@@ -156,8 +156,8 @@ function Dashboard() {
     [visibleLeads, filters],
   );
 
-  const highPriority = visibleLeads.filter((l) => l.priority === "high").length;
-  const pipelineUsd = visibleLeads.reduce(
+  const highPriority = activeLeads.filter((l) => l.priority === "high").length;
+  const pipelineUsd = activeLeads.reduce(
     (s, l) => s + (l.estimatedValueUsd ?? 0) * (l.winProbability ?? 0),
     0,
   );
@@ -203,7 +203,7 @@ function Dashboard() {
           >
             <Bookmark className="h-3.5 w-3.5" /> Saved
           </button>
-          <AlertsBell leads={visibleLeads} onOpenLead={setActive} />
+          <AlertsBell leads={activeLeads} onOpenLead={setActive} />
           <button
             onClick={() => ingest.mutate()}
             disabled={ingest.isPending}
@@ -216,7 +216,7 @@ function Dashboard() {
       </header>
 
       <main className="mx-auto max-w-[1600px] px-6 py-6">
-        <SummaryCard total={visibleLeads.length} highPriority={highPriority} />
+        <SummaryCard total={activeLeads.length} highPriority={highPriority} />
 
         {(() => {
           const last = (runsQ.data ?? [])[0];
