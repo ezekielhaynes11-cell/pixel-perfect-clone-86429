@@ -8,7 +8,7 @@ import {
   upsertSavedSearch,
   deleteSavedSearch,
 } from "@/lib/leads.functions";
-import type { Filters } from "./FilterBar";
+import { emptyFilters, type Filters } from "./FilterBar";
 
 interface SavedSearchRow {
   id: string;
@@ -174,7 +174,7 @@ export function SavedSearchesDrawer({
                     <span>Alert ≥ {s.alert_threshold}%</span>
                     <button
                       onClick={() => {
-                        onApply(s.filter);
+                        onApply({ ...emptyFilters, ...s.filter });
                         onClose();
                       }}
                       className="text-primary hover:underline"
