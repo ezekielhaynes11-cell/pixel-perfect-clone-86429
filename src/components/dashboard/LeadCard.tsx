@@ -9,6 +9,7 @@ import {
   UserRound,
   Phone,
   ChevronDown,
+  RotateCcw,
 } from "lucide-react";
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
@@ -43,6 +44,11 @@ export function LeadCard({
   onSave,
   onDismiss,
   onDraft,
+  selectable = false,
+  selected = false,
+  onToggleSelect,
+  dismissed = false,
+  onRestore,
 }: {
   lead: Lead;
   onView: (lead: Lead) => void;
@@ -51,17 +57,34 @@ export function LeadCard({
   onSave?: () => void;
   onDismiss?: () => void;
   onDraft?: () => void;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
+  dismissed?: boolean;
+  onRestore?: () => void;
 }) {
   const [showDocs, setShowDocs] = useState(false);
   const meta = sourceMeta[lead.source] ?? { label: lead.source, cls: "bg-surface-3 text-foreground border-border" };
   const conf = confidenceColor(lead.confidence);
   return (
     <article
-      className="fade-up group rounded-md border border-border bg-surface-2 p-4 transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:bg-surface-3 hover:shadow-card-hover"
+      className={`fade-up group rounded-md border bg-surface-2 p-4 transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:bg-surface-3 hover:shadow-card-hover ${
+        selected ? "border-primary/60 ring-1 ring-primary/40" : "border-border"
+      } ${dismissed ? "opacity-60" : ""}`}
       style={{ animationDelay: `${Math.min(index * 40, 400)}ms` }}
     >
       {/* Top row: Source + Confidence + Date */}
       <div className="mb-2 flex items-center gap-3">
+        {selectable && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelect}
+            onClick={(e) => e.stopPropagation()}
+            aria-label="Select lead"
+            className="h-4 w-4 cursor-pointer accent-primary"
+          />
+        )}
         <span
           className={`rounded-sm border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${meta.cls}`}
         >
@@ -180,13 +203,23 @@ export function LeadCard({
           <Bookmark className="h-3.5 w-3.5" />
           Save
         </button>
-        <button
-          onClick={onDismiss}
-          className="flex h-8 items-center gap-1.5 rounded-sm border border-border px-3 text-xs text-foreground/80 transition-colors hover:bg-destructive/10 hover:text-destructive"
-        >
-          <XCircle className="h-3.5 w-3.5" />
-          Dismiss
-        </button>
+        {dismissed ? (
+          <button
+            onClick={onRestore}
+            className="flex h-8 items-center gap-1.5 rounded-sm border border-border px-3 text-xs text-foreground/80 transition-colors hover:bg-success/10 hover:text-success"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            Restore
+          </button>
+        ) : (
+          <button
+            onClick={onDismiss}
+            className="flex h-8 items-center gap-1.5 rounded-sm border border-border px-3 text-xs text-foreground/80 transition-colors hover:bg-destructive/10 hover:text-destructive"
+          >
+            <XCircle className="h-3.5 w-3.5" />
+            Dismiss
+          </button>
+        )}
         {lead.accountId && (
           <Link
             to="/accounts/$id"
