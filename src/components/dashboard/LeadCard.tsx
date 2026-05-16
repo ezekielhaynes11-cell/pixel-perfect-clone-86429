@@ -1,0 +1,119 @@
+import {
+  ExternalLink,
+  Eye,
+  Bookmark,
+  CheckCircle2,
+  Share2,
+  Building2,
+  Stethoscope,
+} from "lucide-react";
+import { type Lead, timeAgo } from "@/data/leads";
+
+const sourceMeta: Record<string, { label: string; cls: string }> = {
+  reddit: { label: "Reddit", cls: "bg-orange-500/15 text-orange-300 border-orange-500/30" },
+  government: { label: "Government", cls: "bg-blue-500/15 text-blue-300 border-blue-500/30" },
+  news: { label: "News", cls: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
+  recalls: { label: "FDA Recall", cls: "bg-red-500/15 text-red-300 border-red-500/30" },
+  linkedin: { label: "LinkedIn", cls: "bg-sky-500/15 text-sky-300 border-sky-500/30" },
+};
+
+function confidenceColor(c: number) {
+  if (c >= 90) return "text-success bg-success";
+  if (c >= 70) return "text-warning bg-warning";
+  return "text-danger bg-danger";
+}
+
+export function LeadCard({
+  lead,
+  onView,
+  index,
+}: {
+  lead: Lead;
+  onView: (lead: Lead) => void;
+  index: number;
+}) {
+  const meta = sourceMeta[lead.source];
+  const conf = confidenceColor(lead.confidence);
+  return (
+    <article
+      className="fade-up group rounded-md border border-border bg-surface-2 p-4 transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:bg-surface-3 hover:shadow-card-hover"
+      style={{ animationDelay: `${Math.min(index * 40, 400)}ms` }}
+    >
+      {/* Top row: Source + Confidence + Date */}
+      <div className="mb-2 flex items-center gap-3">
+        <span
+          className={`rounded-sm border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${meta.cls}`}
+        >
+          {meta.label}
+        </span>
+        <div className="flex items-center gap-1.5">
+          <span className={`inline-block h-3 w-3 rounded-full ${conf.split(" ")[1]}`} />
+          <span className="text-xs font-semibold">{lead.confidence}% Confidence</span>
+        </div>
+        <span className="ml-auto text-[11px] text-muted-foreground">
+          {timeAgo(lead.dateDiscovered)}
+        </span>
+      </div>
+
+      {/* Title */}
+      <h3 className="mb-1.5 font-display text-base font-semibold leading-snug text-foreground transition-colors group-hover:text-primary">
+        {lead.title}
+      </h3>
+
+      {/* Summary */}
+      <p className="mb-3 line-clamp-2 text-sm text-muted-foreground">{lead.summary}</p>
+
+      {/* Entity chips */}
+      <div className="mb-3 flex flex-wrap gap-1.5">
+        <span className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[11px] text-foreground/80">
+          <Building2 className="h-3 w-3 text-muted-foreground" />
+          {lead.hospital}
+        </span>
+        <span className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[11px] text-foreground/80">
+          <Stethoscope className="h-3 w-3 text-muted-foreground" />
+          {lead.specialty}
+        </span>
+        {lead.entities.keywords.slice(0, 2).map((k) => (
+          <span
+            key={k}
+            className="rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[11px] text-primary"
+          >
+            {k}
+          </span>
+        ))}
+      </div>
+
+      {/* Actions */}
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => onView(lead)}
+          className="flex h-8 items-center gap-1.5 rounded-sm border border-border px-3 text-xs text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground"
+        >
+          <Eye className="h-3.5 w-3.5" />
+          View Details
+        </button>
+        <button className="flex h-8 items-center gap-1.5 rounded-sm border border-border px-3 text-xs text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          Add to Salesforce
+        </button>
+        <button className="flex h-8 items-center gap-1.5 rounded-sm border border-border px-3 text-xs text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground">
+          <Bookmark className="h-3.5 w-3.5" />
+          Save
+        </button>
+        <button className="flex h-8 items-center gap-1.5 rounded-sm border border-border px-3 text-xs text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground">
+          <Share2 className="h-3.5 w-3.5" />
+          Share
+        </button>
+        <a
+          href={lead.sourceUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="ml-auto flex h-8 items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-primary"
+        >
+          Source
+          <ExternalLink className="h-3 w-3" />
+        </a>
+      </div>
+    </article>
+  );
+}
