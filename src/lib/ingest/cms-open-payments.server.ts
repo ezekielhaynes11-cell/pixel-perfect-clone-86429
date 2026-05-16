@@ -40,36 +40,20 @@ interface OpRow {
 export async function fetchCmsOpenPayments(opts: { limit?: number; minAmount?: number; territoryState?: string } = {}): Promise<RawLead[]> {
   const { limit = 40, minAmount = 5000, territoryState = "CA" } = opts;
 
-  // CMS exposes each dataset under a UUID. Rather than hardcoding UUIDs that rotate, use the
-  // discovery endpoint that resolves by identifier slug. Falls back gracefully if rate-limited.
+  // CMS exposes each dataset under a slug identifier resolved by the discovery API.
   const datasetId = `general-payments-${DATASET_YEAR}`;
 
-  // Build OR clause for competitor manufacturers
-  const conditions = [
-    { property: "Recipient_State", value: territoryState, operator: "=" },
-    { property: "Total_Amount_of_Payment_USDollars", value: String(minAmount), operator: ">" },
-    ...COMPETITORS.map((c) => ({
-      property: "Submitting_Applicable_Manufacturer_or_Applicable_GPO_Name",
-      value: c,
-      operator: "=",
-    })),
-  ];
-
-  const body = {
-    resource: "t",
-    conditions: [
-      { property: "Recipient_State", value: territoryState, operator: "=" },
-      { property: "Total_Amount_of_Payment_USDollars", value: String(minAmount), operator: ">" },
-    ],
-    limit,
-    sort: [{ property: "Date_of_Payment", order: "desc" }],
-  };
-
-  // Use the simpler query string against the discovery dataset endpoint:
   const url = `${BASE}/${datasetId}/0`;
-  const res = await fetch(`${url}?limit=${limit}&conditions[0][property]=Recipient_State&conditions[0][value]=${territoryState}&conditions[0][operator]==&sort[0][property]=Date_of_Payment&sort[0][order]=desc`, {
-    headers: { Accept: "application/json" },
+  const qs = new URLSearchParams({
+    limit: String(limit),
+    "conditions[0][property]": "Recipient_State",
+    "conditions[0][value]": territoryState,
+    "conditions[0][operator]": "=",
+    "sort[0][property]": "Date_of_Payment",
+    "sort[0][order]": "desc",
   });
+
+  const res = await fetch(`${url}?${qs}`, { headers: { Accept: "application/json" } });
 
   // If the discovery API is unavailable (CMS rotates dataset IDs occasionally),
   // log and return empty rather than failing the whole ingestion run.
@@ -84,7 +68,8 @@ export async function fetchCmsOpenPayments(opts: { limit?: number; minAmount?: n
   const json = (await res.json().catch(() => ({}))) as { results?: OpRow[] };
   const rows = (json.results ?? []).filter((r) => {
     const mfr = (r.Submitting_Applicable_Manufacturer_or_Applicable_GPO_Name ?? "").toLowerCase();
-    return COMPETITORS.some((c) => mfr.includes(c.split(" ")[0].toLowerCase()));
+    const amt = Number(r.Total_Amount_of_Payment_USDollars ?? 0);
+    return amt >= minAmount && COMPETITORS.some((c) => mfr.includes(c.split(" ")[0].toLowerCase()));
   });
 
   // Group by physician + manufacturer to deduplicate noise (one signal per relationship)
