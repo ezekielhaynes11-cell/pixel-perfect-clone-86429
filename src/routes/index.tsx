@@ -104,11 +104,13 @@ function Dashboard() {
     0,
   );
 
-  if (loading) {
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (!loading && !user) navigate({ to: "/login" });
+  }, [loading, user, navigate]);
+
+  if (loading || !user) {
     return <div className="grid min-h-screen place-items-center text-muted-foreground">Loading…</div>;
-  }
-  if (!user) {
-    throw redirect({ to: "/login" });
   }
 
   return (
