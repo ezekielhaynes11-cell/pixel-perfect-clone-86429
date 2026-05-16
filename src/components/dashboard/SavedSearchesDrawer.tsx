@@ -142,7 +142,7 @@ export function SavedSearchesDrawer({
             </div>
           ) : (
             <ul className="space-y-2">
-              {(q.data as SavedSearchRow[]).map((s) => (
+              {(q.data as unknown as SavedSearchRow[]).map((s) => (
                 <li
                   key={s.id}
                   className="rounded-md border border-border bg-surface-2 p-3 transition-colors hover:border-primary/40"
