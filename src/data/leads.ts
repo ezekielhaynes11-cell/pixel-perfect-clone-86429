@@ -6,10 +6,14 @@ export type LeadSource =
   | "sam_gov"
   | "openfda"
   | "gdelt"
+  | "gdelt_m_and_a"
+  | "gdelt_va_funding"
   | "reddit"
+  | "bluesky"
   | "news"
   | "clinicaltrials"
-  | "cms_open_payments";
+  | "cms_open_payments"
+  | "funding_rss";
 
 export interface LeadEntities {
   hospitals: string[];
@@ -85,10 +89,14 @@ export const sources: LeadSource[] = [
   "sam_gov",
   "openfda",
   "gdelt",
+  "gdelt_m_and_a",
+  "gdelt_va_funding",
   "reddit",
+  "bluesky",
   "news",
   "clinicaltrials",
   "cms_open_payments",
+  "funding_rss",
 ];
 
 export function timeAgo(iso: string): string {

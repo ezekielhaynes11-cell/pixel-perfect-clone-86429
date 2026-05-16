@@ -14,6 +14,42 @@ export type Database = {
   }
   public: {
     Tables: {
+      accounts: {
+        Row: {
+          account_type: string | null
+          created_at: string
+          id: string
+          is_va: boolean
+          name: string
+          notes: string | null
+          state: string | null
+          system: string | null
+          updated_at: string
+        }
+        Insert: {
+          account_type?: string | null
+          created_at?: string
+          id?: string
+          is_va?: boolean
+          name: string
+          notes?: string | null
+          state?: string | null
+          system?: string | null
+          updated_at?: string
+        }
+        Update: {
+          account_type?: string | null
+          created_at?: string
+          id?: string
+          is_va?: boolean
+          name?: string
+          notes?: string | null
+          state?: string | null
+          system?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       alerts: {
         Row: {
           created_at: string
@@ -119,6 +155,33 @@ export type Database = {
         }
         Relationships: []
       }
+      keyword_lists: {
+        Row: {
+          active: boolean
+          created_at: string
+          id: string
+          kind: string
+          notes: string | null
+          value: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          kind: string
+          notes?: string | null
+          value: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          kind?: string
+          notes?: string | null
+          value?: string
+        }
+        Relationships: []
+      }
       lead_actions: {
         Row: {
           action: string
@@ -162,6 +225,7 @@ export type Database = {
           match_confidence: number
           npi: string
           role: string
+          role_hint: string | null
         }
         Insert: {
           created_at?: string
@@ -170,6 +234,7 @@ export type Database = {
           match_confidence?: number
           npi: string
           role?: string
+          role_hint?: string | null
         }
         Update: {
           created_at?: string
@@ -178,6 +243,7 @@ export type Database = {
           match_confidence?: number
           npi?: string
           role?: string
+          role_hint?: string | null
         }
         Relationships: [
           {
@@ -191,6 +257,8 @@ export type Database = {
       }
       leads: {
         Row: {
+          account_id: string | null
+          account_type: string | null
           competitor_incumbent: string | null
           confidence: number
           created_at: string
@@ -203,6 +271,7 @@ export type Database = {
           id: string
           priority: string
           raw_payload: Json | null
+          signal_type: string | null
           source: string
           source_external_id: string
           source_url: string | null
@@ -211,9 +280,12 @@ export type Database = {
           territory: string | null
           title: string
           updated_at: string
+          vendor_mentions: string[]
           win_probability: number | null
         }
         Insert: {
+          account_id?: string | null
+          account_type?: string | null
           competitor_incumbent?: string | null
           confidence?: number
           created_at?: string
@@ -226,6 +298,7 @@ export type Database = {
           id?: string
           priority?: string
           raw_payload?: Json | null
+          signal_type?: string | null
           source: string
           source_external_id: string
           source_url?: string | null
@@ -234,9 +307,12 @@ export type Database = {
           territory?: string | null
           title: string
           updated_at?: string
+          vendor_mentions?: string[]
           win_probability?: number | null
         }
         Update: {
+          account_id?: string | null
+          account_type?: string | null
           competitor_incumbent?: string | null
           confidence?: number
           created_at?: string
@@ -249,6 +325,7 @@ export type Database = {
           id?: string
           priority?: string
           raw_payload?: Json | null
+          signal_type?: string | null
           source?: string
           source_external_id?: string
           source_url?: string | null
@@ -257,9 +334,18 @@ export type Database = {
           territory?: string | null
           title?: string
           updated_at?: string
+          vendor_mentions?: string[]
           win_probability?: number | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "leads_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       outreach_drafts: {
         Row: {
@@ -397,6 +483,44 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      scraped_pages: {
+        Row: {
+          account_id: string | null
+          extracted: Json
+          fetched_at: string
+          id: string
+          raw_text: string | null
+          title: string | null
+          url: string
+        }
+        Insert: {
+          account_id?: string | null
+          extracted?: Json
+          fetched_at?: string
+          id?: string
+          raw_text?: string | null
+          title?: string | null
+          url: string
+        }
+        Update: {
+          account_id?: string | null
+          extracted?: Json
+          fetched_at?: string
+          id?: string
+          raw_text?: string | null
+          title?: string | null
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scraped_pages_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_roles: {
         Row: {

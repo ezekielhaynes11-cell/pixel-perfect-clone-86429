@@ -53,6 +53,7 @@ export interface PhysicianLookupInput {
   state?: string | null; // 2-letter US state to narrow match
   knownNpi?: string | null; // skip NPPES lookup if we already have the NPI (CMS Open Payments)
   role?: "named_in_source" | "cms_payment_recipient";
+  roleHint?: string | null; // POCUS director, fellowship director, biomed, chief, etc.
 }
 
 const NAME_PREFIX_RE = /^(dr\.?|prof\.?|mr\.?|ms\.?|mrs\.?)\s+/i;
@@ -199,6 +200,7 @@ export async function attachPhysiciansToLead(
           lead_id: leadId,
           npi: contact.npi,
           role: ref.role ?? "named_in_source",
+          role_hint: ref.roleHint ?? null,
           match_confidence: confidence,
         });
       if (!linkErr) linked++;

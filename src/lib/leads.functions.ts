@@ -81,7 +81,7 @@ export const generateOutreachDraft = createServerFn({ method: "POST" })
     z
       .object({
         lead_id: z.string().uuid(),
-        tone: z.enum(["discovery", "follow_up", "executive_intro"]).default("discovery"),
+        tone: z.enum(["discovery", "follow_up", "executive_intro", "switch_pitch"]).optional(),
       })
       .parse(input),
   )
@@ -105,6 +105,10 @@ export const generateOutreachDraft = createServerFn({ method: "POST" })
         summary: lead.summary ?? "",
         hospital: lead.hospital,
         specialty: lead.specialty,
+        source: lead.source,
+        signal_type: (lead as { signal_type?: string | null }).signal_type ?? null,
+        competitor_incumbent: lead.competitor_incumbent,
+        vendor_mentions: ((lead as { vendor_mentions?: string[] | null }).vendor_mentions) ?? [],
         entities: (lead.entities as {
           physicians?: string[];
           equipment?: string[];
