@@ -109,10 +109,14 @@ function RootShell({ children }: { children: React.ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  // Lazy import to keep root tree small; AuthProvider only runs client-side effects.
+  const { AuthProvider } = require("@/hooks/use-auth") as typeof import("@/hooks/use-auth");
 
   return (
     <QueryClientProvider client={queryClient}>
-      <Outlet />
+      <AuthProvider>
+        <Outlet />
+      </AuthProvider>
     </QueryClientProvider>
   );
 }
