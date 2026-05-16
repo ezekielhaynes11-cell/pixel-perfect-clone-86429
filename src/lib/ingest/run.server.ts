@@ -4,9 +4,12 @@ import { fetchOpenFda } from "./openfda.server";
 import { fetchSamGov } from "./sam-gov.server";
 import { fetchClinicalTrials } from "./clinicaltrials.server";
 import { fetchCmsOpenPayments } from "./cms-open-payments.server";
+import { fetchReddit } from "./reddit.server";
+import { fetchBluesky } from "./bluesky.server";
+import { fetchFundingRss } from "./funding-rss.server";
 import { enrichRawLead } from "./enrich.server";
 import { attachPhysiciansToLead, type PhysicianLookupInput } from "./nppes.server";
-import type { RawLead } from "./types";
+import type { LeadSource, RawLead } from "./types";
 
 // Map US state name → 2-letter code for NPPES name lookups
 const STATE_TO_CODE: Record<string, string> = {
@@ -35,6 +38,10 @@ interface SavedSearchFilter {
   hospitals?: string[];
   specialties?: string[];
   sources?: string[];
+  states?: string[];
+  accountTypes?: string[];
+  signalTypes?: string[];
+  vendors?: string[];
   minConfidence?: number;
 }
 
@@ -43,16 +50,20 @@ export async function runIngestion(forUserId?: string): Promise<IngestionSummary
   const summaries: IngestionSummary[] = [];
   const newlyEnrichedIds: string[] = [];
 
-  const sources: Array<{ name: string; fn: () => Promise<RawLead[]> }> = [
-    {
-      name: "sam_gov",
-      fn: () => (samKey ? fetchSamGov({ apiKey: samKey }) : Promise.resolve([])),
-    },
-    { name: "openfda", fn: () => fetchOpenFda({}) },
-    { name: "gdelt", fn: () => fetchGdelt({}) },
-    { name: "clinicaltrials", fn: () => fetchClinicalTrials({}) },
+  // fetchGdelt now produces three different `source` values internally
+  // (gdelt / gdelt_m_and_a / gdelt_va_funding). Treat the call as a single
+  // ingestion-run entry but bucket inserts by their own source for clarity.
+  const sources: Array<{ name: string; sourceFilter: LeadSource[]; fn: () => Promise<RawLead[]> }> = [
+    { name: "sam_gov", sourceFilter: ["sam_gov"], fn: () => (samKey ? fetchSamGov({ apiKey: samKey }) : Promise.resolve([])) },
+    { name: "openfda", sourceFilter: ["openfda"], fn: () => fetchOpenFda({}) },
+    { name: "gdelt", sourceFilter: ["gdelt", "gdelt_m_and_a", "gdelt_va_funding"], fn: () => fetchGdelt({}) },
+    { name: "clinicaltrials", sourceFilter: ["clinicaltrials"], fn: () => fetchClinicalTrials({}) },
+    { name: "reddit", sourceFilter: ["reddit"], fn: () => fetchReddit({}) },
+    { name: "bluesky", sourceFilter: ["bluesky"], fn: () => fetchBluesky({}) },
+    { name: "funding_rss", sourceFilter: ["funding_rss"], fn: () => fetchFundingRss() },
     {
       name: "cms_open_payments",
+      sourceFilter: ["cms_open_payments"],
       fn: async () => {
         const states = ["OK", "AR", "LA", "TX"];
         const all: RawLead[] = [];
@@ -70,64 +81,43 @@ export async function runIngestion(forUserId?: string): Promise<IngestionSummary
   ];
 
   for (const src of sources) {
-    const runRow = await supabaseAdmin
-      .from("ingestion_runs")
-      .insert({ source: src.name })
-      .select()
-      .single();
+    const runRow = await supabaseAdmin.from("ingestion_runs").insert({ source: src.name }).select().single();
     const runId = runRow.data?.id;
-
     try {
       const raws = await src.fn();
       const inserted = await persistRaws(raws);
-      const enrichedIds = await enrichPending(src.name);
-      newlyEnrichedIds.push(...enrichedIds);
-
-      summaries.push({
-        source: src.name,
-        fetched: raws.length,
-        inserted,
-        enriched: enrichedIds.length,
-      });
-
+      let enrichedTotal = 0;
+      for (const s of src.sourceFilter) {
+        const ids = await enrichPending(s);
+        newlyEnrichedIds.push(...ids);
+        enrichedTotal += ids.length;
+      }
+      summaries.push({ source: src.name, fetched: raws.length, inserted, enriched: enrichedTotal });
       if (runId) {
-        await supabaseAdmin
-          .from("ingestion_runs")
-          .update({
-            finished_at: new Date().toISOString(),
-            fetched_count: raws.length,
-            new_count: inserted,
-            enriched_count: enrichedIds.length,
-            status: "ok",
-          })
-          .eq("id", runId);
+        await supabaseAdmin.from("ingestion_runs").update({
+          finished_at: new Date().toISOString(),
+          fetched_count: raws.length,
+          new_count: inserted,
+          enriched_count: enrichedTotal,
+          status: "ok",
+        }).eq("id", runId);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error(`Ingestion failed for ${src.name}:`, msg);
       summaries.push({ source: src.name, fetched: 0, inserted: 0, enriched: 0, error: msg });
       if (runId) {
-        await supabaseAdmin
-          .from("ingestion_runs")
-          .update({
-            finished_at: new Date().toISOString(),
-            status: "error",
-            error: msg,
-          })
-          .eq("id", runId);
+        await supabaseAdmin.from("ingestion_runs").update({
+          finished_at: new Date().toISOString(), status: "error", error: msg,
+        }).eq("id", runId);
       }
     }
   }
 
-  // Evaluate saved-search alerts against newly enriched leads.
   if (newlyEnrichedIds.length > 0) {
-    try {
-      await evaluateAlerts(newlyEnrichedIds, forUserId);
-    } catch (e) {
-      console.error("alerts evaluation failed:", e);
-    }
+    try { await evaluateAlerts(newlyEnrichedIds, forUserId); }
+    catch (e) { console.error("alerts evaluation failed:", e); }
   }
-
   return summaries;
 }
 
@@ -160,7 +150,6 @@ async function enrichPending(source: string): Promise<string[]> {
     .eq("enriched", false)
     .order("date_discovered", { ascending: false })
     .limit(20);
-
   if (!pending || pending.length === 0) return [];
 
   const ids: string[] = [];
@@ -176,32 +165,57 @@ async function enrichPending(source: string): Promise<string[]> {
         raw_payload: (row.raw_payload as Record<string, unknown>) ?? {},
       };
       const enriched = await enrichRawLead(raw);
-      await supabaseAdmin
-        .from("leads")
-        .update({
-          summary: enriched.summary,
-          confidence: enriched.confidence,
-          priority: enriched.priority,
-          hospital: enriched.hospital,
-          specialty: enriched.specialty,
-          territory: enriched.territory,
-          entities: enriched.entities as never,
-          estimated_value_usd: enriched.estimated_value_usd,
-          win_probability: enriched.win_probability,
-          competitor_incumbent: enriched.competitor_incumbent,
-          enriched: true,
-        })
-        .eq("id", row.id);
+
+      // Resolve account_id from the enriched hospital name (best-effort).
+      let accountId: string | null = null;
+      if (enriched.hospital) {
+        const { data: existing } = await supabaseAdmin
+          .from("accounts").select("id").eq("name", enriched.hospital).maybeSingle();
+        if (existing) accountId = existing.id;
+        else {
+          const { data: created } = await supabaseAdmin.from("accounts").insert({
+            name: enriched.hospital,
+            state: enriched.territory,
+            account_type: enriched.account_type,
+            is_va: enriched.account_type === "va",
+          }).select("id").maybeSingle();
+          accountId = created?.id ?? null;
+        }
+      }
+
+      // Strip role_hint from entities.physicians before storing (use names only in the jsonb blob
+      // to keep the existing UI happy); role_hint goes onto lead_physicians.role_hint.
+      const physicianNames = enriched.entities.physicians.map((p) => p.name);
+      const entitiesForStorage = {
+        hospitals: enriched.entities.hospitals,
+        physicians: physicianNames,
+        equipment: enriched.entities.equipment,
+        keywords: enriched.entities.keywords,
+      };
+
+      await supabaseAdmin.from("leads").update({
+        summary: enriched.summary,
+        confidence: enriched.confidence,
+        priority: enriched.priority,
+        hospital: enriched.hospital,
+        specialty: enriched.specialty,
+        territory: enriched.territory,
+        entities: entitiesForStorage as never,
+        estimated_value_usd: enriched.estimated_value_usd,
+        win_probability: enriched.win_probability,
+        competitor_incumbent: enriched.competitor_incumbent,
+        vendor_mentions: enriched.vendor_mentions,
+        account_type: enriched.account_type,
+        signal_type: enriched.signal_type,
+        account_id: accountId,
+        enriched: true,
+      }).eq("id", row.id);
       ids.push(row.id);
 
-      // Resolve physicians against NPPES (free public registry).
-      // CMS Open Payments rows carry first/last + state in raw_payload — use that
-      // directly; for all other sources, fall back to AI-extracted physician names.
       try {
         const refs: PhysicianLookupInput[] = [];
         const territory = enriched.territory?.toLowerCase() ?? "";
-        const stateCode =
-          STATE_TO_CODE[territory] ?? (territory.length === 2 ? territory.toUpperCase() : null);
+        const stateCode = STATE_TO_CODE[territory] ?? (territory.length === 2 ? territory.toUpperCase() : null);
 
         if (source === "cms_open_payments") {
           const payload = raw.raw_payload as { rows?: Array<Record<string, string>> } | undefined;
@@ -211,15 +225,19 @@ async function enrichPending(source: string): Promise<string[]> {
               rawName: `${first.Physician_First_Name} ${first.Physician_Last_Name}`,
               state: first.Recipient_State ?? stateCode,
               role: "cms_payment_recipient",
+              roleHint: "cms_payment_recipient",
             });
           }
         }
-        for (const name of enriched.entities.physicians ?? []) {
-          refs.push({ rawName: name, state: stateCode, role: "named_in_source" });
+        for (const phys of enriched.entities.physicians) {
+          refs.push({
+            rawName: phys.name,
+            state: stateCode,
+            role: "named_in_source",
+            roleHint: phys.role_hint ?? null,
+          });
         }
-        if (refs.length > 0) {
-          await attachPhysiciansToLead(row.id, refs);
-        }
+        if (refs.length > 0) await attachPhysiciansToLead(row.id, refs);
       } catch (e) {
         console.error("physician enrichment failed:", e instanceof Error ? e.message : e);
       }
@@ -231,14 +249,12 @@ async function enrichPending(source: string): Promise<string[]> {
 }
 
 async function evaluateAlerts(newLeadIds: string[], forUserId?: string) {
-  // Fetch the newly enriched leads
   const { data: leads } = await supabaseAdmin
     .from("leads")
-    .select("id, hospital, specialty, source, confidence")
+    .select("id, hospital, specialty, source, confidence, territory, account_type, signal_type, vendor_mentions")
     .in("id", newLeadIds);
   if (!leads || leads.length === 0) return;
 
-  // Fetch active saved searches (optionally scoped to the user who triggered)
   let q = supabaseAdmin
     .from("saved_searches")
     .select("id, user_id, filter, alert_threshold, alerts_enabled")
@@ -255,6 +271,16 @@ async function evaluateAlerts(newLeadIds: string[], forUserId?: string) {
       if (f.hospitals?.length && (!l.hospital || !f.hospitals.includes(l.hospital))) continue;
       if (f.specialties?.length && (!l.specialty || !f.specialties.includes(l.specialty))) continue;
       if (f.sources?.length && !f.sources.includes(l.source)) continue;
+      if (f.states?.length) {
+        const t = (l.territory ?? "").toLowerCase();
+        if (!f.states.some((st) => st.toLowerCase() === t)) continue;
+      }
+      if (f.accountTypes?.length && (!l.account_type || !f.accountTypes.includes(l.account_type))) continue;
+      if (f.signalTypes?.length && (!l.signal_type || !f.signalTypes.includes(l.signal_type))) continue;
+      if (f.vendors?.length) {
+        const vm = (l.vendor_mentions ?? []) as string[];
+        if (!vm.some((v) => f.vendors!.includes(v))) continue;
+      }
       if (f.minConfidence && l.confidence < f.minConfidence) continue;
       toInsert.push({ lead_id: l.id, user_id: s.user_id, saved_search_id: s.id });
     }
