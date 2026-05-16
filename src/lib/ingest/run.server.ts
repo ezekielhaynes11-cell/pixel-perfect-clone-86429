@@ -13,11 +13,18 @@ export interface IngestionSummary {
   error?: string;
 }
 
-export async function runIngestion(): Promise<IngestionSummary[]> {
+interface SavedSearchFilter {
+  hospitals?: string[];
+  specialties?: string[];
+  sources?: string[];
+  minConfidence?: number;
+}
+
+export async function runIngestion(forUserId?: string): Promise<IngestionSummary[]> {
   const samKey = process.env.SAM_GOV_API_KEY;
   const summaries: IngestionSummary[] = [];
+  const newlyEnrichedIds: string[] = [];
 
-  // Each source is isolated so one failure doesn't kill the run
   const sources: Array<{ name: string; fn: () => Promise<RawLead[]> }> = [
     {
       name: "sam_gov",
@@ -38,13 +45,14 @@ export async function runIngestion(): Promise<IngestionSummary[]> {
     try {
       const raws = await src.fn();
       const inserted = await persistRaws(raws);
-      const enrichedCount = await enrichPending(src.name);
+      const enrichedIds = await enrichPending(src.name);
+      newlyEnrichedIds.push(...enrichedIds);
 
       summaries.push({
         source: src.name,
         fetched: raws.length,
         inserted,
-        enriched: enrichedCount,
+        enriched: enrichedIds.length,
       });
 
       if (runId) {
@@ -54,7 +62,7 @@ export async function runIngestion(): Promise<IngestionSummary[]> {
             finished_at: new Date().toISOString(),
             fetched_count: raws.length,
             new_count: inserted,
-            enriched_count: enrichedCount,
+            enriched_count: enrichedIds.length,
             status: "ok",
           })
           .eq("id", runId);
@@ -76,45 +84,51 @@ export async function runIngestion(): Promise<IngestionSummary[]> {
     }
   }
 
+  // Evaluate saved-search alerts against newly enriched leads.
+  if (newlyEnrichedIds.length > 0) {
+    try {
+      await evaluateAlerts(newlyEnrichedIds, forUserId);
+    } catch (e) {
+      console.error("alerts evaluation failed:", e);
+    }
+  }
+
   return summaries;
 }
 
 async function persistRaws(raws: RawLead[]): Promise<number> {
   if (raws.length === 0) return 0;
   let inserted = 0;
-  // Insert one at a time so dedupe conflicts don't roll back the batch.
   for (const r of raws) {
-    const { error } = await supabaseAdmin
-      .from("leads")
-      .insert({
-        source: r.source,
-        source_external_id: r.source_external_id,
-        source_url: r.source_url,
-        title: r.title.slice(0, 500),
-        summary: r.raw_text.slice(0, 600),
-        raw_payload: r.raw_payload as never,
-        date_discovered: r.date_discovered,
-        confidence: 0,
-        enriched: false,
-      });
+    const { error } = await supabaseAdmin.from("leads").insert({
+      source: r.source,
+      source_external_id: r.source_external_id,
+      source_url: r.source_url,
+      title: r.title.slice(0, 500),
+      summary: r.raw_text.slice(0, 600),
+      raw_payload: r.raw_payload as never,
+      date_discovered: r.date_discovered,
+      confidence: 0,
+      enriched: false,
+    });
     if (!error) inserted++;
     else if (!error.message?.includes("duplicate")) console.error("insert lead:", error.message);
   }
   return inserted;
 }
 
-async function enrichPending(source: string): Promise<number> {
+async function enrichPending(source: string): Promise<string[]> {
   const { data: pending } = await supabaseAdmin
     .from("leads")
     .select("id, source, source_external_id, source_url, title, summary, raw_payload, date_discovered")
     .eq("source", source)
     .eq("enriched", false)
     .order("date_discovered", { ascending: false })
-    .limit(20); // cap per run to control cost
+    .limit(20);
 
-  if (!pending || pending.length === 0) return 0;
+  if (!pending || pending.length === 0) return [];
 
-  let count = 0;
+  const ids: string[] = [];
   for (const row of pending) {
     try {
       const raw: RawLead = {
@@ -143,10 +157,43 @@ async function enrichPending(source: string): Promise<number> {
           enriched: true,
         })
         .eq("id", row.id);
-      count++;
+      ids.push(row.id);
     } catch (e) {
       console.error("enrich failed:", e instanceof Error ? e.message : e);
     }
   }
-  return count;
+  return ids;
+}
+
+async function evaluateAlerts(newLeadIds: string[], forUserId?: string) {
+  // Fetch the newly enriched leads
+  const { data: leads } = await supabaseAdmin
+    .from("leads")
+    .select("id, hospital, specialty, source, confidence")
+    .in("id", newLeadIds);
+  if (!leads || leads.length === 0) return;
+
+  // Fetch active saved searches (optionally scoped to the user who triggered)
+  let q = supabaseAdmin
+    .from("saved_searches")
+    .select("id, user_id, filter, alert_threshold, alerts_enabled")
+    .eq("alerts_enabled", true);
+  if (forUserId) q = q.eq("user_id", forUserId);
+  const { data: searches } = await q;
+  if (!searches || searches.length === 0) return;
+
+  const toInsert: Array<{ lead_id: string; user_id: string; saved_search_id: string }> = [];
+  for (const s of searches) {
+    const f = (s.filter as SavedSearchFilter) ?? {};
+    for (const l of leads) {
+      if (l.confidence < s.alert_threshold) continue;
+      if (f.hospitals?.length && (!l.hospital || !f.hospitals.includes(l.hospital))) continue;
+      if (f.specialties?.length && (!l.specialty || !f.specialties.includes(l.specialty))) continue;
+      if (f.sources?.length && !f.sources.includes(l.source)) continue;
+      if (f.minConfidence && l.confidence < f.minConfidence) continue;
+      toInsert.push({ lead_id: l.id, user_id: s.user_id, saved_search_id: s.id });
+    }
+  }
+  if (toInsert.length === 0) return;
+  await supabaseAdmin.from("alerts").insert(toInsert);
 }

@@ -1,90 +1,58 @@
+# Finish the top-1% UI layer
 
-# Yield Architect → Production-Grade Sales Intelligence
+The backend (9 tables, ingestion adapters for SAM.gov / openFDA / GDELT, Gemini enrichment, `listLeads` / `triggerIngestion` / `setLeadAction` server functions, auth) is live. This plan completes the three remaining UI surfaces a Philips rep needs to actually convert these signals into pipeline.
 
-Replace the mock `src/data/leads.ts` array with a real ingestion pipeline backed by Lovable Cloud, Gemini 2.5 Flash enrichment, and a set of features designed to drive multi-million-dollar pipeline for Phillips Medical reps.
+## 1. Outreach Draft modal (per-lead AI email)
 
-## 1. Backend (Lovable Cloud)
+- Add `draftOutreach` server fn in `src/lib/outreach.functions.ts` wrapping the existing `outreach.server.ts` helper. Returns `{ subject, body, id }` and persists to `outreach_drafts`.
+- Add `listDraftsForLead(leadId)` server fn so reopening a lead shows prior drafts.
+- New component `OutreachDraftDialog.tsx`:
+  - Tone selector (Discovery / Follow-up / Executive intro)
+  - "Generate with AI" button → calls `draftOutreach` via `useMutation`
+  - Editable subject + body textareas, "Copy" and "Open in mail client" (`mailto:`) actions
+  - Saves edits back via an `updateDraft` server fn
+- Wire from `LeadCard` "Draft outreach" action and from `LeadDetailModal`.
 
-Enable Cloud and create the following tables (all with RLS):
+## 2. Pipeline forecast view
 
-- `leads` — id, title, summary, source, source_url, source_external_id (dedupe key), raw_payload (jsonb), confidence, hospital, specialty, territory, entities (jsonb), priority, estimated_value_usd, win_probability, date_discovered, date_ingested, status (`new|saved|dismissed|in_sfdc`), assigned_rep_id
-- `lead_actions` — per-rep saved/dismissed/notes/SFDC-push log (so saves are per-user, lead row stays shared)
-- `saved_searches` — user_id, name, filter JSON, alert_threshold (e.g. 90), notify_email
-- `alerts` — user_id, lead_id, saved_search_id, sent_at, channel
-- `briefings` — user_id, date, markdown summary, top_lead_ids
-- `outreach_drafts` — lead_id, user_id, subject, body, created_at
-- `profiles` + `user_roles` (admin/rep) — standard secure pattern
-- `ingestion_runs` — source, started_at, finished_at, fetched_count, new_count, error
+- New route `src/routes/pipeline.tsx` under the same auth gate.
+- New server fn `getPipelineForecast` that reads `leads` and returns:
+  - Total weighted pipeline = Σ `estimated_value_usd × win_probability` (filter: not dismissed, confidence ≥ 60)
+  - Breakdown by `hospital`, by `specialty`, by week of `date_discovered`
+  - Top 10 leads by weighted value
+- UI: 3 summary cards (Total weighted, Open leads, Avg confidence), a stacked bar chart by specialty (Recharts), and a sortable table of top weighted leads with quick "Draft outreach" + "Open in Salesforce" actions.
+- Add a "Pipeline" link to the sidebar nav.
 
-## 2. Ingestion (server functions, on-demand)
+## 3. Saved Searches + Alerts
 
-A single `runIngestion` server function fans out to:
+- `SavedSearchesDrawer.tsx` opened from header:
+  - List current saved searches with name, filter chips, alert threshold, on/off toggle
+  - "Save current view" button captures the dashboard's active `FilterBar` state into `saved_searches.filter` (jsonb)
+  - Edit / delete per row
+- Server fns: `listSavedSearches`, `upsertSavedSearch`, `deleteSavedSearch`, `toggleSavedSearchAlerts`.
+- Alerts evaluation: extend `run.server.ts` so that after ingestion+enrichment, for each saved search with `alerts_enabled`, insert rows into `alerts` for newly-enriched leads matching the filter with `confidence >= alert_threshold`.
+- Bell icon in `Header.tsx` with unread count (`alerts` where `read_at is null`), dropdown lists recent alerts, click marks read and opens the lead.
 
-- **SAM.gov Opportunities API** — keyword filter for ultrasound, MRI, CT, ventilator, ECMO, infusion pump, patient monitor, cath lab; NAICS 339112/621. Requires `SAM_GOV_API_KEY` (free).
-- **openFDA `/device/enforcement.json`** — competitor recalls (filter to recalling firms != Philips). No key needed.
-- **GDELT 2.1 DOC API** — hospital capital projects, fellowships, expansions. No key.
-- **Reddit OAuth** — `r/medicine`, `r/nursing`, `r/Residency` search for vendor/equipment mentions. Requires `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET`.
+## 4. Polish that ships with this turn
 
-Each source normalizes to a common `RawLead` shape, dedupes against `source_external_id`, then queues for enrichment.
-
-## 3. Enrichment (Gemini 2.5 Flash via Lovable AI Gateway)
-
-One `enrichLead` server fn per raw lead. Single structured-JSON call that returns:
-
-- `summary` (≤280 chars, sales-rep voice)
-- `confidence` 0–100 (with rubric in system prompt: explicit RFQ=95+, recall replacement=90+, public budget=85+, hiring/news=70±, reddit chatter=60±)
-- `priority` high|medium|low
-- `hospital`, `specialty`, `territory` (CA/Pacific/etc.)
-- `entities` { hospitals[], physicians[], equipment[], keywords[] }
-- `estimated_value_usd` and `win_probability` (0–1) — drives pipeline view
-- `competitor_incumbent` (when inferable)
-
-Model: `google/gemini-2.5-flash`. Cost-bounded by only enriching new (deduped) rows.
-
-## 4. Frontend changes
-
-Replace `src/data/leads.ts` with `useLeads()` (TanStack Query + `createServerFn`) reading from `leads` table.
-
-New / changed UI:
-
-- **Refresh now** button in header → calls `runIngestion`, shows per-source progress toast, invalidates query.
-- **Lead card actions** wired to real handlers: Save / Dismiss / Add to Salesforce (stub link with deep-link template) / **Draft outreach email** (opens modal, calls `draftOutreach` server fn).
-- **Saved searches drawer** — save current filter, set confidence threshold, toggle email alerts.
-- **Daily AI Briefing** panel at top of dashboard (collapsible) — markdown rendered, regenerated on first load each day.
-- **Pipeline tab** (`/pipeline`) — table + bar chart of Σ `estimated_value_usd × win_probability` by hospital, specialty, week. KPI cards: Total pipeline $, Weighted pipeline $, Leads × stage.
-- **Auth** — email + Google sign-in, per-rep workspace; gated routes under `_authenticated`.
-- Sidebar trend chart switches from hardcoded numbers to real 7-day rolling counts from `leads`.
-
-## 5. Alerts
-
-`checkAlerts` server fn (called at end of every ingestion run) compares new leads to each `saved_search.filter` + threshold, inserts into `alerts`, and emails the rep via Resend (requires `RESEND_API_KEY`). Slack deferred.
-
-## 6. Secrets to request
-
-`SAM_GOV_API_KEY`, `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `RESEND_API_KEY`. `LOVABLE_API_KEY` is auto-provisioned.
-
-## 7. Out of scope (now)
-
-- LinkedIn / hiring signals (user opted out)
-- Scheduled cron (user chose on-demand)
-- Real Salesforce OAuth push (we ship a deep-link + CSV export; full OAuth is a follow-up)
+- `Refresh feed` button shows last `ingestion_runs` timestamp + per-source counts in a tooltip.
+- `LeadDetailModal` gets an "AI briefing" tab that calls a `getOrCreateDailyBriefing` server fn (Gemini 2.5 Flash) summarizing today's top 5 leads for the rep, persisted to `briefings`.
+- Fix the current SSR error (preview shows "SSR rendering failed") before adding new routes — likely a server-only import reachable from a route file; will diagnose with `server-function-logs` and the import graph and correct in the first step.
 
 ## Technical notes
 
-- All ingestion + enrichment runs in `createServerFn` handlers (TanStack Start), never client-side.
-- Source clients live in `src/lib/ingest/*.server.ts`; thin `*.functions.ts` wrappers expose them.
-- AI calls use the gateway pattern (`https://ai.gateway.lovable.dev/v1/chat/completions`, `Bearer ${LOVABLE_API_KEY}`), structured outputs via JSON schema tool call.
-- Per-user data (`saved_searches`, `lead_actions`, `briefings`, `outreach_drafts`) keyed by `auth.uid()` with RLS `USING (user_id = auth.uid())`.
-- Roles stored in separate `user_roles` table with `has_role()` SECURITY DEFINER fn (no recursion).
-- Dedupe: `UNIQUE (source, source_external_id)`. Re-ingestion is idempotent.
-- Mock `leads.ts` kept temporarily as a seed used only when the DB is empty, then deleted.
+- All new server fns use `createServerFn` + `requireSupabaseAuth`; no Edge Functions.
+- Outreach generation, briefings, and any enrichment continue to go through Lovable AI Gateway (`google/gemini-2.5-flash`); no new secrets required.
+- New tables: none — schema already has `outreach_drafts`, `saved_searches`, `alerts`, `briefings`.
+- No scheduled jobs: alerts are evaluated at the end of each on-demand ingestion run.
+- Out of scope (deferred): email delivery of alerts (would need `RESEND_API_KEY`), real Salesforce OAuth, LinkedIn/hiring sources.
 
 ## Build order
 
-1. Enable Cloud, request secrets, create schema + RLS + auth pages.
-2. Build ingestion adapters (one PR each: SAM → openFDA → GDELT → Reddit) with a unit-style server-fn test.
-3. Enrichment fn + structured schema.
-4. Wire `useLeads` + Refresh button; remove mock data.
-5. Saved searches + alerts + email.
-6. Daily briefing + draft outreach.
-7. Pipeline view.
+1. Diagnose & fix the SSR error so preview is healthy
+2. Outreach Draft modal (highest rep value)
+3. Saved Searches + in-app alerts bell
+4. Pipeline forecast route
+5. Daily AI briefing tab + Refresh tooltip
+
+Shall I proceed?
