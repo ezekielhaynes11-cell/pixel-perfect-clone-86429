@@ -27,10 +27,14 @@ export function LeadCard({
   lead,
   onView,
   index,
+  onSave,
+  onDismiss,
 }: {
   lead: Lead;
   onView: (lead: Lead) => void;
   index: number;
+  onSave?: () => void;
+  onDismiss?: () => void;
 }) {
   const meta = sourceMeta[lead.source] ?? { label: lead.source, cls: "bg-surface-3 text-foreground border-border" };
   const conf = confidenceColor(lead.confidence);
