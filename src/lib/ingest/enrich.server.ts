@@ -18,7 +18,7 @@ Estimated value: realistic USD pipeline value for Phillips if won. Ultrasound RF
 
 Win probability: 0.0-1.0. Recall replacement = 0.45; explicit RFQ Phillips invited = 0.4; RFQ generic = 0.2; news of expansion = 0.15; sentiment chatter = 0.05.
 
-Territory: infer US state slug (e.g. "california", "texas") from any geographic signal.
+Territory: infer US state slug (e.g. "texas", "oklahoma", "arkansas", "louisiana") from any geographic signal.
 
 Output ONLY valid JSON via the structured tool. Be conservative with confidence — never inflate.`;
 

@@ -108,7 +108,7 @@ export function SavedSearchesDrawer({
           <input
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
-            placeholder='e.g. "California cath labs"'
+            placeholder='e.g. "Texas cath labs"'
             className="mb-2 w-full rounded-md border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
           />
           <div className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
