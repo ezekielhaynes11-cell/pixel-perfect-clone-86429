@@ -40,12 +40,10 @@ function Dashboard() {
   const leadsQ = useQuery({
     queryKey: ["leads"],
     queryFn: () => fetchLeads(),
-    enabled: !!user,
   });
   const actionsQ = useQuery({
     queryKey: ["lead_actions"],
     queryFn: () => fetchActions(),
-    enabled: !!user,
   });
 
   const ingest = useMutation({
