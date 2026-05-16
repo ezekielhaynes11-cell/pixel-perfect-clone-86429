@@ -1,77 +1,49 @@
-## Problem
+## Goal
 
-The dashboard shows the generic "This page didn't load" error screen. The console reveals:
+Remove the login wall. App opens directly to the dashboard. No sign-in, no `/login`, no Supabase auth in the UI.
 
-```
-error: { "options": { "to": "/login", "statusCode": 307 } }
-The above error occurred in the <Dashboard> component.
-```
+## Approach
 
-In `src/routes/index.tsx` (line 111) and `src/routes/pipeline.tsx` (line 33), the code does:
+Since this is a single-user internal tool, switch server functions from per-user (RLS-scoped) to **trusted single-owner** using `supabaseAdmin` (service role, bypasses RLS). The data model already has `user_id` columns, so we use a fixed `OWNER_ID` constant on the server for all writes/reads.
 
-```tsx
-if (!user) {
-  throw redirect({ to: "/login" });
-}
-```
+## Changes
 
-TanStack Router's `redirect()` helper is only meant to be thrown from `beforeLoad` / `loader` (where the router catches it and performs the navigation). When thrown **inside a React component during render**, it bypasses the router and is caught by the nearest React error boundary — which is our `ErrorComponent` in `__root.tsx`. That's why every unauthenticated visit shows the error page instead of redirecting to `/login`.
+### 1. Frontend — drop the auth gate
 
-We can't move the check into `beforeLoad` because auth state lives in the client-side `useAuth` hook (Supabase session in `localStorage`), which isn't available during SSR / route loaders without a server-side session.
+- **`src/routes/index.tsx`**: remove `useAuth`, `useNavigate` redirect effect, and the `loading || !user` guard. Queries run unconditionally (`enabled: true`). Remove the "Sign out" button in the header.
+- **`src/routes/pipeline.tsx`**: same removal.
+- **`src/routes/__root.tsx`**: remove `<AuthProvider>` wrapper.
+- **`src/routes/login.tsx`**: delete the file.
+- **`src/hooks/use-auth.tsx`**: delete (no longer imported).
 
-## Fix
+### 2. Server functions — use admin client, no auth middleware
 
-Use the router's imperative `navigate` from a `useEffect` instead of throwing during render. While the redirect is in flight, render a lightweight loading state.
+For each `createServerFn` in `src/lib/leads.functions.ts`, `src/lib/outreach.server.ts` (and any sibling functions file), `src/lib/briefings.server.ts`:
 
-### `src/routes/index.tsx`
+- Remove `.middleware([requireSupabaseAuth])`.
+- Replace `context.supabase` with `supabaseAdmin` from `@/integrations/supabase/client.server`.
+- Replace `context.userId` with a single constant `OWNER_ID` (defined once in a new `src/lib/owner.server.ts`, value read from a `OWNER_USER_ID` secret, falling back to a generated UUID written into the existing `profiles` row).
+- `src/lib/ingest/run.server.ts` and ingest helpers: same swap.
 
-Replace:
-```tsx
-if (loading) {
-  return <div className="grid min-h-screen place-items-center text-muted-foreground">Loading…</div>;
-}
-if (!user) {
-  throw redirect({ to: "/login" });
-}
-```
+### 3. Database — single owner row
 
-With:
-```tsx
-const navigate = useNavigate();
-useEffect(() => {
-  if (!loading && !user) navigate({ to: "/login" });
-}, [loading, user, navigate]);
+One-time migration to seed an owner profile so `user_id`-typed columns have a valid FK target:
 
-if (loading || !user) {
-  return <div className="grid min-h-screen place-items-center text-muted-foreground">Loading…</div>;
-}
-```
+- Insert into `profiles` (and `user_roles` as `admin`) with a fixed UUID. Store that UUID in a new secret `OWNER_USER_ID`.
+- Drop the `handle_new_user()` trigger reliance (no new signups happen). The trigger can stay; it just never fires.
+- RLS policies stay in place — they're simply bypassed by the service role client. No policy edits needed.
 
-Drop the now-unused `redirect` import; add `useNavigate` from `@tanstack/react-router` and `useEffect` from `react`.
+### 4. start.ts — drop auth attacher
 
-### `src/routes/pipeline.tsx`
+- Remove `attachSupabaseAuth` from `functionMiddleware` in `src/start.ts` (no longer needed; nothing sends a bearer token).
 
-Same treatment — swap `throw redirect(...)` for a `useEffect` + `useNavigate` pattern with a loading fallback.
+## Out of scope
 
-### Optional polish (same edit)
+- Multi-user, role-based access, or sharing — the tool is explicitly single-user.
+- Public exposure protection: published URL will be open to anyone who knows it. If you want a simple shared-password gate later, that's a separate small task.
 
-The `ErrorComponent` in `__root.tsx` could defensively re-throw values that look like router redirects so any future stray `throw redirect(...)` still works:
+## Risk
 
-```tsx
-function ErrorComponent({ error, reset }) {
-  if (error && typeof error === "object" && "options" in error && (error as any).options?.to) {
-    throw error; // let the router handle it
-  }
-  // ...existing UI
-}
-```
+The published URL becomes fully open. Anyone with the link can view leads, trigger ingestion, and generate AI drafts (each refresh costs Lovable AI credits + SAM.gov quota). Mitigations available later: a single shared password prompt, IP allowlist, or Lovable's site-level password protection.
 
-This is a small safety net; not required for the fix.
-
-## Scope
-
-- Edit `src/routes/index.tsx` — swap redirect-throw for `useEffect`+`useNavigate`.
-- Edit `src/routes/pipeline.tsx` — same swap.
-- (Optional) Edit `src/routes/__root.tsx` `ErrorComponent` to re-throw redirect-shaped errors.
-
-No backend / schema / dependency changes. After the fix, signed-out users land on `/login` cleanly and signed-in users see the dashboard.
+Confirm and I'll execute.

@@ -1,5 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { ArrowLeft, TrendingUp, Target, Gauge } from "lucide-react";
@@ -12,7 +11,6 @@ import {
   Tooltip,
   CartesianGrid,
 } from "recharts";
-import { useAuth } from "@/hooks/use-auth";
 import { getPipelineForecast } from "@/lib/leads.functions";
 import { formatUsd } from "@/data/leads";
 
@@ -22,20 +20,11 @@ export const Route = createFileRoute("/pipeline")({
 });
 
 function PipelinePage() {
-  const { user, loading } = useAuth();
   const fetchForecast = useServerFn(getPipelineForecast);
   const q = useQuery({
     queryKey: ["pipeline_forecast"],
     queryFn: () => fetchForecast(),
-    enabled: !!user,
   });
-
-  const navigate = useNavigate();
-  useEffect(() => {
-    if (!loading && !user) navigate({ to: "/login" });
-  }, [loading, user, navigate]);
-
-  if (loading || !user) return <div className="grid min-h-screen place-items-center text-muted-foreground">Loading…</div>;
 
   const d = q.data;
   return (

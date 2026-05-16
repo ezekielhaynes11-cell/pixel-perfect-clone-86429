@@ -1,11 +1,9 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { RefreshCw, LogOut, TrendingUp, Bookmark, BarChart3 } from "lucide-react";
+import { RefreshCw, TrendingUp, Bookmark, BarChart3 } from "lucide-react";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/hooks/use-auth";
 import { listLeads, triggerIngestion, setLeadAction, listLeadActions } from "@/lib/leads.functions";
 import { rowToLead, type Lead, type LeadRow } from "@/data/leads";
 import { SummaryCard } from "@/components/dashboard/SummaryCard";
@@ -28,7 +26,7 @@ export const Route = createFileRoute("/")({
 });
 
 function Dashboard() {
-  const { user, loading } = useAuth();
+  
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [active, setActive] = useState<Lead | null>(null);
   const [draftFor, setDraftFor] = useState<Lead | null>(null);
@@ -42,12 +40,10 @@ function Dashboard() {
   const leadsQ = useQuery({
     queryKey: ["leads"],
     queryFn: () => fetchLeads(),
-    enabled: !!user,
   });
   const actionsQ = useQuery({
     queryKey: ["lead_actions"],
     queryFn: () => fetchActions(),
-    enabled: !!user,
   });
 
   const ingest = useMutation({
@@ -104,15 +100,6 @@ function Dashboard() {
     0,
   );
 
-  const navigate = useNavigate();
-  useEffect(() => {
-    if (!loading && !user) navigate({ to: "/login" });
-  }, [loading, user, navigate]);
-
-  if (loading || !user) {
-    return <div className="grid min-h-screen place-items-center text-muted-foreground">Loading…</div>;
-  }
-
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-40 h-16 border-b border-border bg-background/95 backdrop-blur">
@@ -151,16 +138,6 @@ function Dashboard() {
           >
             <RefreshCw className={`h-3.5 w-3.5 ${ingest.isPending ? "animate-spin" : ""}`} />
             {ingest.isPending ? "Scanning…" : "Refresh feed"}
-          </button>
-          <button
-            onClick={async () => {
-              await supabase.auth.signOut();
-              window.location.href = "/login";
-            }}
-            className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground"
-            title="Sign out"
-          >
-            <LogOut className="h-4 w-4" />
           </button>
         </div>
       </header>
@@ -217,7 +194,7 @@ function Dashboard() {
 
         <footer className="mt-12 flex flex-wrap items-center justify-between border-t border-border pt-4 text-xs text-muted-foreground">
           <span>Live data from SAM.gov · openFDA · GDELT · Enriched by Lovable AI</span>
-          <Link to="/login" className="hover:text-primary">{user.email}</Link>
+          <span>Single-user mode</span>
         </footer>
       </main>
 
