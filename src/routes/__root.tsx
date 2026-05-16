@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-router";
 
 
+import { PasswordGate } from "@/components/PasswordGate";
 import appCss from "../styles.css?url";
 
 function NotFoundComponent() {
@@ -110,10 +111,11 @@ function RootShell({ children }: { children: React.ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
-
   return (
     <QueryClientProvider client={queryClient}>
-      <Outlet />
+      <PasswordGate>
+        <Outlet />
+      </PasswordGate>
     </QueryClientProvider>
   );
 }
