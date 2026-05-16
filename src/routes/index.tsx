@@ -34,6 +34,7 @@ function Dashboard() {
   const qc = useQueryClient();
   const fetchLeads = useServerFn(listLeads);
   const fetchActions = useServerFn(listLeadActions);
+  const fetchRuns = useServerFn(getRecentIngestionRuns);
   const runIngest = useServerFn(triggerIngestion);
   const actionFn = useServerFn(setLeadAction);
 
@@ -44,6 +45,11 @@ function Dashboard() {
   const actionsQ = useQuery({
     queryKey: ["lead_actions"],
     queryFn: () => fetchActions(),
+  });
+  const runsQ = useQuery({
+    queryKey: ["ingestion_runs"],
+    queryFn: () => fetchRuns(),
+    refetchInterval: 30_000,
   });
 
   const ingest = useMutation({
