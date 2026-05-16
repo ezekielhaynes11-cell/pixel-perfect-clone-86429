@@ -105,6 +105,10 @@ export const generateOutreachDraft = createServerFn({ method: "POST" })
         summary: lead.summary ?? "",
         hospital: lead.hospital,
         specialty: lead.specialty,
+        source: lead.source,
+        signal_type: (lead as { signal_type?: string | null }).signal_type ?? null,
+        competitor_incumbent: lead.competitor_incumbent,
+        vendor_mentions: ((lead as { vendor_mentions?: string[] | null }).vendor_mentions) ?? [],
         entities: (lead.entities as {
           physicians?: string[];
           equipment?: string[];
