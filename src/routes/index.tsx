@@ -2,9 +2,9 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { RefreshCw, TrendingUp, Bookmark, BarChart3, AlertCircle } from "lucide-react";
+import { RefreshCw, TrendingUp, Bookmark, BarChart3, AlertCircle, EyeOff, Eye, XCircle, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
-import { listLeads, triggerIngestion, setLeadAction, listLeadActions, getRecentIngestionRuns, listLeadPhysicians, type LeadPhysician } from "@/lib/leads.functions";
+import { listLeads, triggerIngestion, setLeadAction, listLeadActions, getRecentIngestionRuns, listLeadPhysicians, bulkSetLeadAction, type LeadPhysician } from "@/lib/leads.functions";
 import { rowToLead, leadStateCode, type Lead, type LeadRow } from "@/data/leads";
 import { SummaryCard } from "@/components/dashboard/SummaryCard";
 import { FilterBar, emptyFilters, type Filters } from "@/components/dashboard/FilterBar";
@@ -31,6 +31,8 @@ function Dashboard() {
   const [active, setActive] = useState<Lead | null>(null);
   const [draftFor, setDraftFor] = useState<Lead | null>(null);
   const [searchesOpen, setSearchesOpen] = useState(false);
+  const [showDismissed, setShowDismissed] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const qc = useQueryClient();
   const fetchLeads = useServerFn(listLeads);
   const fetchActions = useServerFn(listLeadActions);
@@ -38,6 +40,7 @@ function Dashboard() {
   const fetchPhysicians = useServerFn(listLeadPhysicians);
   const runIngest = useServerFn(triggerIngestion);
   const actionFn = useServerFn(setLeadAction);
+  const bulkActionFn = useServerFn(bulkSetLeadAction);
 
   const leadsQ = useQuery({
     queryKey: ["leads"],
@@ -97,6 +100,17 @@ function Dashboard() {
     mutationFn: (input: { lead_id: string; action: "saved" | "dismissed" | "pushed_sfdc"; remove?: boolean }) =>
       actionFn({ data: input }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["lead_actions"] }),
+  });
+
+  const bulkAct = useMutation({
+    mutationFn: (input: { lead_ids: string[]; action: "dismissed"; remove?: boolean }) =>
+      bulkActionFn({ data: input }),
+    onSuccess: (res, vars) => {
+      toast.success(vars.remove ? `Restored ${res.count} leads` : `Dismissed ${res.count} leads`);
+      setSelected(new Set());
+      qc.invalidateQueries({ queryKey: ["lead_actions"] });
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Bulk action failed"),
   });
 
   const leads: Lead[] = useMemo(
