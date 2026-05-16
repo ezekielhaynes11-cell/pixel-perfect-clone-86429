@@ -2,6 +2,8 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { fetchGdelt } from "./gdelt.server";
 import { fetchOpenFda } from "./openfda.server";
 import { fetchSamGov } from "./sam-gov.server";
+import { fetchClinicalTrials } from "./clinicaltrials.server";
+import { fetchCmsOpenPayments } from "./cms-open-payments.server";
 import { enrichRawLead } from "./enrich.server";
 import type { RawLead } from "./types";
 
@@ -32,6 +34,8 @@ export async function runIngestion(forUserId?: string): Promise<IngestionSummary
     },
     { name: "openfda", fn: () => fetchOpenFda({}) },
     { name: "gdelt", fn: () => fetchGdelt({}) },
+    { name: "clinicaltrials", fn: () => fetchClinicalTrials({}) },
+    { name: "cms_open_payments", fn: () => fetchCmsOpenPayments({ territoryState: "CA" }) },
   ];
 
   for (const src of sources) {

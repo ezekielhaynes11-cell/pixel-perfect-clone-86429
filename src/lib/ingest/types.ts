@@ -1,4 +1,11 @@
-export type LeadSource = "sam_gov" | "openfda" | "gdelt" | "reddit" | "news";
+export type LeadSource =
+  | "sam_gov"
+  | "openfda"
+  | "gdelt"
+  | "reddit"
+  | "news"
+  | "clinicaltrials"
+  | "cms_open_payments";
 
 export interface RawLead {
   source: LeadSource;
