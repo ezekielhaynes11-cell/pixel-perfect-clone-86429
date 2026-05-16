@@ -61,6 +61,37 @@ export const setLeadAction = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const bulkSetLeadAction = createServerFn({ method: "POST" })
+  .inputValidator((input) =>
+    z
+      .object({
+        lead_ids: z.array(z.string().uuid()).min(1).max(500),
+        action: z.enum(["saved", "dismissed", "pushed_sfdc"]),
+        remove: z.boolean().optional(),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data }) => {
+    if (data.remove) {
+      const { error } = await supabaseAdmin
+        .from("lead_actions")
+        .delete()
+        .eq("user_id", OWNER_ID)
+        .eq("action", data.action)
+        .in("lead_id", data.lead_ids);
+      if (error) throw new Error(error.message);
+      return { ok: true, count: data.lead_ids.length };
+    }
+    const rows = data.lead_ids.map((id) => ({
+      lead_id: id,
+      user_id: OWNER_ID,
+      action: data.action,
+    }));
+    const { error } = await supabaseAdmin.from("lead_actions").insert(rows);
+    if (error && !error.message.includes("duplicate")) throw new Error(error.message);
+    return { ok: true, count: rows.length };
+  });
+
 /* -------------------- Outreach drafts -------------------- */
 
 export const listDraftsForLead = createServerFn({ method: "POST" })

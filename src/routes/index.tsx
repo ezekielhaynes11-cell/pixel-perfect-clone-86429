@@ -2,9 +2,9 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { RefreshCw, TrendingUp, Bookmark, BarChart3, AlertCircle } from "lucide-react";
+import { RefreshCw, TrendingUp, Bookmark, BarChart3, AlertCircle, EyeOff, Eye, XCircle, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
-import { listLeads, triggerIngestion, setLeadAction, listLeadActions, getRecentIngestionRuns, listLeadPhysicians, type LeadPhysician } from "@/lib/leads.functions";
+import { listLeads, triggerIngestion, setLeadAction, listLeadActions, getRecentIngestionRuns, listLeadPhysicians, bulkSetLeadAction, type LeadPhysician } from "@/lib/leads.functions";
 import { rowToLead, leadStateCode, type Lead, type LeadRow } from "@/data/leads";
 import { SummaryCard } from "@/components/dashboard/SummaryCard";
 import { FilterBar, emptyFilters, type Filters } from "@/components/dashboard/FilterBar";
@@ -31,6 +31,8 @@ function Dashboard() {
   const [active, setActive] = useState<Lead | null>(null);
   const [draftFor, setDraftFor] = useState<Lead | null>(null);
   const [searchesOpen, setSearchesOpen] = useState(false);
+  const [showDismissed, setShowDismissed] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const qc = useQueryClient();
   const fetchLeads = useServerFn(listLeads);
   const fetchActions = useServerFn(listLeadActions);
@@ -38,6 +40,7 @@ function Dashboard() {
   const fetchPhysicians = useServerFn(listLeadPhysicians);
   const runIngest = useServerFn(triggerIngestion);
   const actionFn = useServerFn(setLeadAction);
+  const bulkActionFn = useServerFn(bulkSetLeadAction);
 
   const leadsQ = useQuery({
     queryKey: ["leads"],
@@ -99,14 +102,28 @@ function Dashboard() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["lead_actions"] }),
   });
 
+  const bulkAct = useMutation({
+    mutationFn: (input: { lead_ids: string[]; action: "dismissed"; remove?: boolean }) =>
+      bulkActionFn({ data: input }),
+    onSuccess: (res, vars) => {
+      toast.success(vars.remove ? `Restored ${res.count} leads` : `Dismissed ${res.count} leads`);
+      setSelected(new Set());
+      qc.invalidateQueries({ queryKey: ["lead_actions"] });
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Bulk action failed"),
+  });
+
   const leads: Lead[] = useMemo(
     () => (leadsQ.data ?? []).map((r) => rowToLead(r as LeadRow)),
     [leadsQ.data],
   );
-  const dismissedIds = new Set(
-    (actionsQ.data ?? []).filter((a) => a.action === "dismissed").map((a) => a.lead_id),
+  const dismissedIds = useMemo(
+    () => new Set((actionsQ.data ?? []).filter((a) => a.action === "dismissed").map((a) => a.lead_id)),
+    [actionsQ.data],
   );
-  const visibleLeads = leads.filter((l) => !dismissedIds.has(l.id));
+  const activeLeads = useMemo(() => leads.filter((l) => !dismissedIds.has(l.id)), [leads, dismissedIds]);
+  const dismissedLeads = useMemo(() => leads.filter((l) => dismissedIds.has(l.id)), [leads, dismissedIds]);
+  const visibleLeads = showDismissed ? dismissedLeads : activeLeads;
 
   const hospitals = useMemo(
     () => Array.from(new Set(visibleLeads.map((l) => l.hospital).filter((x): x is string => !!x))).sort(),
@@ -139,8 +156,8 @@ function Dashboard() {
     [visibleLeads, filters],
   );
 
-  const highPriority = visibleLeads.filter((l) => l.priority === "high").length;
-  const pipelineUsd = visibleLeads.reduce(
+  const highPriority = activeLeads.filter((l) => l.priority === "high").length;
+  const pipelineUsd = activeLeads.reduce(
     (s, l) => s + (l.estimatedValueUsd ?? 0) * (l.winProbability ?? 0),
     0,
   );
@@ -186,7 +203,7 @@ function Dashboard() {
           >
             <Bookmark className="h-3.5 w-3.5" /> Saved
           </button>
-          <AlertsBell leads={visibleLeads} onOpenLead={setActive} />
+          <AlertsBell leads={activeLeads} onOpenLead={setActive} />
           <button
             onClick={() => ingest.mutate()}
             disabled={ingest.isPending}
@@ -199,7 +216,7 @@ function Dashboard() {
       </header>
 
       <main className="mx-auto max-w-[1600px] px-6 py-6">
-        <SummaryCard total={visibleLeads.length} highPriority={highPriority} />
+        <SummaryCard total={activeLeads.length} highPriority={highPriority} />
 
         {(() => {
           const last = (runsQ.data ?? [])[0];
@@ -239,14 +256,63 @@ function Dashboard() {
             <FilterBar filters={filters} onChange={setFilters} hospitals={hospitals} specialties={specialties} />
 
 
-            <div className="mb-3 flex items-center justify-between">
+            <div className="mb-3 flex flex-wrap items-center gap-3">
               <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                Lead Feed
+                {showDismissed ? "Dismissed" : "Lead Feed"}
                 <span className="ml-2 rounded-full bg-surface-2 px-2 py-0.5 text-xs text-foreground">
                   {filtered.length}
                 </span>
               </h2>
-              <div className="text-xs text-muted-foreground">Sorted by confidence</div>
+              <button
+                onClick={() => { setShowDismissed((v) => !v); setSelected(new Set()); }}
+                className="flex h-7 items-center gap-1.5 rounded-sm border border-border bg-surface-2 px-2.5 text-[11px] font-medium text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground"
+                title={showDismissed ? "Back to active feed" : "View dismissed leads"}
+              >
+                {showDismissed ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                {showDismissed ? "Show active" : `Show dismissed (${dismissedLeads.length})`}
+              </button>
+              {filtered.length > 0 && (
+                <button
+                  onClick={() => {
+                    const all = filtered.map((l) => l.id);
+                    setSelected((prev) => (prev.size === all.length ? new Set() : new Set(all)));
+                  }}
+                  className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                >
+                  {selected.size === filtered.length ? "Clear selection" : "Select all"}
+                </button>
+              )}
+              {selected.size > 0 && (
+                <div className="ml-auto flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">{selected.size} selected</span>
+                  {showDismissed ? (
+                    <button
+                      onClick={() =>
+                        bulkAct.mutate({ lead_ids: Array.from(selected), action: "dismissed", remove: true })
+                      }
+                      disabled={bulkAct.isPending}
+                      className="flex h-7 items-center gap-1.5 rounded-sm border border-success/40 bg-success/10 px-2.5 text-[11px] font-medium text-success hover:bg-success/20 disabled:opacity-50"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Restore selected
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() =>
+                        bulkAct.mutate({ lead_ids: Array.from(selected), action: "dismissed" })
+                      }
+                      disabled={bulkAct.isPending}
+                      className="flex h-7 items-center gap-1.5 rounded-sm border border-destructive/40 bg-destructive/10 px-2.5 text-[11px] font-medium text-destructive hover:bg-destructive/20 disabled:opacity-50"
+                    >
+                      <XCircle className="h-3.5 w-3.5" />
+                      Dismiss selected
+                    </button>
+                  )}
+                </div>
+              )}
+              {selected.size === 0 && (
+                <div className="ml-auto text-xs text-muted-foreground">Sorted by confidence</div>
+              )}
             </div>
 
             {leadsQ.isLoading ? (
@@ -255,7 +321,9 @@ function Dashboard() {
               </div>
             ) : filtered.length === 0 ? (
               <div className="rounded-md border border-dashed border-border p-12 text-center text-sm text-muted-foreground">
-                {leads.length === 0
+                {showDismissed
+                  ? "No dismissed leads."
+                  : leads.length === 0
                   ? 'No leads yet. Click "Refresh feed" to pull live signals from SAM.gov, FDA, and news.'
                   : "No leads match your filters."}
               </div>
@@ -274,6 +342,20 @@ function Dashboard() {
                       onSave={() => act.mutate({ lead_id: lead.id, action: "saved" })}
                       onDismiss={() => act.mutate({ lead_id: lead.id, action: "dismissed" })}
                       onDraft={() => setDraftFor(lead)}
+                      selectable
+                      selected={selected.has(lead.id)}
+                      onToggleSelect={() =>
+                        setSelected((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(lead.id)) next.delete(lead.id);
+                          else next.add(lead.id);
+                          return next;
+                        })
+                      }
+                      dismissed={showDismissed}
+                      onRestore={() =>
+                        act.mutate({ lead_id: lead.id, action: "dismissed", remove: true })
+                      }
                     />
                   ))}
               </div>
