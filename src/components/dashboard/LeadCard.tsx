@@ -15,6 +15,8 @@ const sourceMeta: Record<string, { label: string; cls: string }> = {
   gdelt: { label: "News", cls: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
   reddit: { label: "Reddit", cls: "bg-orange-500/15 text-orange-300 border-orange-500/30" },
   news: { label: "News", cls: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
+  clinicaltrials: { label: "ClinicalTrials", cls: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" },
+  cms_open_payments: { label: "CMS Payments", cls: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
 };
 
 function confidenceColor(c: number) {
