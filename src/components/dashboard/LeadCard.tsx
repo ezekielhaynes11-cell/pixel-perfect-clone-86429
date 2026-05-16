@@ -2,8 +2,8 @@ import {
   ExternalLink,
   Eye,
   Bookmark,
-  CheckCircle2,
-  Share2,
+  Sparkles,
+  XCircle,
   Building2,
   Stethoscope,
 } from "lucide-react";
@@ -29,12 +29,14 @@ export function LeadCard({
   index,
   onSave,
   onDismiss,
+  onDraft,
 }: {
   lead: Lead;
   onView: (lead: Lead) => void;
   index: number;
   onSave?: () => void;
   onDismiss?: () => void;
+  onDraft?: () => void;
 }) {
   const meta = sourceMeta[lead.source] ?? { label: lead.source, cls: "bg-surface-3 text-foreground border-border" };
   const conf = confidenceColor(lead.confidence);
@@ -105,17 +107,26 @@ export function LeadCard({
           <Eye className="h-3.5 w-3.5" />
           View Details
         </button>
-        <button className="flex h-8 items-center gap-1.5 rounded-sm border border-border px-3 text-xs text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground">
-          <CheckCircle2 className="h-3.5 w-3.5" />
-          Add to Salesforce
+        <button
+          onClick={onDraft}
+          className="flex h-8 items-center gap-1.5 rounded-sm border border-primary/40 bg-primary/10 px-3 text-xs text-primary transition-colors hover:bg-primary/20"
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          Draft outreach
         </button>
-        <button className="flex h-8 items-center gap-1.5 rounded-sm border border-border px-3 text-xs text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground">
+        <button
+          onClick={onSave}
+          className="flex h-8 items-center gap-1.5 rounded-sm border border-border px-3 text-xs text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground"
+        >
           <Bookmark className="h-3.5 w-3.5" />
           Save
         </button>
-        <button className="flex h-8 items-center gap-1.5 rounded-sm border border-border px-3 text-xs text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground">
-          <Share2 className="h-3.5 w-3.5" />
-          Share
+        <button
+          onClick={onDismiss}
+          className="flex h-8 items-center gap-1.5 rounded-sm border border-border px-3 text-xs text-foreground/80 transition-colors hover:bg-destructive/10 hover:text-destructive"
+        >
+          <XCircle className="h-3.5 w-3.5" />
+          Dismiss
         </button>
         <a
           href={lead.sourceUrl}
