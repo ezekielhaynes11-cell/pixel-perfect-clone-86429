@@ -1,58 +1,77 @@
-# Finish the top-1% UI layer
+## Problem
 
-The backend (9 tables, ingestion adapters for SAM.gov / openFDA / GDELT, Gemini enrichment, `listLeads` / `triggerIngestion` / `setLeadAction` server functions, auth) is live. This plan completes the three remaining UI surfaces a Philips rep needs to actually convert these signals into pipeline.
+The dashboard shows the generic "This page didn't load" error screen. The console reveals:
 
-## 1. Outreach Draft modal (per-lead AI email)
+```
+error: { "options": { "to": "/login", "statusCode": 307 } }
+The above error occurred in the <Dashboard> component.
+```
 
-- Add `draftOutreach` server fn in `src/lib/outreach.functions.ts` wrapping the existing `outreach.server.ts` helper. Returns `{ subject, body, id }` and persists to `outreach_drafts`.
-- Add `listDraftsForLead(leadId)` server fn so reopening a lead shows prior drafts.
-- New component `OutreachDraftDialog.tsx`:
-  - Tone selector (Discovery / Follow-up / Executive intro)
-  - "Generate with AI" button → calls `draftOutreach` via `useMutation`
-  - Editable subject + body textareas, "Copy" and "Open in mail client" (`mailto:`) actions
-  - Saves edits back via an `updateDraft` server fn
-- Wire from `LeadCard` "Draft outreach" action and from `LeadDetailModal`.
+In `src/routes/index.tsx` (line 111) and `src/routes/pipeline.tsx` (line 33), the code does:
 
-## 2. Pipeline forecast view
+```tsx
+if (!user) {
+  throw redirect({ to: "/login" });
+}
+```
 
-- New route `src/routes/pipeline.tsx` under the same auth gate.
-- New server fn `getPipelineForecast` that reads `leads` and returns:
-  - Total weighted pipeline = Σ `estimated_value_usd × win_probability` (filter: not dismissed, confidence ≥ 60)
-  - Breakdown by `hospital`, by `specialty`, by week of `date_discovered`
-  - Top 10 leads by weighted value
-- UI: 3 summary cards (Total weighted, Open leads, Avg confidence), a stacked bar chart by specialty (Recharts), and a sortable table of top weighted leads with quick "Draft outreach" + "Open in Salesforce" actions.
-- Add a "Pipeline" link to the sidebar nav.
+TanStack Router's `redirect()` helper is only meant to be thrown from `beforeLoad` / `loader` (where the router catches it and performs the navigation). When thrown **inside a React component during render**, it bypasses the router and is caught by the nearest React error boundary — which is our `ErrorComponent` in `__root.tsx`. That's why every unauthenticated visit shows the error page instead of redirecting to `/login`.
 
-## 3. Saved Searches + Alerts
+We can't move the check into `beforeLoad` because auth state lives in the client-side `useAuth` hook (Supabase session in `localStorage`), which isn't available during SSR / route loaders without a server-side session.
 
-- `SavedSearchesDrawer.tsx` opened from header:
-  - List current saved searches with name, filter chips, alert threshold, on/off toggle
-  - "Save current view" button captures the dashboard's active `FilterBar` state into `saved_searches.filter` (jsonb)
-  - Edit / delete per row
-- Server fns: `listSavedSearches`, `upsertSavedSearch`, `deleteSavedSearch`, `toggleSavedSearchAlerts`.
-- Alerts evaluation: extend `run.server.ts` so that after ingestion+enrichment, for each saved search with `alerts_enabled`, insert rows into `alerts` for newly-enriched leads matching the filter with `confidence >= alert_threshold`.
-- Bell icon in `Header.tsx` with unread count (`alerts` where `read_at is null`), dropdown lists recent alerts, click marks read and opens the lead.
+## Fix
 
-## 4. Polish that ships with this turn
+Use the router's imperative `navigate` from a `useEffect` instead of throwing during render. While the redirect is in flight, render a lightweight loading state.
 
-- `Refresh feed` button shows last `ingestion_runs` timestamp + per-source counts in a tooltip.
-- `LeadDetailModal` gets an "AI briefing" tab that calls a `getOrCreateDailyBriefing` server fn (Gemini 2.5 Flash) summarizing today's top 5 leads for the rep, persisted to `briefings`.
-- Fix the current SSR error (preview shows "SSR rendering failed") before adding new routes — likely a server-only import reachable from a route file; will diagnose with `server-function-logs` and the import graph and correct in the first step.
+### `src/routes/index.tsx`
 
-## Technical notes
+Replace:
+```tsx
+if (loading) {
+  return <div className="grid min-h-screen place-items-center text-muted-foreground">Loading…</div>;
+}
+if (!user) {
+  throw redirect({ to: "/login" });
+}
+```
 
-- All new server fns use `createServerFn` + `requireSupabaseAuth`; no Edge Functions.
-- Outreach generation, briefings, and any enrichment continue to go through Lovable AI Gateway (`google/gemini-2.5-flash`); no new secrets required.
-- New tables: none — schema already has `outreach_drafts`, `saved_searches`, `alerts`, `briefings`.
-- No scheduled jobs: alerts are evaluated at the end of each on-demand ingestion run.
-- Out of scope (deferred): email delivery of alerts (would need `RESEND_API_KEY`), real Salesforce OAuth, LinkedIn/hiring sources.
+With:
+```tsx
+const navigate = useNavigate();
+useEffect(() => {
+  if (!loading && !user) navigate({ to: "/login" });
+}, [loading, user, navigate]);
 
-## Build order
+if (loading || !user) {
+  return <div className="grid min-h-screen place-items-center text-muted-foreground">Loading…</div>;
+}
+```
 
-1. Diagnose & fix the SSR error so preview is healthy
-2. Outreach Draft modal (highest rep value)
-3. Saved Searches + in-app alerts bell
-4. Pipeline forecast route
-5. Daily AI briefing tab + Refresh tooltip
+Drop the now-unused `redirect` import; add `useNavigate` from `@tanstack/react-router` and `useEffect` from `react`.
 
-Shall I proceed?
+### `src/routes/pipeline.tsx`
+
+Same treatment — swap `throw redirect(...)` for a `useEffect` + `useNavigate` pattern with a loading fallback.
+
+### Optional polish (same edit)
+
+The `ErrorComponent` in `__root.tsx` could defensively re-throw values that look like router redirects so any future stray `throw redirect(...)` still works:
+
+```tsx
+function ErrorComponent({ error, reset }) {
+  if (error && typeof error === "object" && "options" in error && (error as any).options?.to) {
+    throw error; // let the router handle it
+  }
+  // ...existing UI
+}
+```
+
+This is a small safety net; not required for the fix.
+
+## Scope
+
+- Edit `src/routes/index.tsx` — swap redirect-throw for `useEffect`+`useNavigate`.
+- Edit `src/routes/pipeline.tsx` — same swap.
+- (Optional) Edit `src/routes/__root.tsx` `ErrorComponent` to re-throw redirect-shaped errors.
+
+No backend / schema / dependency changes. After the fix, signed-out users land on `/login` cleanly and signed-in users see the dashboard.
