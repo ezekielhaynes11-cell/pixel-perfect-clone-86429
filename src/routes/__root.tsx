@@ -9,7 +9,6 @@ import {
 } from "@tanstack/react-router";
 
 
-import { PasswordGate } from "@/components/PasswordGate";
 import appCss from "../styles.css?url";
 
 function NotFoundComponent() {
@@ -113,9 +112,7 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   return (
     <QueryClientProvider client={queryClient}>
-      <PasswordGate>
-        <Outlet />
-      </PasswordGate>
+      <Outlet />
     </QueryClientProvider>
   );
 }
