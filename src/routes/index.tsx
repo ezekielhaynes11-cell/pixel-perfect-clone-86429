@@ -26,7 +26,7 @@ export const Route = createFileRoute("/")({
 });
 
 function Dashboard() {
-  const { user, loading } = useAuth();
+  
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [active, setActive] = useState<Lead | null>(null);
   const [draftFor, setDraftFor] = useState<Lead | null>(null);
