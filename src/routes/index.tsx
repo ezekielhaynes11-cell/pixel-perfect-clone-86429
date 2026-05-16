@@ -1,10 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { RefreshCw, TrendingUp, Bookmark, BarChart3 } from "lucide-react";
+import { RefreshCw, TrendingUp, Bookmark, BarChart3, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
-import { listLeads, triggerIngestion, setLeadAction, listLeadActions } from "@/lib/leads.functions";
+import { listLeads, triggerIngestion, setLeadAction, listLeadActions, getRecentIngestionRuns } from "@/lib/leads.functions";
 import { rowToLead, type Lead, type LeadRow } from "@/data/leads";
 import { SummaryCard } from "@/components/dashboard/SummaryCard";
 import { FilterBar, emptyFilters, type Filters } from "@/components/dashboard/FilterBar";
