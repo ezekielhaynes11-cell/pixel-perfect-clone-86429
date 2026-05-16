@@ -81,7 +81,7 @@ export const generateOutreachDraft = createServerFn({ method: "POST" })
     z
       .object({
         lead_id: z.string().uuid(),
-        tone: z.enum(["discovery", "follow_up", "executive_intro"]).default("discovery"),
+        tone: z.enum(["discovery", "follow_up", "executive_intro", "switch_pitch"]).optional(),
       })
       .parse(input),
   )
