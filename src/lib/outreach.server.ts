@@ -1,5 +1,7 @@
 const GATEWAY_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
 
+export type OutreachTone = "discovery" | "follow_up" | "executive_intro";
+
 interface DraftInput {
   lead: {
     title: string;
@@ -9,9 +11,19 @@ interface DraftInput {
     entities: { physicians?: string[]; equipment?: string[]; keywords?: string[] };
   };
   repName: string;
+  tone?: OutreachTone;
 }
 
-const SYSTEM = `You are an elite enterprise medical-device sales rep at Phillips Medical. Draft a short, specific, non-spammy outreach email tailored to the lead. Reference the actual signal (RFQ, recall, capital project, etc.). Keep it under 140 words, plain text, signed by the rep. Open with the recipient's specific situation, not generic flattery. End with one clear ask (15-min intro call). Never invent facts not present in the brief.`;
+const TONE_GUIDE: Record<OutreachTone, string> = {
+  discovery:
+    "Tone: warm discovery email. Reference the specific public signal you found, ask one open-ended question to confirm timing/scope, and propose a 15-minute intro call.",
+  follow_up:
+    "Tone: short follow-up to a prior thread. Reference the original signal, add ONE new insight or benchmark, and ask if next week works for a brief call.",
+  executive_intro:
+    "Tone: peer-to-peer executive introduction (C-suite / VP). Confident, brief, business-outcome focused. Reference the strategic implication of the signal. Propose a 20-minute conversation with a named Philips executive sponsor.",
+};
+
+const SYSTEM = `You are an elite enterprise medical-device sales rep at Philips Medical. Draft a short, specific, non-spammy outreach email tailored to the lead. Reference the actual signal (RFQ, recall, capital project, etc.). Keep it under 140 words, plain text, signed by the rep. Open with the recipient's specific situation, not generic flattery. End with one clear ask. Never invent facts not present in the brief.`;
 
 const TOOL = {
   type: "function" as const,
@@ -30,9 +42,12 @@ const TOOL = {
   },
 };
 
-export async function draftOutreachEmail(input: DraftInput): Promise<{ subject: string; body: string }> {
+export async function draftOutreachEmail(
+  input: DraftInput,
+): Promise<{ subject: string; body: string }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) throw new Error("LOVABLE_API_KEY not configured");
+  const tone = input.tone ?? "discovery";
 
   const userMsg = `Lead title: ${input.lead.title}
 Hospital: ${input.lead.hospital ?? "unknown"}
@@ -44,7 +59,9 @@ Signals: ${(input.lead.entities.keywords ?? []).join(", ") || "n/a"}
 Background:
 ${input.lead.summary}
 
-Rep name to sign as: ${input.repName}`;
+Rep name to sign as: ${input.repName}
+
+${TONE_GUIDE[tone]}`;
 
   const res = await fetch(GATEWAY_URL, {
     method: "POST",
