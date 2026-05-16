@@ -6,8 +6,13 @@ import {
   XCircle,
   Building2,
   Stethoscope,
+  UserRound,
+  Phone,
+  ChevronDown,
 } from "lucide-react";
+import { useState } from "react";
 import { type Lead, timeAgo } from "@/data/leads";
+import type { LeadPhysician } from "@/lib/leads.functions";
 
 const sourceMeta: Record<string, { label: string; cls: string }> = {
   sam_gov: { label: "SAM.gov", cls: "bg-blue-500/15 text-blue-300 border-blue-500/30" },
@@ -29,6 +34,7 @@ export function LeadCard({
   lead,
   onView,
   index,
+  physicians = [],
   onSave,
   onDismiss,
   onDraft,
@@ -36,10 +42,12 @@ export function LeadCard({
   lead: Lead;
   onView: (lead: Lead) => void;
   index: number;
+  physicians?: LeadPhysician[];
   onSave?: () => void;
   onDismiss?: () => void;
   onDraft?: () => void;
 }) {
+  const [showDocs, setShowDocs] = useState(false);
   const meta = sourceMeta[lead.source] ?? { label: lead.source, cls: "bg-surface-3 text-foreground border-border" };
   const conf = confidenceColor(lead.confidence);
   return (
