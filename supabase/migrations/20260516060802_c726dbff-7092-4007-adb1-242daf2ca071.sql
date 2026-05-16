@@ -1,0 +1,1 @@
+ALTER TABLE public.profiles ALTER COLUMN territory SET DEFAULT 'texas';

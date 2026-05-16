@@ -63,7 +63,7 @@ export function SummaryCard({
           Next update in <span className="font-mono text-foreground">23:42</span>
         </div>
         <div className="mt-1 text-[11px] uppercase tracking-wider text-muted-foreground">
-          Live · Territory: California
+          Live · Territory: OK · AR · LA · TX
         </div>
       </div>
     </div>

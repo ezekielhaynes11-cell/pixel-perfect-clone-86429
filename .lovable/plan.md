@@ -1,57 +1,34 @@
-## Plan: Physician contacts + scheduled ingestion
+## Switch rep territory: California → Oklahoma, Arkansas, Louisiana, Texas
 
-### 1. NPPES physician enrichment (free, no API key)
+Currently the app is hardcoded to California in three places: the CMS Open Payments fetcher, the dashboard header label, and a placeholder string. The schema default for `profiles.territory` is also `'california'`. National sources (SAM.gov, openFDA, GDELT, ClinicalTrials) already return nationwide signal and will continue to — the AI enricher already infers the state per lead, so OK/AR/LA/TX leads will surface naturally and get the right `territory` tag.
 
-Add `src/lib/ingest/nppes.server.ts` that calls the public NPPES NPI Registry API (`https://npiregistry.cms.hhs.gov/api/?version=2.1`). For every physician name surfaced by the enrichment step, look up:
+### Changes
 
-- **NPI number** (the unique 10-digit national ID)
-- **Primary specialty / taxonomy** (e.g. "Radiology", "Cardiology")
-- **Practice address** (street, city, state, ZIP)
-- **Practice phone**
-- **Credentials** (MD, DO, etc.)
+1. **CMS Open Payments — fetch all four states**
+   `src/lib/ingest/run.server.ts` currently calls `fetchCmsOpenPayments({ territoryState: "CA" })` once. Replace with four sequential calls (OK, AR, LA, TX) merged into one `cms_open_payments` source entry so the run summary stays clean. Volume stays modest because each state is filtered server-side by CMS.
 
-Hook it into `enrich.server.ts` so that after the AI extracts physician names, each name is resolved against NPPES. Cache results in a new `physician_contacts` table keyed by NPI to avoid re-hitting the API.
+2. **Dashboard territory label**
+   `src/components/dashboard/SummaryCard.tsx` line 66: `"Live · Territory: California"` → `"Live · Territory: OK · AR · LA · TX"`.
 
-**Schema change** (one migration):
-- `physician_contacts` table: `npi`, `full_name`, `credentials`, `primary_specialty`, `practice_address`, `practice_city`, `practice_state`, `practice_zip`, `practice_phone`, `last_verified_at`. Public-readable since it's all public registry data.
-- `lead_physicians` join table: `lead_id`, `npi`, `role` (e.g. "named in source", "CMS payment recipient"). Lets one physician appear on many leads and vice-versa.
+3. **Saved-search placeholder copy**
+   `src/components/dashboard/SavedSearchesDrawer.tsx` line 111: `'e.g. "California cath labs"'` → `'e.g. "Texas cath labs"'`.
 
-**UI change:** `LeadCard.tsx` gets a small "Physicians" section listing each linked contact with specialty, phone, and city — collapsed by default, expand on click.
+4. **Profile default territory (DB migration)**
+   Change `public.profiles.territory` default from `'california'` to `'texas'` (representative state — multi-state coverage is conveyed in the UI label, not in the single-string column). No existing rows need backfill since this is single-user mode and the owner row will be updated to `'texas'`.
 
-**Limitations to flag upfront:** NPPES does NOT contain email addresses or direct mobile numbers — only the practice's front-desk line and mailing address. If he wants direct emails later, that's a paid API (Apollo / Hunter / Definitive Healthcare) we can add as a Tier-2 upgrade.
+5. **Enricher hint text (minor)**
+   `src/lib/ingest/enrich.server.ts` line 21 example list mentions `"california", "texas"` — swap to `"texas", "oklahoma"` so the model's example aligns with the active territory.
 
-### 2. Scheduled ingestion — twice daily
+### Out of scope
 
-Enable `pg_cron` + `pg_net` extensions, then schedule the existing `/api/public/ingest` endpoint to run:
+- No new filtering that drops out-of-territory leads. The user already has access to national signals via the filter bar; auto-hiding them would silently shrink the feed.
+- No change to the twice-daily cron schedule.
+- No change to NPPES enrichment (it already uses the per-lead inferred state code).
 
-- **14:00 UTC** (7:00 AM Pacific) — morning briefing data
-- **20:00 UTC** (1:00 PM Pacific) — afternoon refresh
+### Files touched
 
-Authenticated via the `apikey` anon header (the project's standard pattern). Job name: `phillips-ingest-daily`.
-
-Replaces the never-installed every-30-min job from the earlier plan.
-
-### 3. Volume expectations (documented in dashboard)
-
-Add a small "What to expect" tooltip on the dashboard header so he knows what's normal:
-
-```text
-Per refresh (twice/day):     20–60 new leads
-Per week:                    200–400 new leads
-Worth opening (conf ≥ 75):   50–100 / week
-```
-
-If he sees ≪ that, something's broken (likely an API key or a source returning 0).
-
-### Technical notes
-
-- NPPES API is unauthenticated, ~5 req/sec rate-limit-friendly. We'll batch lookups with a small in-handler delay.
-- Physician matching by name is fuzzy. We'll require last name + state match before linking, and store the match confidence so bad links can be filtered out later.
-- CMS Open Payments source already produces *real* NPIs — those skip the fuzzy match and link directly.
-- The cron uses the stable `project--{id}.lovable.app` URL so it survives republishes.
-
-### What this plan does NOT include
-
-- Paid email/phone enrichment (Apollo, Hunter) — user chose free-only.
-- More frequent than twice-daily ingestion — user chose 7am + 1pm PT.
-- Any other Tier-2 sources from the earlier roadmap.
+- `src/lib/ingest/run.server.ts` — fan CMS call across 4 states
+- `src/components/dashboard/SummaryCard.tsx` — label
+- `src/components/dashboard/SavedSearchesDrawer.tsx` — placeholder
+- `src/lib/ingest/enrich.server.ts` — example states in prompt
+- 1 migration — change `profiles.territory` default

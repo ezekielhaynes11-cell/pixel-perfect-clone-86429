@@ -51,7 +51,22 @@ export async function runIngestion(forUserId?: string): Promise<IngestionSummary
     { name: "openfda", fn: () => fetchOpenFda({}) },
     { name: "gdelt", fn: () => fetchGdelt({}) },
     { name: "clinicaltrials", fn: () => fetchClinicalTrials({}) },
-    { name: "cms_open_payments", fn: () => fetchCmsOpenPayments({ territoryState: "CA" }) },
+    {
+      name: "cms_open_payments",
+      fn: async () => {
+        const states = ["OK", "AR", "LA", "TX"];
+        const all: RawLead[] = [];
+        for (const s of states) {
+          try {
+            const rows = await fetchCmsOpenPayments({ territoryState: s });
+            all.push(...rows);
+          } catch (e) {
+            console.error(`cms_open_payments ${s} failed:`, e instanceof Error ? e.message : e);
+          }
+        }
+        return all;
+      },
+    },
   ];
 
   for (const src of sources) {
