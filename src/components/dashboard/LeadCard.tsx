@@ -6,8 +6,13 @@ import {
   XCircle,
   Building2,
   Stethoscope,
+  UserRound,
+  Phone,
+  ChevronDown,
 } from "lucide-react";
+import { useState } from "react";
 import { type Lead, timeAgo } from "@/data/leads";
+import type { LeadPhysician } from "@/lib/leads.functions";
 
 const sourceMeta: Record<string, { label: string; cls: string }> = {
   sam_gov: { label: "SAM.gov", cls: "bg-blue-500/15 text-blue-300 border-blue-500/30" },
@@ -29,6 +34,7 @@ export function LeadCard({
   lead,
   onView,
   index,
+  physicians = [],
   onSave,
   onDismiss,
   onDraft,
@@ -36,10 +42,12 @@ export function LeadCard({
   lead: Lead;
   onView: (lead: Lead) => void;
   index: number;
+  physicians?: LeadPhysician[];
   onSave?: () => void;
   onDismiss?: () => void;
   onDraft?: () => void;
 }) {
+  const [showDocs, setShowDocs] = useState(false);
   const meta = sourceMeta[lead.source] ?? { label: lead.source, cls: "bg-surface-3 text-foreground border-border" };
   const conf = confidenceColor(lead.confidence);
   return (
@@ -99,6 +107,50 @@ export function LeadCard({
           </span>
         ))}
       </div>
+
+      {/* Physicians */}
+      {physicians.length > 0 && (
+        <div className="mb-3 rounded-md border border-border/60 bg-surface/60 p-2">
+          <button
+            type="button"
+            onClick={() => setShowDocs((v) => !v)}
+            className="flex w-full items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
+          >
+            <UserRound className="h-3 w-3" />
+            {physicians.length} Physician{physicians.length > 1 ? "s" : ""}
+            <ChevronDown className={`ml-auto h-3 w-3 transition-transform ${showDocs ? "rotate-180" : ""}`} />
+          </button>
+          {showDocs && (
+            <ul className="mt-2 space-y-1.5">
+              {physicians.slice(0, 6).map((p) => (
+                <li key={p.npi} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+                  <span className="font-medium text-foreground">
+                    {p.full_name}
+                    {p.credentials ? `, ${p.credentials}` : ""}
+                  </span>
+                  {p.primary_specialty && (
+                    <span className="text-muted-foreground">· {p.primary_specialty}</span>
+                  )}
+                  {(p.practice_city || p.practice_state) && (
+                    <span className="text-muted-foreground">
+                      · {[p.practice_city, p.practice_state].filter(Boolean).join(", ")}
+                    </span>
+                  )}
+                  {p.practice_phone && (
+                    <a
+                      href={`tel:${p.practice_phone}`}
+                      className="ml-auto flex items-center gap-1 text-primary hover:underline"
+                    >
+                      <Phone className="h-3 w-3" />
+                      {p.practice_phone}
+                    </a>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {/* Actions */}
       <div className="flex flex-wrap items-center gap-2">

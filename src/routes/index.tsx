@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { RefreshCw, TrendingUp, Bookmark, BarChart3, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
-import { listLeads, triggerIngestion, setLeadAction, listLeadActions, getRecentIngestionRuns } from "@/lib/leads.functions";
+import { listLeads, triggerIngestion, setLeadAction, listLeadActions, getRecentIngestionRuns, listLeadPhysicians, type LeadPhysician } from "@/lib/leads.functions";
 import { rowToLead, type Lead, type LeadRow } from "@/data/leads";
 import { SummaryCard } from "@/components/dashboard/SummaryCard";
 import { FilterBar, emptyFilters, type Filters } from "@/components/dashboard/FilterBar";
@@ -35,6 +35,7 @@ function Dashboard() {
   const fetchLeads = useServerFn(listLeads);
   const fetchActions = useServerFn(listLeadActions);
   const fetchRuns = useServerFn(getRecentIngestionRuns);
+  const fetchPhysicians = useServerFn(listLeadPhysicians);
   const runIngest = useServerFn(triggerIngestion);
   const actionFn = useServerFn(setLeadAction);
 
@@ -51,6 +52,19 @@ function Dashboard() {
     queryFn: () => fetchRuns(),
     refetchInterval: 30_000,
   });
+  const physiciansQ = useQuery({
+    queryKey: ["lead_physicians"],
+    queryFn: () => fetchPhysicians(),
+  });
+  const physiciansByLead = useMemo(() => {
+    const map = new Map<string, LeadPhysician[]>();
+    for (const p of physiciansQ.data ?? []) {
+      const arr = map.get(p.lead_id) ?? [];
+      arr.push(p);
+      map.set(p.lead_id, arr);
+    }
+    return map;
+  }, [physiciansQ.data]);
 
   const ingest = useMutation({
     mutationFn: () => runIngest(),
@@ -61,6 +75,7 @@ function Dashboard() {
       toast.success(`Found ${total} new leads · enriched ${enriched}`, { id: "ingest" });
       qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["ingestion_runs"] });
+      qc.invalidateQueries({ queryKey: ["lead_physicians"] });
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Ingestion failed", { id: "ingest" }),
   });
@@ -144,6 +159,17 @@ function Dashboard() {
           >
             <BarChart3 className="h-3.5 w-3.5" /> Pipeline
           </Link>
+          <span
+            className="hidden cursor-help rounded-md border border-border bg-surface-2 px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground md:inline-block"
+            title={
+              "Auto-refresh: 7am + 1pm PT\n" +
+              "Per refresh: 20–60 new leads\n" +
+              "Per week: 200–400 new leads\n" +
+              "Worth opening (conf ≥75): 50–100/wk"
+            }
+          >
+            2× daily
+          </span>
           <button
             onClick={() => setSearchesOpen(true)}
             className="hidden items-center gap-1.5 rounded-md border border-border bg-surface-2 px-3 py-1.5 text-xs font-medium text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground md:flex"
@@ -233,6 +259,7 @@ function Dashboard() {
                       key={lead.id}
                       lead={lead}
                       index={i}
+                      physicians={physiciansByLead.get(lead.id) ?? []}
                       onView={setActive}
                       onSave={() => act.mutate({ lead_id: lead.id, action: "saved" })}
                       onDismiss={() => act.mutate({ lead_id: lead.id, action: "dismissed" })}

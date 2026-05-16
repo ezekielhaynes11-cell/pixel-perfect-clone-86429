@@ -383,3 +383,60 @@ export const getRecentIngestionRuns = createServerFn({ method: "GET" }).handler(
   if (error) throw new Error(error.message);
   return data ?? [];
 });
+
+/* -------------------- Physician contacts -------------------- */
+
+export interface LeadPhysician {
+  lead_id: string;
+  role: string;
+  match_confidence: number;
+  npi: string;
+  full_name: string;
+  credentials: string | null;
+  primary_specialty: string | null;
+  practice_city: string | null;
+  practice_state: string | null;
+  practice_phone: string | null;
+  practice_address: string | null;
+  practice_zip: string | null;
+}
+
+export const listLeadPhysicians = createServerFn({ method: "GET" }).handler(async (): Promise<LeadPhysician[]> => {
+  const { data, error } = await supabaseAdmin
+    .from("lead_physicians")
+    .select(
+      "lead_id, role, match_confidence, physician_contacts!inner(npi, full_name, credentials, primary_specialty, practice_city, practice_state, practice_phone, practice_address, practice_zip)",
+    )
+    .limit(2000);
+  if (error) throw new Error(error.message);
+  type Row = {
+    lead_id: string;
+    role: string;
+    match_confidence: number;
+    physician_contacts: {
+      npi: string;
+      full_name: string;
+      credentials: string | null;
+      primary_specialty: string | null;
+      practice_city: string | null;
+      practice_state: string | null;
+      practice_phone: string | null;
+      practice_address: string | null;
+      practice_zip: string | null;
+    };
+  };
+  return ((data ?? []) as unknown as Row[]).map((r) => ({
+    lead_id: r.lead_id,
+    role: r.role,
+    match_confidence: r.match_confidence,
+    npi: r.physician_contacts.npi,
+    full_name: r.physician_contacts.full_name,
+    credentials: r.physician_contacts.credentials,
+    primary_specialty: r.physician_contacts.primary_specialty,
+    practice_city: r.physician_contacts.practice_city,
+    practice_state: r.physician_contacts.practice_state,
+    practice_phone: r.physician_contacts.practice_phone,
+    practice_address: r.physician_contacts.practice_address,
+    practice_zip: r.physician_contacts.practice_zip,
+  }));
+});
