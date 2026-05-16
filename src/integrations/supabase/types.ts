@@ -154,6 +154,41 @@ export type Database = {
           },
         ]
       }
+      lead_physicians: {
+        Row: {
+          created_at: string
+          id: string
+          lead_id: string
+          match_confidence: number
+          npi: string
+          role: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          lead_id: string
+          match_confidence?: number
+          npi: string
+          role?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          lead_id?: string
+          match_confidence?: number
+          npi?: string
+          role?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lead_physicians_npi_fkey"
+            columns: ["npi"]
+            isOneToOne: false
+            referencedRelation: "physician_contacts"
+            referencedColumns: ["npi"]
+          },
+        ]
+      }
       leads: {
         Row: {
           competitor_incumbent: string | null
@@ -260,6 +295,48 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      physician_contacts: {
+        Row: {
+          created_at: string
+          credentials: string | null
+          full_name: string
+          last_verified_at: string
+          npi: string
+          practice_address: string | null
+          practice_city: string | null
+          practice_phone: string | null
+          practice_state: string | null
+          practice_zip: string | null
+          primary_specialty: string | null
+        }
+        Insert: {
+          created_at?: string
+          credentials?: string | null
+          full_name: string
+          last_verified_at?: string
+          npi: string
+          practice_address?: string | null
+          practice_city?: string | null
+          practice_phone?: string | null
+          practice_state?: string | null
+          practice_zip?: string | null
+          primary_specialty?: string | null
+        }
+        Update: {
+          created_at?: string
+          credentials?: string | null
+          full_name?: string
+          last_verified_at?: string
+          npi?: string
+          practice_address?: string | null
+          practice_city?: string | null
+          practice_phone?: string | null
+          practice_state?: string | null
+          practice_zip?: string | null
+          primary_specialty?: string | null
+        }
+        Relationships: []
       }
       profiles: {
         Row: {
