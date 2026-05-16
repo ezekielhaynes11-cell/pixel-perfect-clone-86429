@@ -1,7 +1,8 @@
 // Shared-password gate for the single-user app.
 // Stored secret: APP_PASSWORD. If unset, the gate is disabled (open access).
 
-import { createMiddleware, getRequestHeader, setResponseHeaders } from "@tanstack/react-start/server";
+import { createMiddleware } from "@tanstack/react-start";
+import { getRequestHeader, setResponseHeaders } from "@tanstack/react-start/server";
 
 const COOKIE_NAME = "ya_unlock";
 
