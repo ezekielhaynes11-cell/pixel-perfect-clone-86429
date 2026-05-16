@@ -5,7 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { RefreshCw, TrendingUp, Bookmark, BarChart3, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { listLeads, triggerIngestion, setLeadAction, listLeadActions, getRecentIngestionRuns, listLeadPhysicians, type LeadPhysician } from "@/lib/leads.functions";
-import { rowToLead, type Lead, type LeadRow } from "@/data/leads";
+import { rowToLead, leadStateCode, type Lead, type LeadRow } from "@/data/leads";
 import { SummaryCard } from "@/components/dashboard/SummaryCard";
 import { FilterBar, emptyFilters, type Filters } from "@/components/dashboard/FilterBar";
 import { LeadCard } from "@/components/dashboard/LeadCard";
@@ -124,6 +124,16 @@ function Dashboard() {
         if (filters.specialties.length && (!l.specialty || !filters.specialties.includes(l.specialty))) return false;
         if (filters.sources.length && !filters.sources.includes(l.source)) return false;
         if (l.confidence < filters.minConfidence) return false;
+        if (filters.signalTypes.length && (!l.signalType || !filters.signalTypes.includes(l.signalType as never))) return false;
+        if (filters.accountTypes.length && (!l.accountType || !filters.accountTypes.includes(l.accountType as never))) return false;
+        if (filters.vendors.length) {
+          const hay = [...l.vendorMentions, l.competitorIncumbent ?? ""].join(" ").toLowerCase();
+          if (!filters.vendors.some((v) => hay.includes(v.toLowerCase()))) return false;
+        }
+        if (filters.states.length) {
+          const code = leadStateCode(l);
+          if (!code || !filters.states.includes(code)) return false;
+        }
         return true;
       }),
     [visibleLeads, filters],
