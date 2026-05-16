@@ -11,6 +11,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { type Lead, timeAgo } from "@/data/leads";
 import type { LeadPhysician } from "@/lib/leads.functions";
 
@@ -186,6 +187,16 @@ export function LeadCard({
           <XCircle className="h-3.5 w-3.5" />
           Dismiss
         </button>
+        {lead.accountId && (
+          <Link
+            to="/accounts/$id"
+            params={{ id: lead.accountId }}
+            className="flex h-8 items-center gap-1.5 rounded-sm border border-border px-3 text-xs text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground"
+          >
+            <Building2 className="h-3.5 w-3.5" />
+            View account
+          </Link>
+        )}
         <a
           href={lead.sourceUrl}
           target="_blank"

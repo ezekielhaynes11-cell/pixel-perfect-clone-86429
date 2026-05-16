@@ -159,6 +159,10 @@ const FilterSchema = z.object({
   hospitals: z.array(z.string()).default([]),
   specialties: z.array(z.string()).default([]),
   sources: z.array(z.string()).default([]),
+  signalTypes: z.array(z.string()).default([]),
+  accountTypes: z.array(z.string()).default([]),
+  vendors: z.array(z.string()).default([]),
+  states: z.array(z.string()).default([]),
   minConfidence: z.number().min(0).max(100).default(0),
 });
 

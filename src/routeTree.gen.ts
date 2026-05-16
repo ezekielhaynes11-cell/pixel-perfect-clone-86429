@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as PipelineRouteImport } from './routes/pipeline'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SettingsKeywordsRouteImport } from './routes/settings.keywords'
+import { Route as AccountsIdRouteImport } from './routes/accounts.$id'
 import { Route as ApiPublicIngestRouteImport } from './routes/api/public/ingest'
 
 const PipelineRoute = PipelineRouteImport.update({
@@ -29,6 +30,11 @@ const SettingsKeywordsRoute = SettingsKeywordsRouteImport.update({
   path: '/settings/keywords',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AccountsIdRoute = AccountsIdRouteImport.update({
+  id: '/accounts/$id',
+  path: '/accounts/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicIngestRoute = ApiPublicIngestRouteImport.update({
   id: '/api/public/ingest',
   path: '/api/public/ingest',
@@ -38,12 +44,14 @@ const ApiPublicIngestRoute = ApiPublicIngestRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/pipeline': typeof PipelineRoute
+  '/accounts/$id': typeof AccountsIdRoute
   '/settings/keywords': typeof SettingsKeywordsRoute
   '/api/public/ingest': typeof ApiPublicIngestRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/pipeline': typeof PipelineRoute
+  '/accounts/$id': typeof AccountsIdRoute
   '/settings/keywords': typeof SettingsKeywordsRoute
   '/api/public/ingest': typeof ApiPublicIngestRoute
 }
@@ -51,18 +59,30 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/pipeline': typeof PipelineRoute
+  '/accounts/$id': typeof AccountsIdRoute
   '/settings/keywords': typeof SettingsKeywordsRoute
   '/api/public/ingest': typeof ApiPublicIngestRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/pipeline' | '/settings/keywords' | '/api/public/ingest'
+  fullPaths:
+    | '/'
+    | '/pipeline'
+    | '/accounts/$id'
+    | '/settings/keywords'
+    | '/api/public/ingest'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/pipeline' | '/settings/keywords' | '/api/public/ingest'
+  to:
+    | '/'
+    | '/pipeline'
+    | '/accounts/$id'
+    | '/settings/keywords'
+    | '/api/public/ingest'
   id:
     | '__root__'
     | '/'
     | '/pipeline'
+    | '/accounts/$id'
     | '/settings/keywords'
     | '/api/public/ingest'
   fileRoutesById: FileRoutesById
@@ -70,6 +90,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   PipelineRoute: typeof PipelineRoute
+  AccountsIdRoute: typeof AccountsIdRoute
   SettingsKeywordsRoute: typeof SettingsKeywordsRoute
   ApiPublicIngestRoute: typeof ApiPublicIngestRoute
 }
@@ -97,6 +118,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsKeywordsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/accounts/$id': {
+      id: '/accounts/$id'
+      path: '/accounts/$id'
+      fullPath: '/accounts/$id'
+      preLoaderRoute: typeof AccountsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/ingest': {
       id: '/api/public/ingest'
       path: '/api/public/ingest'
@@ -110,6 +138,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   PipelineRoute: PipelineRoute,
+  AccountsIdRoute: AccountsIdRoute,
   SettingsKeywordsRoute: SettingsKeywordsRoute,
   ApiPublicIngestRoute: ApiPublicIngestRoute,
 }
