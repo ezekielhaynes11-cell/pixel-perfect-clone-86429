@@ -2,7 +2,7 @@ import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { RefreshCw, LogOut, TrendingUp } from "lucide-react";
+import { RefreshCw, LogOut, TrendingUp, Bookmark, BarChart3 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
@@ -13,6 +13,9 @@ import { FilterBar, emptyFilters, type Filters } from "@/components/dashboard/Fi
 import { LeadCard } from "@/components/dashboard/LeadCard";
 import { LeadDetailModal } from "@/components/dashboard/LeadDetailModal";
 import { Sidebar } from "@/components/dashboard/Sidebar";
+import { OutreachDraftDialog } from "@/components/dashboard/OutreachDraftDialog";
+import { SavedSearchesDrawer } from "@/components/dashboard/SavedSearchesDrawer";
+import { AlertsBell } from "@/components/dashboard/AlertsBell";
 
 export const Route = createFileRoute("/")({
   head: () => ({
