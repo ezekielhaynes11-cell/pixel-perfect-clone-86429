@@ -30,8 +30,12 @@ function PipelinePage() {
     enabled: !!user,
   });
 
-  if (loading) return <div className="grid min-h-screen place-items-center text-muted-foreground">Loading…</div>;
-  if (!user) throw redirect({ to: "/login" });
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (!loading && !user) navigate({ to: "/login" });
+  }, [loading, user, navigate]);
+
+  if (loading || !user) return <div className="grid min-h-screen place-items-center text-muted-foreground">Loading…</div>;
 
   const d = q.data;
   return (
