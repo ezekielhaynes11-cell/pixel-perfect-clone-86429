@@ -7,7 +7,7 @@ import {
   X,
   Check,
 } from "lucide-react";
-import { hospitals, specialties, sources, type LeadSource } from "@/data/leads";
+import { sources, type LeadSource } from "@/data/leads";
 
 export interface Filters {
   hospitals: string[];
@@ -124,9 +124,13 @@ function FilterButton({
 export function FilterBar({
   filters,
   onChange,
+  hospitals,
+  specialties,
 }: {
   filters: Filters;
   onChange: (f: Filters) => void;
+  hospitals: string[];
+  specialties: string[];
 }) {
   const [open, setOpen] = useState<string | null>(null);
   const anyActive =

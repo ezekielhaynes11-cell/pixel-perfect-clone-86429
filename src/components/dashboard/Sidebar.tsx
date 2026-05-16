@@ -2,16 +2,16 @@ import { TrendingUp, Building2, PieChart } from "lucide-react";
 import type { Lead } from "@/data/leads";
 
 export function Sidebar({ leads }: { leads: Lead[] }) {
-  // Top opportunity type
   const typeCounts = leads.reduce<Record<string, number>>((acc, l) => {
-    acc[l.specialty] = (acc[l.specialty] || 0) + 1;
+    const k = l.specialty ?? "Unknown";
+    acc[k] = (acc[k] || 0) + 1;
     return acc;
   }, {});
   const topType = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0];
 
-  // Most mentioned hospital
   const hospitalCounts = leads.reduce<Record<string, number>>((acc, l) => {
-    acc[l.hospital] = (acc[l.hospital] || 0) + 1;
+    const k = l.hospital ?? "Unknown";
+    acc[k] = (acc[k] || 0) + 1;
     return acc;
   }, {});
   const topHospital = Object.entries(hospitalCounts).sort((a, b) => b[1] - a[1])[0];

@@ -14,16 +14,349 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      alerts: {
+        Row: {
+          created_at: string
+          id: string
+          lead_id: string
+          read_at: string | null
+          saved_search_id: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          lead_id: string
+          read_at?: string | null
+          saved_search_id?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          lead_id?: string
+          read_at?: string | null
+          saved_search_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "alerts_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "alerts_saved_search_id_fkey"
+            columns: ["saved_search_id"]
+            isOneToOne: false
+            referencedRelation: "saved_searches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      briefings: {
+        Row: {
+          created_at: string
+          date: string
+          id: string
+          markdown: string
+          top_lead_ids: string[]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          date?: string
+          id?: string
+          markdown: string
+          top_lead_ids?: string[]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          date?: string
+          id?: string
+          markdown?: string
+          top_lead_ids?: string[]
+          user_id?: string
+        }
+        Relationships: []
+      }
+      ingestion_runs: {
+        Row: {
+          enriched_count: number
+          error: string | null
+          fetched_count: number
+          finished_at: string | null
+          id: string
+          new_count: number
+          source: string
+          started_at: string
+          status: string
+        }
+        Insert: {
+          enriched_count?: number
+          error?: string | null
+          fetched_count?: number
+          finished_at?: string | null
+          id?: string
+          new_count?: number
+          source: string
+          started_at?: string
+          status?: string
+        }
+        Update: {
+          enriched_count?: number
+          error?: string | null
+          fetched_count?: number
+          finished_at?: string | null
+          id?: string
+          new_count?: number
+          source?: string
+          started_at?: string
+          status?: string
+        }
+        Relationships: []
+      }
+      lead_actions: {
+        Row: {
+          action: string
+          created_at: string
+          id: string
+          lead_id: string
+          note: string | null
+          user_id: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          id?: string
+          lead_id: string
+          note?: string | null
+          user_id: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          id?: string
+          lead_id?: string
+          note?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lead_actions_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      leads: {
+        Row: {
+          competitor_incumbent: string | null
+          confidence: number
+          created_at: string
+          date_discovered: string
+          date_ingested: string
+          enriched: boolean
+          entities: Json
+          estimated_value_usd: number | null
+          hospital: string | null
+          id: string
+          priority: string
+          raw_payload: Json | null
+          source: string
+          source_external_id: string
+          source_url: string | null
+          specialty: string | null
+          summary: string | null
+          territory: string | null
+          title: string
+          updated_at: string
+          win_probability: number | null
+        }
+        Insert: {
+          competitor_incumbent?: string | null
+          confidence?: number
+          created_at?: string
+          date_discovered?: string
+          date_ingested?: string
+          enriched?: boolean
+          entities?: Json
+          estimated_value_usd?: number | null
+          hospital?: string | null
+          id?: string
+          priority?: string
+          raw_payload?: Json | null
+          source: string
+          source_external_id: string
+          source_url?: string | null
+          specialty?: string | null
+          summary?: string | null
+          territory?: string | null
+          title: string
+          updated_at?: string
+          win_probability?: number | null
+        }
+        Update: {
+          competitor_incumbent?: string | null
+          confidence?: number
+          created_at?: string
+          date_discovered?: string
+          date_ingested?: string
+          enriched?: boolean
+          entities?: Json
+          estimated_value_usd?: number | null
+          hospital?: string | null
+          id?: string
+          priority?: string
+          raw_payload?: Json | null
+          source?: string
+          source_external_id?: string
+          source_url?: string | null
+          specialty?: string | null
+          summary?: string | null
+          territory?: string | null
+          title?: string
+          updated_at?: string
+          win_probability?: number | null
+        }
+        Relationships: []
+      }
+      outreach_drafts: {
+        Row: {
+          body: string
+          created_at: string
+          id: string
+          lead_id: string
+          subject: string
+          user_id: string
+        }
+        Insert: {
+          body: string
+          created_at?: string
+          id?: string
+          lead_id: string
+          subject: string
+          user_id: string
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          id?: string
+          lead_id?: string
+          subject?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "outreach_drafts_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          display_name: string | null
+          email: string | null
+          id: string
+          territory: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          display_name?: string | null
+          email?: string | null
+          id?: string
+          territory?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string | null
+          email?: string | null
+          id?: string
+          territory?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      saved_searches: {
+        Row: {
+          alert_threshold: number
+          alerts_enabled: boolean
+          created_at: string
+          filter: Json
+          id: string
+          name: string
+          user_id: string
+        }
+        Insert: {
+          alert_threshold?: number
+          alerts_enabled?: boolean
+          created_at?: string
+          filter?: Json
+          id?: string
+          name: string
+          user_id: string
+        }
+        Update: {
+          alert_threshold?: number
+          alerts_enabled?: boolean
+          created_at?: string
+          filter?: Json
+          id?: string
+          name?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "rep"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +483,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "rep"],
+    },
   },
 } as const

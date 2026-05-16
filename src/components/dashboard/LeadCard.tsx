@@ -10,11 +10,11 @@ import {
 import { type Lead, timeAgo } from "@/data/leads";
 
 const sourceMeta: Record<string, { label: string; cls: string }> = {
+  sam_gov: { label: "SAM.gov", cls: "bg-blue-500/15 text-blue-300 border-blue-500/30" },
+  openfda: { label: "FDA Recall", cls: "bg-red-500/15 text-red-300 border-red-500/30" },
+  gdelt: { label: "News", cls: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
   reddit: { label: "Reddit", cls: "bg-orange-500/15 text-orange-300 border-orange-500/30" },
-  government: { label: "Government", cls: "bg-blue-500/15 text-blue-300 border-blue-500/30" },
   news: { label: "News", cls: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
-  recalls: { label: "FDA Recall", cls: "bg-red-500/15 text-red-300 border-red-500/30" },
-  linkedin: { label: "LinkedIn", cls: "bg-sky-500/15 text-sky-300 border-sky-500/30" },
 };
 
 function confidenceColor(c: number) {
@@ -27,12 +27,16 @@ export function LeadCard({
   lead,
   onView,
   index,
+  onSave,
+  onDismiss,
 }: {
   lead: Lead;
   onView: (lead: Lead) => void;
   index: number;
+  onSave?: () => void;
+  onDismiss?: () => void;
 }) {
-  const meta = sourceMeta[lead.source];
+  const meta = sourceMeta[lead.source] ?? { label: lead.source, cls: "bg-surface-3 text-foreground border-border" };
   const conf = confidenceColor(lead.confidence);
   return (
     <article
@@ -65,14 +69,23 @@ export function LeadCard({
 
       {/* Entity chips */}
       <div className="mb-3 flex flex-wrap gap-1.5">
-        <span className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[11px] text-foreground/80">
-          <Building2 className="h-3 w-3 text-muted-foreground" />
-          {lead.hospital}
-        </span>
-        <span className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[11px] text-foreground/80">
-          <Stethoscope className="h-3 w-3 text-muted-foreground" />
-          {lead.specialty}
-        </span>
+        {lead.hospital && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[11px] text-foreground/80">
+            <Building2 className="h-3 w-3 text-muted-foreground" />
+            {lead.hospital}
+          </span>
+        )}
+        {lead.specialty && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[11px] text-foreground/80">
+            <Stethoscope className="h-3 w-3 text-muted-foreground" />
+            {lead.specialty}
+          </span>
+        )}
+        {lead.estimatedValueUsd != null && (
+          <span className="rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[11px] text-success">
+            Est. {lead.estimatedValueUsd >= 1e6 ? `$${(lead.estimatedValueUsd / 1e6).toFixed(1)}M` : `$${Math.round(lead.estimatedValueUsd / 1000)}k`}
+          </span>
+        )}
         {lead.entities.keywords.slice(0, 2).map((k) => (
           <span
             key={k}

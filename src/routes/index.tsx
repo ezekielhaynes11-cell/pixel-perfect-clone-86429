@@ -1,53 +1,156 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { DashboardHeader } from "@/components/dashboard/Header";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
+import { RefreshCw, LogOut, TrendingUp } from "lucide-react";
+import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/use-auth";
+import { listLeads, triggerIngestion, setLeadAction, listLeadActions } from "@/lib/leads.functions";
+import { rowToLead, type Lead, type LeadRow } from "@/data/leads";
 import { SummaryCard } from "@/components/dashboard/SummaryCard";
 import { FilterBar, emptyFilters, type Filters } from "@/components/dashboard/FilterBar";
 import { LeadCard } from "@/components/dashboard/LeadCard";
 import { LeadDetailModal } from "@/components/dashboard/LeadDetailModal";
 import { Sidebar } from "@/components/dashboard/Sidebar";
-import { leads as allLeads, type Lead } from "@/data/leads";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       { title: "Yield Architect — Phillips Sales Intelligence" },
-      {
-        name: "description",
-        content:
-          "AI-powered medical device sales intelligence dashboard for Phillips field reps.",
-      },
+      { name: "description", content: "Live AI-powered medical device sales intelligence." },
     ],
   }),
   component: Dashboard,
 });
 
 function Dashboard() {
+  const { user, loading } = useAuth();
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [active, setActive] = useState<Lead | null>(null);
+  const qc = useQueryClient();
+  const fetchLeads = useServerFn(listLeads);
+  const fetchActions = useServerFn(listLeadActions);
+  const runIngest = useServerFn(triggerIngestion);
+  const actionFn = useServerFn(setLeadAction);
 
-  const filtered = useMemo(() => {
-    return allLeads.filter((l) => {
-      if (filters.hospitals.length && !filters.hospitals.includes(l.hospital)) return false;
-      if (filters.specialties.length && !filters.specialties.includes(l.specialty)) return false;
-      if (filters.sources.length && !filters.sources.includes(l.source)) return false;
-      if (l.confidence < filters.minConfidence) return false;
-      return true;
-    });
-  }, [filters]);
+  const leadsQ = useQuery({
+    queryKey: ["leads"],
+    queryFn: () => fetchLeads(),
+    enabled: !!user,
+  });
+  const actionsQ = useQuery({
+    queryKey: ["lead_actions"],
+    queryFn: () => fetchActions(),
+    enabled: !!user,
+  });
 
-  const highPriority = allLeads.filter((l) => l.priority === "high").length;
+  const ingest = useMutation({
+    mutationFn: () => runIngest(),
+    onMutate: () => toast.loading("Scanning live sources…", { id: "ingest" }),
+    onSuccess: (summaries) => {
+      const total = summaries.reduce((a, s) => a + s.inserted, 0);
+      const enriched = summaries.reduce((a, s) => a + s.enriched, 0);
+      toast.success(`Found ${total} new leads · enriched ${enriched}`, { id: "ingest" });
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Ingestion failed", { id: "ingest" }),
+  });
+
+  const act = useMutation({
+    mutationFn: (input: { lead_id: string; action: "saved" | "dismissed" | "pushed_sfdc"; remove?: boolean }) =>
+      actionFn({ data: input }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["lead_actions"] }),
+  });
+
+  const leads: Lead[] = useMemo(
+    () => (leadsQ.data ?? []).map((r) => rowToLead(r as LeadRow)),
+    [leadsQ.data],
+  );
+  const dismissedIds = new Set(
+    (actionsQ.data ?? []).filter((a) => a.action === "dismissed").map((a) => a.lead_id),
+  );
+  const visibleLeads = leads.filter((l) => !dismissedIds.has(l.id));
+
+  const hospitals = useMemo(
+    () => Array.from(new Set(visibleLeads.map((l) => l.hospital).filter((x): x is string => !!x))).sort(),
+    [visibleLeads],
+  );
+  const specialties = useMemo(
+    () => Array.from(new Set(visibleLeads.map((l) => l.specialty).filter((x): x is string => !!x))).sort(),
+    [visibleLeads],
+  );
+
+  const filtered = useMemo(
+    () =>
+      visibleLeads.filter((l) => {
+        if (filters.hospitals.length && (!l.hospital || !filters.hospitals.includes(l.hospital))) return false;
+        if (filters.specialties.length && (!l.specialty || !filters.specialties.includes(l.specialty))) return false;
+        if (filters.sources.length && !filters.sources.includes(l.source)) return false;
+        if (l.confidence < filters.minConfidence) return false;
+        return true;
+      }),
+    [visibleLeads, filters],
+  );
+
+  const highPriority = visibleLeads.filter((l) => l.priority === "high").length;
+  const pipelineUsd = visibleLeads.reduce(
+    (s, l) => s + (l.estimatedValueUsd ?? 0) * (l.winProbability ?? 0),
+    0,
+  );
+
+  if (loading) {
+    return <div className="grid min-h-screen place-items-center text-muted-foreground">Loading…</div>;
+  }
+  if (!user) {
+    throw redirect({ to: "/login" });
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <DashboardHeader />
+      <header className="sticky top-0 z-40 h-16 border-b border-border bg-background/95 backdrop-blur">
+        <div className="mx-auto flex h-full max-w-[1600px] items-center gap-4 px-6">
+          <div className="font-display text-base font-bold tracking-tight">
+            ⚡ Yield Architect
+            <span className="ml-2 hidden rounded-sm bg-surface-2 px-1.5 py-0.5 font-sans text-[10px] uppercase tracking-wider text-muted-foreground sm:inline">
+              Phillips Medical
+            </span>
+          </div>
+          <div className="flex-1" />
+          <div className="hidden items-center gap-1.5 text-xs text-muted-foreground md:flex">
+            <TrendingUp className="h-3.5 w-3.5 text-success" />
+            Weighted pipeline:{" "}
+            <span className="font-semibold text-foreground">
+              {pipelineUsd >= 1e6 ? `$${(pipelineUsd / 1e6).toFixed(1)}M` : `$${Math.round(pipelineUsd / 1000)}k`}
+            </span>
+          </div>
+          <button
+            onClick={() => ingest.mutate()}
+            disabled={ingest.isPending}
+            className="flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${ingest.isPending ? "animate-spin" : ""}`} />
+            {ingest.isPending ? "Scanning…" : "Refresh feed"}
+          </button>
+          <button
+            onClick={async () => {
+              await supabase.auth.signOut();
+              window.location.href = "/login";
+            }}
+            className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground"
+            title="Sign out"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
+        </div>
+      </header>
 
       <main className="mx-auto max-w-[1600px] px-6 py-6">
-        <SummaryCard total={allLeads.length} highPriority={highPriority} />
+        <SummaryCard total={visibleLeads.length} highPriority={highPriority} />
 
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
           <div>
-            <FilterBar filters={filters} onChange={setFilters} />
+            <FilterBar filters={filters} onChange={setFilters} hospitals={hospitals} specialties={specialties} />
 
             <div className="mb-3 flex items-center justify-between">
               <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-muted-foreground">
@@ -56,35 +159,44 @@ function Dashboard() {
                   {filtered.length}
                 </span>
               </h2>
-              <div className="text-xs text-muted-foreground">
-                Sorted by confidence · newest first
-              </div>
+              <div className="text-xs text-muted-foreground">Sorted by confidence</div>
             </div>
 
-            <div className="space-y-3">
-              {filtered.length === 0 ? (
-                <div className="rounded-md border border-dashed border-border p-12 text-center text-sm text-muted-foreground">
-                  No leads match your filters.
-                </div>
-              ) : (
-                filtered
+            {leadsQ.isLoading ? (
+              <div className="rounded-md border border-dashed border-border p-12 text-center text-sm text-muted-foreground">
+                Loading leads…
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="rounded-md border border-dashed border-border p-12 text-center text-sm text-muted-foreground">
+                {leads.length === 0
+                  ? 'No leads yet. Click "Refresh feed" to pull live signals from SAM.gov, FDA, and news.'
+                  : "No leads match your filters."}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {filtered
                   .slice()
                   .sort((a, b) => b.confidence - a.confidence)
                   .map((lead, i) => (
-                    <LeadCard key={lead.id} lead={lead} index={i} onView={setActive} />
-                  ))
-              )}
-            </div>
+                    <LeadCard
+                      key={lead.id}
+                      lead={lead}
+                      index={i}
+                      onView={setActive}
+                      onSave={() => act.mutate({ lead_id: lead.id, action: "saved" })}
+                      onDismiss={() => act.mutate({ lead_id: lead.id, action: "dismissed" })}
+                    />
+                  ))}
+              </div>
+            )}
           </div>
 
-          <Sidebar leads={filtered.length ? filtered : allLeads} />
+          <Sidebar leads={filtered.length ? filtered : visibleLeads} />
         </div>
 
         <footer className="mt-12 flex flex-wrap items-center justify-between border-t border-border pt-4 text-xs text-muted-foreground">
-          <span>Last sync: 6:00 AM PST · Next refresh in 23:42</span>
-          <span>
-            Yield Architect v1.0 · <a href="#" className="hover:text-primary">Support</a>
-          </span>
+          <span>Live data from SAM.gov · openFDA · GDELT · Enriched by Lovable AI</span>
+          <Link to="/login" className="hover:text-primary">{user.email}</Link>
         </footer>
       </main>
 
