@@ -5,7 +5,23 @@ import { fetchSamGov } from "./sam-gov.server";
 import { fetchClinicalTrials } from "./clinicaltrials.server";
 import { fetchCmsOpenPayments } from "./cms-open-payments.server";
 import { enrichRawLead } from "./enrich.server";
+import { attachPhysiciansToLead, type PhysicianLookupInput } from "./nppes.server";
 import type { RawLead } from "./types";
+
+// Map US state name → 2-letter code for NPPES name lookups
+const STATE_TO_CODE: Record<string, string> = {
+  alabama: "AL", alaska: "AK", arizona: "AZ", arkansas: "AR", california: "CA",
+  colorado: "CO", connecticut: "CT", delaware: "DE", florida: "FL", georgia: "GA",
+  hawaii: "HI", idaho: "ID", illinois: "IL", indiana: "IN", iowa: "IA",
+  kansas: "KS", kentucky: "KY", louisiana: "LA", maine: "ME", maryland: "MD",
+  massachusetts: "MA", michigan: "MI", minnesota: "MN", mississippi: "MS", missouri: "MO",
+  montana: "MT", nebraska: "NE", nevada: "NV", "new hampshire": "NH", "new jersey": "NJ",
+  "new mexico": "NM", "new york": "NY", "north carolina": "NC", "north dakota": "ND",
+  ohio: "OH", oklahoma: "OK", oregon: "OR", pennsylvania: "PA", "rhode island": "RI",
+  "south carolina": "SC", "south dakota": "SD", tennessee: "TN", texas: "TX", utah: "UT",
+  vermont: "VT", virginia: "VA", washington: "WA", "west virginia": "WV", wisconsin: "WI",
+  wyoming: "WY",
+};
 
 export interface IngestionSummary {
   source: string;
@@ -162,6 +178,36 @@ async function enrichPending(source: string): Promise<string[]> {
         })
         .eq("id", row.id);
       ids.push(row.id);
+
+      // Resolve physicians against NPPES (free public registry).
+      // CMS Open Payments rows carry first/last + state in raw_payload — use that
+      // directly; for all other sources, fall back to AI-extracted physician names.
+      try {
+        const refs: PhysicianLookupInput[] = [];
+        const territory = enriched.territory?.toLowerCase() ?? "";
+        const stateCode =
+          STATE_TO_CODE[territory] ?? (territory.length === 2 ? territory.toUpperCase() : null);
+
+        if (source === "cms_open_payments") {
+          const payload = raw.raw_payload as { rows?: Array<Record<string, string>> } | undefined;
+          const first = payload?.rows?.[0];
+          if (first?.Physician_First_Name && first?.Physician_Last_Name) {
+            refs.push({
+              rawName: `${first.Physician_First_Name} ${first.Physician_Last_Name}`,
+              state: first.Recipient_State ?? stateCode,
+              role: "cms_payment_recipient",
+            });
+          }
+        }
+        for (const name of enriched.entities.physicians ?? []) {
+          refs.push({ rawName: name, state: stateCode, role: "named_in_source" });
+        }
+        if (refs.length > 0) {
+          await attachPhysiciansToLead(row.id, refs);
+        }
+      } catch (e) {
+        console.error("physician enrichment failed:", e instanceof Error ? e.message : e);
+      }
     } catch (e) {
       console.error("enrich failed:", e instanceof Error ? e.message : e);
     }
