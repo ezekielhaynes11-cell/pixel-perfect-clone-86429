@@ -1,49 +1,24 @@
-## Goal
+# Why nothing is showing
 
-Remove the login wall. App opens directly to the dashboard. No sign-in, no `/login`, no Supabase auth in the UI.
+The `leads` table is empty (0 rows) and there are **0 ingestion_runs** ever recorded. The dashboard renders correctly — it shows the "No leads yet. Click Refresh feed…" empty state — but no SAM.gov / FDA / news fetch has been triggered yet, so there is nothing to display.
 
-## Approach
+Clicking **Refresh feed** in the header should populate it. If that already fails silently for you, the plan below also surfaces the failure.
 
-Since this is a single-user internal tool, switch server functions from per-user (RLS-scoped) to **trusted single-owner** using `supabaseAdmin` (service role, bypasses RLS). The data model already has `user_id` columns, so we use a fixed `OWNER_ID` constant on the server for all writes/reads.
+# Plan
 
-## Changes
+1. **Auto-trigger first ingestion on load.** In `src/routes/index.tsx`, when `leadsQ` finishes loading and returns 0 rows AND no ingestion has ever run, fire `ingest.mutate()` once. Guarded by a `useRef` so it never loops.
 
-### 1. Frontend — drop the auth gate
+2. **Surface ingestion errors in-page.** Today errors only go to a toast that disappears. Add a small red banner above the lead feed when `ingest.isError` is true, showing `ingest.error.message` so you can see exactly which source failed (SAM.gov auth, FDA timeout, Lovable AI quota, etc.).
 
-- **`src/routes/index.tsx`**: remove `useAuth`, `useNavigate` redirect effect, and the `loading || !user` guard. Queries run unconditionally (`enabled: true`). Remove the "Sign out" button in the header.
-- **`src/routes/pipeline.tsx`**: same removal.
-- **`src/routes/__root.tsx`**: remove `<AuthProvider>` wrapper.
-- **`src/routes/login.tsx`**: delete the file.
-- **`src/hooks/use-auth.tsx`**: delete (no longer imported).
+3. **Show last ingestion status.** Under the header, render a one-line "Last scan: 2m ago · 12 new · 8 enriched" pulled from `getRecentIngestionRuns` so it's obvious when the feed last ran and whether it succeeded.
 
-### 2. Server functions — use admin client, no auth middleware
+4. **No backend or schema changes.** Server functions, RLS, and ingestion logic stay as-is. Pure frontend wiring.
 
-For each `createServerFn` in `src/lib/leads.functions.ts`, `src/lib/outreach.server.ts` (and any sibling functions file), `src/lib/briefings.server.ts`:
+# Out of scope
 
-- Remove `.middleware([requireSupabaseAuth])`.
-- Replace `context.supabase` with `supabaseAdmin` from `@/integrations/supabase/client.server`.
-- Replace `context.userId` with a single constant `OWNER_ID` (defined once in a new `src/lib/owner.server.ts`, value read from a `OWNER_USER_ID` secret, falling back to a generated UUID written into the existing `profiles` row).
-- `src/lib/ingest/run.server.ts` and ingest helpers: same swap.
+- Scheduled/cron ingestion (can add later via `pg_cron` hitting `/api/public/ingest`).
+- Retrying individual failed sources.
 
-### 3. Database — single owner row
+# Open question
 
-One-time migration to seed an owner profile so `user_id`-typed columns have a valid FK target:
-
-- Insert into `profiles` (and `user_roles` as `admin`) with a fixed UUID. Store that UUID in a new secret `OWNER_USER_ID`.
-- Drop the `handle_new_user()` trigger reliance (no new signups happen). The trigger can stay; it just never fires.
-- RLS policies stay in place — they're simply bypassed by the service role client. No policy edits needed.
-
-### 4. start.ts — drop auth attacher
-
-- Remove `attachSupabaseAuth` from `functionMiddleware` in `src/start.ts` (no longer needed; nothing sends a bearer token).
-
-## Out of scope
-
-- Multi-user, role-based access, or sharing — the tool is explicitly single-user.
-- Public exposure protection: published URL will be open to anyone who knows it. If you want a simple shared-password gate later, that's a separate small task.
-
-## Risk
-
-The published URL becomes fully open. Anyone with the link can view leads, trigger ingestion, and generate AI drafts (each refresh costs Lovable AI credits + SAM.gov quota). Mitigations available later: a single shared password prompt, IP allowlist, or Lovable's site-level password protection.
-
-Confirm and I'll execute.
+Do you want me to **also** trigger an ingestion right now from my side so you can see real data immediately after the code change ships, or just wire the auto-trigger and let it run on your next page load?

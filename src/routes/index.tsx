@@ -1,10 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { RefreshCw, TrendingUp, Bookmark, BarChart3 } from "lucide-react";
+import { RefreshCw, TrendingUp, Bookmark, BarChart3, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
-import { listLeads, triggerIngestion, setLeadAction, listLeadActions } from "@/lib/leads.functions";
+import { listLeads, triggerIngestion, setLeadAction, listLeadActions, getRecentIngestionRuns } from "@/lib/leads.functions";
 import { rowToLead, type Lead, type LeadRow } from "@/data/leads";
 import { SummaryCard } from "@/components/dashboard/SummaryCard";
 import { FilterBar, emptyFilters, type Filters } from "@/components/dashboard/FilterBar";
@@ -34,6 +34,7 @@ function Dashboard() {
   const qc = useQueryClient();
   const fetchLeads = useServerFn(listLeads);
   const fetchActions = useServerFn(listLeadActions);
+  const fetchRuns = useServerFn(getRecentIngestionRuns);
   const runIngest = useServerFn(triggerIngestion);
   const actionFn = useServerFn(setLeadAction);
 
@@ -45,6 +46,11 @@ function Dashboard() {
     queryKey: ["lead_actions"],
     queryFn: () => fetchActions(),
   });
+  const runsQ = useQuery({
+    queryKey: ["ingestion_runs"],
+    queryFn: () => fetchRuns(),
+    refetchInterval: 30_000,
+  });
 
   const ingest = useMutation({
     mutationFn: () => runIngest(),
@@ -54,9 +60,23 @@ function Dashboard() {
       const enriched = summaries.reduce((a, s) => a + s.enriched, 0);
       toast.success(`Found ${total} new leads · enriched ${enriched}`, { id: "ingest" });
       qc.invalidateQueries({ queryKey: ["leads"] });
+      qc.invalidateQueries({ queryKey: ["ingestion_runs"] });
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Ingestion failed", { id: "ingest" }),
   });
+
+  // Auto-trigger first ingestion if the database is empty and nothing has ever run.
+  const autoRanRef = useRef(false);
+  useEffect(() => {
+    if (autoRanRef.current) return;
+    if (leadsQ.isLoading || runsQ.isLoading) return;
+    const noLeads = (leadsQ.data ?? []).length === 0;
+    const noRuns = (runsQ.data ?? []).length === 0;
+    if (noLeads && noRuns && !ingest.isPending) {
+      autoRanRef.current = true;
+      ingest.mutate();
+    }
+  }, [leadsQ.isLoading, leadsQ.data, runsQ.isLoading, runsQ.data, ingest]);
 
   const act = useMutation({
     mutationFn: (input: { lead_id: string; action: "saved" | "dismissed" | "pushed_sfdc"; remove?: boolean }) =>
@@ -145,9 +165,43 @@ function Dashboard() {
       <main className="mx-auto max-w-[1600px] px-6 py-6">
         <SummaryCard total={visibleLeads.length} highPriority={highPriority} />
 
+        {(() => {
+          const last = (runsQ.data ?? [])[0];
+          if (!last) return null;
+          const when = new Date(last.started_at);
+          const mins = Math.max(0, Math.round((Date.now() - when.getTime()) / 60000));
+          const ago = mins < 1 ? "just now" : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
+          const color =
+            last.status === "error"
+              ? "text-destructive"
+              : last.status === "running"
+              ? "text-muted-foreground"
+              : "text-success";
+          return (
+            <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+              <span className={`inline-block h-1.5 w-1.5 rounded-full bg-current ${color}`} />
+              Last scan: {ago} · {last.source} · {last.new_count ?? 0} new · {last.enriched_count ?? 0} enriched
+              {last.status === "error" ? " · failed" : ""}
+            </div>
+          );
+        })()}
+
+        {ingest.isError ? (
+          <div className="mt-3 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <div className="font-semibold">Ingestion failed</div>
+              <div className="text-destructive/80">
+                {ingest.error instanceof Error ? ingest.error.message : String(ingest.error)}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
           <div>
             <FilterBar filters={filters} onChange={setFilters} hospitals={hospitals} specialties={specialties} />
+
 
             <div className="mb-3 flex items-center justify-between">
               <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-muted-foreground">
