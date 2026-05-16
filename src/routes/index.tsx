@@ -60,9 +60,23 @@ function Dashboard() {
       const enriched = summaries.reduce((a, s) => a + s.enriched, 0);
       toast.success(`Found ${total} new leads · enriched ${enriched}`, { id: "ingest" });
       qc.invalidateQueries({ queryKey: ["leads"] });
+      qc.invalidateQueries({ queryKey: ["ingestion_runs"] });
     },
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Ingestion failed", { id: "ingest" }),
   });
+
+  // Auto-trigger first ingestion if the database is empty and nothing has ever run.
+  const autoRanRef = useRef(false);
+  useEffect(() => {
+    if (autoRanRef.current) return;
+    if (leadsQ.isLoading || runsQ.isLoading) return;
+    const noLeads = (leadsQ.data ?? []).length === 0;
+    const noRuns = (runsQ.data ?? []).length === 0;
+    if (noLeads && noRuns && !ingest.isPending) {
+      autoRanRef.current = true;
+      ingest.mutate();
+    }
+  }, [leadsQ.isLoading, leadsQ.data, runsQ.isLoading, runsQ.data, ingest]);
 
   const act = useMutation({
     mutationFn: (input: { lead_id: string; action: "saved" | "dismissed" | "pushed_sfdc"; remove?: boolean }) =>
