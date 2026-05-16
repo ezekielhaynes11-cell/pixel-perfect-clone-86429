@@ -6,13 +6,34 @@ import {
   BarChart3,
   X,
   Check,
+  Zap,
+  Flag,
+  MapPin,
+  Factory,
 } from "lucide-react";
 import { sources, type LeadSource } from "@/data/leads";
+
+export type SignalType =
+  | "recall"
+  | "rfp"
+  | "funding"
+  | "m_and_a"
+  | "expansion"
+  | "sentiment"
+  | "incumbency";
+
+export type AccountType = "va" | "non_va";
+
+export type TerritoryState = "TX" | "OK" | "AR" | "LA";
 
 export interface Filters {
   hospitals: string[];
   specialties: string[];
   sources: LeadSource[];
+  signalTypes: SignalType[];
+  accountTypes: AccountType[];
+  vendors: string[];
+  states: TerritoryState[];
   minConfidence: number;
 }
 
@@ -20,8 +41,52 @@ export const emptyFilters: Filters = {
   hospitals: [],
   specialties: [],
   sources: [],
+  signalTypes: [],
+  accountTypes: [],
+  vendors: [],
+  states: [],
   minConfidence: 0,
 };
+
+export const signalTypeOptions: SignalType[] = [
+  "recall",
+  "rfp",
+  "funding",
+  "m_and_a",
+  "expansion",
+  "sentiment",
+  "incumbency",
+];
+
+const signalLabels: Record<SignalType, string> = {
+  recall: "Recall",
+  rfp: "RFP",
+  funding: "Funding",
+  m_and_a: "M&A",
+  expansion: "Expansion",
+  sentiment: "Sentiment",
+  incumbency: "Incumbency",
+};
+
+export const accountTypeOptions: AccountType[] = ["va", "non_va"];
+const accountTypeLabels: Record<AccountType, string> = {
+  va: "VA",
+  non_va: "Non-VA",
+};
+
+export const stateOptions: TerritoryState[] = ["TX", "OK", "AR", "LA"];
+
+export const vendorOptions = [
+  "GE Healthcare",
+  "Mindray",
+  "SonoSite",
+  "Fujifilm",
+  "Samsung",
+  "Canon Medical",
+  "Siemens Healthineers",
+  "Butterfly Network",
+  "Clarius",
+];
 
 function useOutside(ref: React.RefObject<HTMLDivElement | null>, cb: () => void) {
   useEffect(() => {
@@ -55,26 +120,28 @@ function FilterPopover({
   );
 }
 
-function MultiSelect({
+function MultiSelect<T extends string>({
   options,
   selected,
   onToggle,
+  labelFor,
 }: {
-  options: string[];
-  selected: string[];
-  onToggle: (v: string) => void;
+  options: readonly T[];
+  selected: readonly T[];
+  onToggle: (v: T) => void;
+  labelFor?: (v: T) => string;
 }) {
   return (
     <div className="max-h-64 overflow-y-auto scrollbar-thin">
       {options.map((o) => {
-        const isOn = selected.includes(o);
+        const isOn = (selected as readonly string[]).includes(o);
         return (
           <button
             key={o}
             onClick={() => onToggle(o)}
             className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-surface-3"
           >
-            <span className="truncate">{o}</span>
+            <span className="truncate">{labelFor ? labelFor(o) : o}</span>
             {isOn && <Check className="h-3.5 w-3.5 text-primary" />}
           </button>
         );
@@ -137,10 +204,17 @@ export function FilterBar({
     filters.hospitals.length +
       filters.specialties.length +
       filters.sources.length +
+      filters.signalTypes.length +
+      filters.accountTypes.length +
+      filters.vendors.length +
+      filters.states.length +
       (filters.minConfidence > 0 ? 1 : 0) >
     0;
 
-  const toggle = <K extends keyof Filters>(key: K, v: Filters[K] extends Array<infer U> ? U : never) => {
+  const toggle = <K extends keyof Filters>(
+    key: K,
+    v: Filters[K] extends Array<infer U> ? U : never,
+  ) => {
     const arr = filters[key] as unknown as string[];
     const next = arr.includes(v as string) ? arr.filter((x) => x !== v) : [...arr, v as string];
     onChange({ ...filters, [key]: next });
@@ -149,6 +223,72 @@ export function FilterBar({
   return (
     <div className="sticky top-16 z-30 -mx-6 mb-6 border-b border-border bg-background/90 px-6 py-3 backdrop-blur">
       <div className="flex flex-wrap items-center gap-2">
+        <FilterButton
+          icon={<MapPin className="h-3.5 w-3.5" />}
+          label="State"
+          count={filters.states.length}
+          active={filters.states.length > 0 || open === "st"}
+          onClick={() => setOpen(open === "st" ? null : "st")}
+        >
+          <FilterPopover open={open === "st"} onClose={() => setOpen(null)}>
+            <MultiSelect
+              options={stateOptions}
+              selected={filters.states}
+              onToggle={(v) => toggle("states", v as never)}
+            />
+          </FilterPopover>
+        </FilterButton>
+
+        <FilterButton
+          icon={<Zap className="h-3.5 w-3.5" />}
+          label="Signal"
+          count={filters.signalTypes.length}
+          active={filters.signalTypes.length > 0 || open === "sig"}
+          onClick={() => setOpen(open === "sig" ? null : "sig")}
+        >
+          <FilterPopover open={open === "sig"} onClose={() => setOpen(null)}>
+            <MultiSelect
+              options={signalTypeOptions}
+              selected={filters.signalTypes}
+              onToggle={(v) => toggle("signalTypes", v as never)}
+              labelFor={(v) => signalLabels[v]}
+            />
+          </FilterPopover>
+        </FilterButton>
+
+        <FilterButton
+          icon={<Flag className="h-3.5 w-3.5" />}
+          label="Account"
+          count={filters.accountTypes.length}
+          active={filters.accountTypes.length > 0 || open === "at"}
+          onClick={() => setOpen(open === "at" ? null : "at")}
+        >
+          <FilterPopover open={open === "at"} onClose={() => setOpen(null)}>
+            <MultiSelect
+              options={accountTypeOptions}
+              selected={filters.accountTypes}
+              onToggle={(v) => toggle("accountTypes", v as never)}
+              labelFor={(v) => accountTypeLabels[v]}
+            />
+          </FilterPopover>
+        </FilterButton>
+
+        <FilterButton
+          icon={<Factory className="h-3.5 w-3.5" />}
+          label="Vendor"
+          count={filters.vendors.length}
+          active={filters.vendors.length > 0 || open === "v"}
+          onClick={() => setOpen(open === "v" ? null : "v")}
+        >
+          <FilterPopover open={open === "v"} onClose={() => setOpen(null)}>
+            <MultiSelect
+              options={vendorOptions}
+              selected={filters.vendors}
+              onToggle={(v) => toggle("vendors", v as never)}
+            />
+          </FilterPopover>
+        </FilterButton>
+
         <FilterButton
           icon={<Building2 className="h-3.5 w-3.5" />}
           label="Hospital"
