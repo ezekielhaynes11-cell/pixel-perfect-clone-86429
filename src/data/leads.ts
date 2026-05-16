@@ -2,7 +2,14 @@
 // Real lead rows now come from Lovable Cloud (see useLeads); this file no
 // longer ships mock data.
 
-export type LeadSource = "sam_gov" | "openfda" | "gdelt" | "reddit" | "news";
+export type LeadSource =
+  | "sam_gov"
+  | "openfda"
+  | "gdelt"
+  | "reddit"
+  | "news"
+  | "clinicaltrials"
+  | "cms_open_payments";
 
 export interface LeadEntities {
   hospitals: string[];
@@ -74,7 +81,15 @@ export function rowToLead(r: LeadRow): Lead {
   };
 }
 
-export const sources: LeadSource[] = ["sam_gov", "openfda", "gdelt", "reddit", "news"];
+export const sources: LeadSource[] = [
+  "sam_gov",
+  "openfda",
+  "gdelt",
+  "reddit",
+  "news",
+  "clinicaltrials",
+  "cms_open_payments",
+];
 
 export function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
