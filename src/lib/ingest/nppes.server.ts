@@ -200,6 +200,7 @@ export async function attachPhysiciansToLead(
           lead_id: leadId,
           npi: contact.npi,
           role: ref.role ?? "named_in_source",
+          role_hint: ref.roleHint ?? null,
           match_confidence: confidence,
         });
       if (!linkErr) linked++;
