@@ -122,7 +122,7 @@ export async function scrapeUrlForAccount(args: {
       account_id: args.accountId ?? null,
       url: args.url,
       title: title || args.url,
-      extracted,
+      extracted: extracted as never,
       raw_text: text,
     })
     .select("id")
