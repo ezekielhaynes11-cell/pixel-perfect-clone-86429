@@ -83,8 +83,6 @@ export async function fetchCmsOpenPayments(opts: { limit?: number; minAmount?: n
     grouped.set(key, g);
   }
 
-  const _ = conditions; // satisfy linter
-  void body;
 
   return Array.from(grouped.entries())
     .filter(([, g]) => g.total >= minAmount)
