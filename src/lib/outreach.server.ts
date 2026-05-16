@@ -1,6 +1,6 @@
 const GATEWAY_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
 
-export type OutreachTone = "discovery" | "follow_up" | "executive_intro";
+export type OutreachTone = "discovery" | "follow_up" | "executive_intro" | "switch_pitch";
 
 interface DraftInput {
   lead: {
@@ -8,6 +8,10 @@ interface DraftInput {
     summary: string;
     hospital: string | null;
     specialty: string | null;
+    source?: string | null;
+    signal_type?: string | null;
+    competitor_incumbent?: string | null;
+    vendor_mentions?: string[] | null;
     entities: { physicians?: string[]; equipment?: string[]; keywords?: string[] };
   };
   repName: string;
@@ -21,9 +25,11 @@ const TONE_GUIDE: Record<OutreachTone, string> = {
     "Tone: short follow-up to a prior thread. Reference the original signal, add ONE new insight or benchmark, and ask if next week works for a brief call.",
   executive_intro:
     "Tone: peer-to-peer executive introduction (C-suite / VP). Confident, brief, business-outcome focused. Reference the strategic implication of the signal. Propose a 20-minute conversation with a named Philips executive sponsor.",
+  switch_pitch:
+    "Tone: empathetic switch-pitch. Name the specific incumbent vendor / model and the disruptive event (FDA recall, end-of-life, vendor M&A, manufacturing change). Offer a stable Philips alternative as a like-for-like replacement, mention installed-base support and clinical continuity, and propose a 15-minute technical briefing this week.",
 };
 
-const SYSTEM = `You are an elite enterprise medical-device sales rep at Philips Medical. Draft a short, specific, non-spammy outreach email tailored to the lead. Reference the actual signal (RFQ, recall, capital project, etc.). Keep it under 140 words, plain text, signed by the rep. Open with the recipient's specific situation, not generic flattery. End with one clear ask. Never invent facts not present in the brief.`;
+const SYSTEM = `You are an elite enterprise medical-device sales rep at Philips Medical. Draft a short, specific, non-spammy outreach email tailored to the lead. Reference the actual signal (RFQ, recall, capital project, vendor disruption, forum chatter, etc.). Keep it under 150 words, plain text, signed by the rep. Open with the recipient's specific situation, not generic flattery. End with one clear ask. Never invent facts not present in the brief.`;
 
 const TOOL = {
   type: "function" as const,
@@ -34,7 +40,7 @@ const TOOL = {
       type: "object",
       properties: {
         subject: { type: "string", description: "<= 80 chars, specific not generic" },
-        body: { type: "string", description: "<= 140 words plain text" },
+        body: { type: "string", description: "<= 150 words plain text" },
       },
       required: ["subject", "body"],
       additionalProperties: false,
@@ -42,16 +48,26 @@ const TOOL = {
   },
 };
 
+/** Choose a default tone from the lead if caller didn't specify one. */
+export function defaultToneForLead(lead: { source?: string | null; signal_type?: string | null }): OutreachTone {
+  if (lead.signal_type === "recall" || lead.signal_type === "m_and_a") return "switch_pitch";
+  if (lead.source === "openfda" || lead.source === "gdelt_m_and_a") return "switch_pitch";
+  return "discovery";
+}
+
 export async function draftOutreachEmail(
   input: DraftInput,
 ): Promise<{ subject: string; body: string }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) throw new Error("LOVABLE_API_KEY not configured");
-  const tone = input.tone ?? "discovery";
+  const tone = input.tone ?? defaultToneForLead(input.lead);
 
   const userMsg = `Lead title: ${input.lead.title}
 Hospital: ${input.lead.hospital ?? "unknown"}
 Specialty: ${input.lead.specialty ?? "unknown"}
+Signal type: ${input.lead.signal_type ?? "unknown"}
+Incumbent competitor: ${input.lead.competitor_incumbent ?? "unknown"}
+Vendor / model mentions: ${(input.lead.vendor_mentions ?? []).join(", ") || "n/a"}
 Equipment focus: ${(input.lead.entities.equipment ?? []).join(", ") || "n/a"}
 Key physicians/contacts: ${(input.lead.entities.physicians ?? []).join(", ") || "n/a"}
 Signals: ${(input.lead.entities.keywords ?? []).join(", ") || "n/a"}
@@ -84,3 +100,4 @@ ${TONE_GUIDE[tone]}`;
   if (!args) throw new Error("AI returned no draft");
   return JSON.parse(args);
 }
+
