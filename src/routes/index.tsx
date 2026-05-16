@@ -129,6 +129,19 @@ function Dashboard() {
               {pipelineUsd >= 1e6 ? `$${(pipelineUsd / 1e6).toFixed(1)}M` : `$${Math.round(pipelineUsd / 1000)}k`}
             </span>
           </div>
+          <Link
+            to="/pipeline"
+            className="hidden items-center gap-1.5 rounded-md border border-border bg-surface-2 px-3 py-1.5 text-xs font-medium text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground md:flex"
+          >
+            <BarChart3 className="h-3.5 w-3.5" /> Pipeline
+          </Link>
+          <button
+            onClick={() => setSearchesOpen(true)}
+            className="hidden items-center gap-1.5 rounded-md border border-border bg-surface-2 px-3 py-1.5 text-xs font-medium text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground md:flex"
+          >
+            <Bookmark className="h-3.5 w-3.5" /> Saved
+          </button>
+          <AlertsBell leads={visibleLeads} onOpenLead={setActive} />
           <button
             onClick={() => ingest.mutate()}
             disabled={ingest.isPending}
@@ -190,6 +203,7 @@ function Dashboard() {
                       onView={setActive}
                       onSave={() => act.mutate({ lead_id: lead.id, action: "saved" })}
                       onDismiss={() => act.mutate({ lead_id: lead.id, action: "dismissed" })}
+                      onDraft={() => setDraftFor(lead)}
                     />
                   ))}
               </div>
@@ -206,6 +220,13 @@ function Dashboard() {
       </main>
 
       <LeadDetailModal lead={active} onClose={() => setActive(null)} />
+      <OutreachDraftDialog lead={draftFor} open={!!draftFor} onClose={() => setDraftFor(null)} />
+      <SavedSearchesDrawer
+        open={searchesOpen}
+        onClose={() => setSearchesOpen(false)}
+        currentFilters={filters}
+        onApply={setFilters}
+      />
     </div>
   );
 }
