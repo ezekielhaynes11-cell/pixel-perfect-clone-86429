@@ -165,9 +165,43 @@ function Dashboard() {
       <main className="mx-auto max-w-[1600px] px-6 py-6">
         <SummaryCard total={visibleLeads.length} highPriority={highPriority} />
 
+        {(() => {
+          const last = (runsQ.data ?? [])[0];
+          if (!last) return null;
+          const when = new Date(last.started_at);
+          const mins = Math.max(0, Math.round((Date.now() - when.getTime()) / 60000));
+          const ago = mins < 1 ? "just now" : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
+          const color =
+            last.status === "error"
+              ? "text-destructive"
+              : last.status === "running"
+              ? "text-muted-foreground"
+              : "text-success";
+          return (
+            <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+              <span className={`inline-block h-1.5 w-1.5 rounded-full bg-current ${color}`} />
+              Last scan: {ago} · {last.source} · {last.new_count ?? 0} new · {last.enriched_count ?? 0} enriched
+              {last.status === "error" ? " · failed" : ""}
+            </div>
+          );
+        })()}
+
+        {ingest.isError ? (
+          <div className="mt-3 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <div className="font-semibold">Ingestion failed</div>
+              <div className="text-destructive/80">
+                {ingest.error instanceof Error ? ingest.error.message : String(ingest.error)}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
           <div>
             <FilterBar filters={filters} onChange={setFilters} hospitals={hospitals} specialties={specialties} />
+
 
             <div className="mb-3 flex items-center justify-between">
               <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-muted-foreground">
