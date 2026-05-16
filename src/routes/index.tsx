@@ -194,7 +194,7 @@ function Dashboard() {
 
         <footer className="mt-12 flex flex-wrap items-center justify-between border-t border-border pt-4 text-xs text-muted-foreground">
           <span>Live data from SAM.gov · openFDA · GDELT · Enriched by Lovable AI</span>
-          <Link to="/login" className="hover:text-primary">{user.email}</Link>
+          <span>Single-user mode</span>
         </footer>
       </main>
 
