@@ -1,97 +1,70 @@
-## Free-tier build — ship everything that costs nothing
+## Pre-handoff sprint (no email/Resend work)
 
-All items below use APIs we already pay for (Lovable AI, Supabase) or free public endpoints. No new paid services.
+Goal: get the dashboard to a state Mike can use day-one without manual triggering.
 
-### 1. New free data sources
+### 1. Seed `keyword_lists` from the PRD
 
-**a. Reddit adapter** (`src/lib/ingest/reddit.server.ts`)
-- Hit `https://www.reddit.com/r/{sub}/new.json?limit=50` for: `emergencymedicine`, `IcuRn`, `Radiology`, `POCUS`, `medicine`, `anesthesiology`, `medlabprofessionals`.
-- Custom `User-Agent: PhillipsLeadRadar/1.0`.
-- Filter posts whose title/body matches vendor names (GE, Mindray, SonoSite, Samsung, Canon, Siemens, Fuji) OR equipment keywords OR complaint signals ("what should we replace", "frustrated with", "looking to buy").
-- Each match → RawLead → existing AI enricher.
+Insert the full vendor/product/role taxonomy so Reddit/Bluesky/GDELT adapters have something to match against. Three `kind` values:
 
-**b. Bluesky adapter** (`src/lib/ingest/bluesky.server.ts`)
-- Public search: `https://api.bsky.app/xrpc/app.bsky.feed.searchPosts?q=...`.
-- Queries: `"POCUS"`, `"ultrasound recall"`, `"Mindray TE7"`, `"SonoSite"`, `"Venue Fit"`, `"VA hospital ultrasound"`.
-- Free, no auth, rate-limited but fine for 2× daily.
+- `vendor` — GE Healthcare, Mindray, SonoSite (Fujifilm), Samsung, Canon, Siemens, Konica Minolta, Esaote, Butterfly, Clarius, EchoNous, Kosmos, Exo
+- `product` — Venue Fit, Venue Go, Vivid iq, Voluson, Logiq, M9, ME8, TE7, X-Porte, Edge II, PX, HS50, HS60, Aplio i-series, Acuson Juniper, P20, IQ
+- `role` — POCUS Director, Fellowship Director, Emergency Ultrasound Director, Chief of EM, Critical Care Director, Biomed Director, Imaging Director, Chief Radiologist
 
-**c. VA / HRSA funding adapter** (`src/lib/ingest/funding-rss.server.ts`)
-- Parse public RSS feeds:
-  - `https://news.va.gov/feed/` (filter by territory keywords + "imaging" / "modernization" / "equipment")
-  - `https://www.hrsa.gov/about/news/press-releases/rss.xml` (rural grants)
-- Lightweight XML parse, no library needed beyond a regex extractor (kept inline to avoid Worker-incompat deps).
+Done via `supabase--insert` (data, not schema).
 
-**d. Tuned GDELT slices** (add two new queries to `gdelt.server.ts`)
-- Vendor M&A: `("acquisition" OR "manufacturing" OR "offshoring" OR "end of life" OR "EOL") AND ("GE Healthcare" OR Mindray OR Samsung OR Canon OR Siemens OR SonoSite OR Fujifilm)`.
-- Rural/VA funding: `("rural hospital" OR "Veterans Affairs" OR "VA hospital" OR "HRSA grant" OR "capital campaign") AND (Texas OR Oklahoma OR Arkansas OR Louisiana)`.
-- Each becomes its own `source` value so the rep can filter on it.
+### 2. FilterBar chips for the new metadata
 
-**e. Free hospital/fellowship page scraper** (`src/lib/ingest/scrape-url.server.ts`)
-- Server function `scrapeUrlForAccount({url, accountId})` — plain `fetch()` + strip HTML to text + AI extracts people/roles/programs into structured JSON.
-- "Add page" button in the (new) account view lets Mike paste any URL — fellowship pages, leadership pages, individual LinkedIn profiles he wants tracked.
+Add to `src/components/dashboard/FilterBar.tsx`:
+- **Signal type** multi-select: recall, RFP, funding, M&A, expansion, sentiment, incumbency
+- **Account type** toggle: VA / Non-VA / All
+- **Vendor** multi-select sourced from `keyword_lists` where kind='vendor'
+- **State** chips: TX / OK / AR / LA (Mike's territory)
 
-### 2. Vendor + product taxonomy (DB + UI)
+Wire into `useLeads` filter object and `leads.functions.ts` query builder.
 
-- Migration: `keyword_lists` table with `(kind: 'vendor' | 'product_model' | 'focus_concept' | 'role_title', value, active)`. Seed with the full PRD §3 list (Venue/Venue Fit/Venue Go, TE7/Max/TE8/M9, LX/PX/S2, POCUS, non-invasive cardiac output, etc.).
-- All adapters import these instead of the hardcoded `PHILLIPS_KEYWORDS` constant.
-- New `/settings/keywords` page where Mike can add/edit/disable terms — no dev needed.
+### 3. `/accounts/$id` deep-dive page
 
-### 3. Better lead enrichment & filters
+New route `src/routes/accounts.$id.tsx` showing:
+- Header: account name, state, VA badge, system
+- Vendor footprint card (aggregated `vendor_mentions` across that account's leads)
+- Timeline of signals (leads grouped by `signal_type`, newest first)
+- Linked physicians (from `lead_physicians` joined through `leads.account_id`)
+- Scraped pages list (from `scraped_pages` where `account_id` matches)
 
-- Extend `EnrichmentResult` + `leads` table with:
-  - `vendor_mentions text[]` (extracted vendor models)
-  - `account_type text` (`va` | `non_va` | `unknown`) — AI infers from hospital name / domain
-  - `signal_type text` (`recall` | `rfp` | `funding` | `expansion` | `sentiment` | `m_and_a` | `incumbency`)
-- Update the AI tool schema + system prompt accordingly.
-- **FilterBar additions**: State (TX/OK/AR/LA + Other), Account type (VA / Non-VA), Vendor model, Signal type. Sticky bar already exists — just add chips.
+LeadCard gets a "View account" link when `account_id` is set.
 
-### 4. Role-aware physician tagging
+### 4. End-to-end ingestion test
 
-- Extend enricher to also extract a per-physician role hint (`pocus_director`, `fellowship_director`, `biomed`, `chief`, `attending`).
-- New nullable column `lead_physicians.role_hint`.
-- Surface as a small badge under each name in the LeadCard physician list.
+- Trigger `/api/public/ingest` once manually via `stack_modern--invoke-server-function`
+- Read `ingestion_runs` + sample 10 enriched leads
+- Spot-check that signal_type, vendor_mentions, account_type are populated
+- Fix any adapter producing junk before scheduling
 
-### 5. Account deep-dive
+### 5. Schedule ingestion via pg_cron
 
-- Migration: `accounts` table (`id, name, state, account_type, system, notes`), plus `account_id` FK on `leads`.
-- Backfill by hospital-name fuzzy match (run once via insert tool).
-- New route `/accounts/$id`: header (name, state, VA flag, vendor footprint chips) → tabs: **Leads**, **People** (deduped physicians), **Pages** (URLs Mike scraped).
+Enable `pg_cron` + `pg_net`, then schedule `/api/public/ingest` every 4 hours using the documented `apikey: <anon>` pattern. SQL goes through `supabase--insert` (not migration) since URL + anon key are environment-specific.
 
-### 6. Switch-pitch outreach
+### 6. Provision Mike's admin account
 
-- When source = `openfda` (recall) or `signal_type = 'm_and_a'`, the outreach drafter switches to a "stable alternative" template that explicitly names the incumbent vendor and the recall/event.
-- One new prompt variant in `src/lib/outreach.server.ts`. No new UI.
+Two-step:
+- Ask user for Mike's email (one ask_questions call)
+- Once we have it, insert a row into `user_roles` with role='admin' after he signs up — OR if he hasn't signed up yet, document the one-line SQL Mike can run after his first login. Cleanest: have Mike sign up first, then I flip his role.
 
-### 7. Morning Gmail digest
+### Technical notes
 
-- New server route `/api/public/cron/morning-digest`.
-- pg_cron job @ 7:15am PT → calls route → builds top-10 leads markdown → sends via the already-wired Gmail connector to Mike's address (read from `profiles.email`).
-- Includes one-line "today's plays" header + per-lead trigger reason + tel link.
+- All data writes (taxonomy seed, cron schedule, role grant) go through `supabase--insert`, not migrations.
+- No new tables, no new columns — schema is already in place from the last migration.
+- FilterBar and accounts page are pure frontend + server-fn query extensions; no new dependencies.
+- Ingest cron URL: `https://project--4153fd65-1b3f-4a50-9892-2fe6d3062712.lovable.app/api/public/ingest`
 
-### 8. Keyword-driven Reddit/Bluesky alerts (free)
+### Out of scope (explicitly deferred)
 
-- Saved-search alerts already exist for confidence threshold; extend the matcher so a saved search like "Texas VA POCUS" also fires when a new Reddit/Bluesky/funding lead matches its filter — not just confidence ≥ N.
-
----
-
-### What this explicitly does NOT do (requires payment — defer)
-
-- Apollo (verified emails / mobile / title-change alerts)
-- X / Twitter API
-- LinkedIn auto-monitoring (only manual paste-a-URL works free)
-- Facebook private groups
-- SFDC integration
+- Morning email digest (needs Resend domain)
+- Apollo / LinkedIn / X / Facebook
+- Saved-search alert email delivery (in-app alerts still work)
 
 ### Order of execution
 
-1. Keyword taxonomy table + seed (unblocks everything else)
-2. Reddit + Bluesky + funding RSS + GDELT M&A/VA adapters
-3. Enricher schema extensions (vendor_mentions, account_type, signal_type, role_hint)
-4. FilterBar additions
-5. Switch-pitch outreach variant
-6. Accounts table + `/accounts/$id` page + URL scraper
-7. Morning Gmail digest cron
-8. Saved-search alert matcher extension
-9. `/settings/keywords` editor UI
+1 → 2 → 3 → 4 → 5 → 6. Steps 1–3 are independent code; 4 validates; 5 automates; 6 hands over.
 
-Approve and I'll execute end-to-end in one pass.
+Approve and I'll build straight through.
