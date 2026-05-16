@@ -100,15 +100,6 @@ function Dashboard() {
     0,
   );
 
-  const navigate = useNavigate();
-  useEffect(() => {
-    if (!loading && !user) navigate({ to: "/login" });
-  }, [loading, user, navigate]);
-
-  if (loading || !user) {
-    return <div className="grid min-h-screen place-items-center text-muted-foreground">Loading…</div>;
-  }
-
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-40 h-16 border-b border-border bg-background/95 backdrop-blur">
