@@ -117,10 +117,13 @@ function Dashboard() {
     () => (leadsQ.data ?? []).map((r) => rowToLead(r as LeadRow)),
     [leadsQ.data],
   );
-  const dismissedIds = new Set(
-    (actionsQ.data ?? []).filter((a) => a.action === "dismissed").map((a) => a.lead_id),
+  const dismissedIds = useMemo(
+    () => new Set((actionsQ.data ?? []).filter((a) => a.action === "dismissed").map((a) => a.lead_id)),
+    [actionsQ.data],
   );
-  const visibleLeads = leads.filter((l) => !dismissedIds.has(l.id));
+  const activeLeads = useMemo(() => leads.filter((l) => !dismissedIds.has(l.id)), [leads, dismissedIds]);
+  const dismissedLeads = useMemo(() => leads.filter((l) => dismissedIds.has(l.id)), [leads, dismissedIds]);
+  const visibleLeads = showDismissed ? dismissedLeads : activeLeads;
 
   const hospitals = useMemo(
     () => Array.from(new Set(visibleLeads.map((l) => l.hospital).filter((x): x is string => !!x))).sort(),
@@ -253,14 +256,63 @@ function Dashboard() {
             <FilterBar filters={filters} onChange={setFilters} hospitals={hospitals} specialties={specialties} />
 
 
-            <div className="mb-3 flex items-center justify-between">
+            <div className="mb-3 flex flex-wrap items-center gap-3">
               <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                Lead Feed
+                {showDismissed ? "Dismissed" : "Lead Feed"}
                 <span className="ml-2 rounded-full bg-surface-2 px-2 py-0.5 text-xs text-foreground">
                   {filtered.length}
                 </span>
               </h2>
-              <div className="text-xs text-muted-foreground">Sorted by confidence</div>
+              <button
+                onClick={() => { setShowDismissed((v) => !v); setSelected(new Set()); }}
+                className="flex h-7 items-center gap-1.5 rounded-sm border border-border bg-surface-2 px-2.5 text-[11px] font-medium text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground"
+                title={showDismissed ? "Back to active feed" : "View dismissed leads"}
+              >
+                {showDismissed ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                {showDismissed ? "Show active" : `Show dismissed (${dismissedLeads.length})`}
+              </button>
+              {filtered.length > 0 && (
+                <button
+                  onClick={() => {
+                    const all = filtered.map((l) => l.id);
+                    setSelected((prev) => (prev.size === all.length ? new Set() : new Set(all)));
+                  }}
+                  className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                >
+                  {selected.size === filtered.length ? "Clear selection" : "Select all"}
+                </button>
+              )}
+              {selected.size > 0 && (
+                <div className="ml-auto flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">{selected.size} selected</span>
+                  {showDismissed ? (
+                    <button
+                      onClick={() =>
+                        bulkAct.mutate({ lead_ids: Array.from(selected), action: "dismissed", remove: true })
+                      }
+                      disabled={bulkAct.isPending}
+                      className="flex h-7 items-center gap-1.5 rounded-sm border border-success/40 bg-success/10 px-2.5 text-[11px] font-medium text-success hover:bg-success/20 disabled:opacity-50"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Restore selected
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() =>
+                        bulkAct.mutate({ lead_ids: Array.from(selected), action: "dismissed" })
+                      }
+                      disabled={bulkAct.isPending}
+                      className="flex h-7 items-center gap-1.5 rounded-sm border border-destructive/40 bg-destructive/10 px-2.5 text-[11px] font-medium text-destructive hover:bg-destructive/20 disabled:opacity-50"
+                    >
+                      <XCircle className="h-3.5 w-3.5" />
+                      Dismiss selected
+                    </button>
+                  )}
+                </div>
+              )}
+              {selected.size === 0 && (
+                <div className="ml-auto text-xs text-muted-foreground">Sorted by confidence</div>
+              )}
             </div>
 
             {leadsQ.isLoading ? (
@@ -269,7 +321,9 @@ function Dashboard() {
               </div>
             ) : filtered.length === 0 ? (
               <div className="rounded-md border border-dashed border-border p-12 text-center text-sm text-muted-foreground">
-                {leads.length === 0
+                {showDismissed
+                  ? "No dismissed leads."
+                  : leads.length === 0
                   ? 'No leads yet. Click "Refresh feed" to pull live signals from SAM.gov, FDA, and news.'
                   : "No leads match your filters."}
               </div>
@@ -288,6 +342,20 @@ function Dashboard() {
                       onSave={() => act.mutate({ lead_id: lead.id, action: "saved" })}
                       onDismiss={() => act.mutate({ lead_id: lead.id, action: "dismissed" })}
                       onDraft={() => setDraftFor(lead)}
+                      selectable
+                      selected={selected.has(lead.id)}
+                      onToggleSelect={() =>
+                        setSelected((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(lead.id)) next.delete(lead.id);
+                          else next.add(lead.id);
+                          return next;
+                        })
+                      }
+                      dismissed={showDismissed}
+                      onRestore={() =>
+                        act.mutate({ lead_id: lead.id, action: "dismissed", remove: true })
+                      }
                     />
                   ))}
               </div>
