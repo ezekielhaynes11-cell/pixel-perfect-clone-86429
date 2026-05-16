@@ -31,6 +31,8 @@ function Dashboard() {
   const { user, loading } = useAuth();
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [active, setActive] = useState<Lead | null>(null);
+  const [draftFor, setDraftFor] = useState<Lead | null>(null);
+  const [searchesOpen, setSearchesOpen] = useState(false);
   const qc = useQueryClient();
   const fetchLeads = useServerFn(listLeads);
   const fetchActions = useServerFn(listLeadActions);
