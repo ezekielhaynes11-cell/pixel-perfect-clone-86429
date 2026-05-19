@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { RefreshCw, TrendingUp, Bookmark, BarChart3, AlertCircle, EyeOff, Eye, XCircle, RotateCcw, Sparkles } from "lucide-react";
+import { RefreshCw, Bookmark, BarChart3, AlertCircle, EyeOff, Eye, XCircle, RotateCcw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { listLeads, triggerIngestion, setLeadAction, listLeadActions, getRecentIngestionRuns, listLeadPhysicians, bulkSetLeadAction, type LeadPhysician } from "@/lib/leads.functions";
 import { rowToLead, leadStateCode, type Lead, type LeadRow } from "@/data/leads";
