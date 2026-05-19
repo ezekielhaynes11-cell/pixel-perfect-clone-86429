@@ -40,7 +40,7 @@ function Dashboard() {
   const fetchActions = useServerFn(listLeadActions);
   const fetchRuns = useServerFn(getRecentIngestionRuns);
   const fetchPhysicians = useServerFn(listLeadPhysicians);
-  const runIngest = useServerFn(triggerIngestion);
+  const runIngestForSource = useServerFn(triggerIngestionForSource);
   const actionFn = useServerFn(setLeadAction);
   const bulkActionFn = useServerFn(bulkSetLeadAction);
 
@@ -72,12 +72,25 @@ function Dashboard() {
   }, [physiciansQ.data]);
 
   const ingest = useMutation({
-    mutationFn: () => runIngest(),
+    mutationFn: async () => {
+      // Fan out per-source so each call stays well under the Worker 60s timeout.
+      const results = await Promise.allSettled(
+        INGESTION_SOURCES.map((source) => runIngestForSource({ data: { source } })),
+      );
+      let inserted = 0;
+      let failed = 0;
+      for (const r of results) {
+        if (r.status === "fulfilled") inserted += r.value.inserted;
+        else failed += 1;
+      }
+      return { inserted, failed };
+    },
     onMutate: () => toast.loading("Scanning live sources…", { id: "ingest" }),
-    onSuccess: (summaries) => {
-      const total = summaries.reduce((a, s) => a + s.inserted, 0);
-      const enriched = summaries.reduce((a, s) => a + s.enriched, 0);
-      toast.success(`Found ${total} new leads · enriched ${enriched}`, { id: "ingest" });
+    onSuccess: ({ inserted, failed }) => {
+      const msg = failed > 0
+        ? `Found ${inserted} new leads · ${failed} source${failed === 1 ? "" : "s"} failed`
+        : `Found ${inserted} new leads`;
+      toast.success(msg, { id: "ingest" });
       qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["ingestion_runs"] });
       qc.invalidateQueries({ queryKey: ["lead_physicians"] });
