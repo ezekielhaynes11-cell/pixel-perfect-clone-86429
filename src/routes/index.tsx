@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { RefreshCw, TrendingUp, Bookmark, BarChart3, AlertCircle, EyeOff, Eye, XCircle, RotateCcw, Sparkles } from "lucide-react";
+import { RefreshCw, Bookmark, BarChart3, AlertCircle, EyeOff, Eye, XCircle, RotateCcw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { listLeads, triggerIngestion, setLeadAction, listLeadActions, getRecentIngestionRuns, listLeadPhysicians, bulkSetLeadAction, type LeadPhysician } from "@/lib/leads.functions";
 import { rowToLead, leadStateCode, type Lead, type LeadRow } from "@/data/leads";
@@ -175,13 +175,27 @@ function Dashboard() {
             </span>
           </div>
           <div className="flex-1" />
-          <div className="hidden items-center gap-1.5 text-xs text-muted-foreground md:flex">
-            <TrendingUp className="h-3.5 w-3.5 text-success" />
-            Weighted pipeline:{" "}
-            <span className="font-semibold text-foreground">
-              {pipelineUsd >= 1e6 ? `$${(pipelineUsd / 1e6).toFixed(1)}M` : `$${Math.round(pipelineUsd / 1000)}k`}
-            </span>
-          </div>
+          {(() => {
+            const last = (runsQ.data ?? [])[0];
+            if (!last) {
+              return (
+                <div className="hidden items-center gap-1.5 text-xs text-muted-foreground md:flex">
+                  <RefreshCw className="h-3.5 w-3.5 text-success" />
+                  Daily sync · 7am & 1pm PT
+                </div>
+              );
+            }
+            const when = new Date(last.started_at);
+            const mins = Math.max(0, Math.round((Date.now() - when.getTime()) / 60000));
+            const ago = mins < 1 ? "just now" : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
+            return (
+              <div className="hidden items-center gap-1.5 text-xs text-muted-foreground md:flex">
+                <RefreshCw className={`h-3.5 w-3.5 ${last.status === "running" ? "animate-spin text-primary" : "text-success"}`} />
+                Daily sync · {ago}
+                {last.status === "error" ? " · failed" : ""}
+              </div>
+            );
+          })()}
           <Link
             to="/pipeline"
             className="hidden items-center gap-1.5 rounded-md border border-border bg-surface-2 px-3 py-1.5 text-xs font-medium text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground md:flex"
