@@ -4,11 +4,21 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { OWNER_ID } from "./owner.server";
 import { runAccountResearch } from "./research-agent.server";
 
+export interface AccountBriefStructured {
+  exec_summary: string;
+  vendor_footprint: string[];
+  capital_plans: string[];
+  key_people: Array<{ name: string; role: string }>;
+  recent_signals: string[];
+  recommended_next_steps: string[];
+  sources: Array<{ url: string; note: string }>;
+}
+
 export interface AccountBriefRow {
   id: string;
   account_id: string;
   markdown: string;
-  structured: Record<string, unknown>;
+  structured: AccountBriefStructured;
   sources: Array<{ url: string; note: string }>;
   model: string;
   created_at: string;
