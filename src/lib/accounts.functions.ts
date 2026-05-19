@@ -8,7 +8,7 @@ export interface AccountBriefRow {
   id: string;
   account_id: string;
   markdown: string;
-  structured: unknown;
+  structured: Record<string, unknown>;
   sources: Array<{ url: string; note: string }>;
   model: string;
   created_at: string;
