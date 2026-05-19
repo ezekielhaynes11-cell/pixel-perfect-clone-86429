@@ -194,7 +194,7 @@ function Dashboard() {
               return (
                 <div className="hidden items-center gap-1.5 text-xs text-muted-foreground md:flex">
                   <RefreshCw className="h-3.5 w-3.5 text-success" />
-                  Daily sync · 7am & 1pm PT
+                  Awaiting first sync…
                 </div>
               );
             }
