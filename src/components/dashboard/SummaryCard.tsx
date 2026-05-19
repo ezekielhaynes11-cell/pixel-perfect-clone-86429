@@ -57,13 +57,13 @@ export function SummaryCard({
       <div className="md:border-l md:border-border md:pl-6">
         <div className="flex items-center gap-2 text-success">
           <span className="pulse-dot inline-block h-2 w-2 rounded-full bg-success" />
-          <span className="text-sm font-medium">Last sync: 6:00 AM PST</span>
+          <span className="text-sm font-medium">Live monitoring</span>
         </div>
         <div className="mt-2 text-[11px] text-muted-foreground">
-          Next update in <span className="font-mono text-foreground">23:42</span>
+          Sync status shown in header
         </div>
         <div className="mt-1 text-[11px] uppercase tracking-wider text-muted-foreground">
-          Live · Territory: OK · AR · LA · TX
+          Territory: OK · AR · LA · TX
         </div>
       </div>
     </div>

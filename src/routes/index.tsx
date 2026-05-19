@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { RefreshCw, Bookmark, BarChart3, AlertCircle, EyeOff, Eye, XCircle, RotateCcw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
-import { listLeads, triggerIngestion, setLeadAction, listLeadActions, getRecentIngestionRuns, listLeadPhysicians, bulkSetLeadAction, type LeadPhysician } from "@/lib/leads.functions";
+import { listLeads, triggerIngestionForSource, setLeadAction, listLeadActions, getRecentIngestionRuns, listLeadPhysicians, bulkSetLeadAction, INGESTION_SOURCES, type LeadPhysician } from "@/lib/leads.functions";
 import { rowToLead, leadStateCode, type Lead, type LeadRow } from "@/data/leads";
 import { SummaryCard } from "@/components/dashboard/SummaryCard";
 import { FilterBar, emptyFilters, type Filters } from "@/components/dashboard/FilterBar";
@@ -40,7 +40,7 @@ function Dashboard() {
   const fetchActions = useServerFn(listLeadActions);
   const fetchRuns = useServerFn(getRecentIngestionRuns);
   const fetchPhysicians = useServerFn(listLeadPhysicians);
-  const runIngest = useServerFn(triggerIngestion);
+  const runIngestForSource = useServerFn(triggerIngestionForSource);
   const actionFn = useServerFn(setLeadAction);
   const bulkActionFn = useServerFn(bulkSetLeadAction);
 
@@ -72,12 +72,25 @@ function Dashboard() {
   }, [physiciansQ.data]);
 
   const ingest = useMutation({
-    mutationFn: () => runIngest(),
+    mutationFn: async () => {
+      // Fan out per-source so each call stays well under the Worker 60s timeout.
+      const results = await Promise.allSettled(
+        INGESTION_SOURCES.map((source) => runIngestForSource({ data: { source } })),
+      );
+      let inserted = 0;
+      let failed = 0;
+      for (const r of results) {
+        if (r.status === "fulfilled") inserted += r.value.inserted;
+        else failed += 1;
+      }
+      return { inserted, failed };
+    },
     onMutate: () => toast.loading("Scanning live sources…", { id: "ingest" }),
-    onSuccess: (summaries) => {
-      const total = summaries.reduce((a, s) => a + s.inserted, 0);
-      const enriched = summaries.reduce((a, s) => a + s.enriched, 0);
-      toast.success(`Found ${total} new leads · enriched ${enriched}`, { id: "ingest" });
+    onSuccess: ({ inserted, failed }) => {
+      const msg = failed > 0
+        ? `Found ${inserted} new leads · ${failed} source${failed === 1 ? "" : "s"} failed`
+        : `Found ${inserted} new leads`;
+      toast.success(msg, { id: "ingest" });
       qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["ingestion_runs"] });
       qc.invalidateQueries({ queryKey: ["lead_physicians"] });
@@ -181,7 +194,7 @@ function Dashboard() {
               return (
                 <div className="hidden items-center gap-1.5 text-xs text-muted-foreground md:flex">
                   <RefreshCw className="h-3.5 w-3.5 text-success" />
-                  Daily sync · 7am & 1pm PT
+                  Awaiting first sync…
                 </div>
               );
             }

@@ -45,15 +45,14 @@ interface SavedSearchFilter {
   minConfidence?: number;
 }
 
-export async function runIngestion(forUserId?: string): Promise<IngestionSummary[]> {
-  const samKey = process.env.SAM_GOV_API_KEY;
-  const summaries: IngestionSummary[] = [];
-  const newlyEnrichedIds: string[] = [];
+type SourceSpec = { name: string; sourceFilter: LeadSource[]; fn: () => Promise<RawLead[]> };
 
-  // fetchGdelt now produces three different `source` values internally
+function buildSources(): SourceSpec[] {
+  const samKey = process.env.SAM_GOV_API_KEY;
+  // fetchGdelt produces three different `source` values internally
   // (gdelt / gdelt_m_and_a / gdelt_va_funding). Treat the call as a single
   // ingestion-run entry but bucket inserts by their own source for clarity.
-  const sources: Array<{ name: string; sourceFilter: LeadSource[]; fn: () => Promise<RawLead[]> }> = [
+  return [
     { name: "sam_gov", sourceFilter: ["sam_gov"], fn: () => (samKey ? fetchSamGov({ apiKey: samKey }) : Promise.resolve([])) },
     { name: "openfda", sourceFilter: ["openfda"], fn: () => fetchOpenFda({}) },
     { name: "gdelt", sourceFilter: ["gdelt", "gdelt_m_and_a", "gdelt_va_funding"], fn: () => fetchGdelt({}) },
@@ -79,41 +78,72 @@ export async function runIngestion(forUserId?: string): Promise<IngestionSummary
       },
     },
   ];
+}
 
-  for (const src of sources) {
-    const runRow = await supabaseAdmin.from("ingestion_runs").insert({ source: src.name }).select().single();
-    const runId = runRow.data?.id;
-    try {
-      const raws = await src.fn();
-      const inserted = await persistRaws(raws);
-      let enrichedTotal = 0;
-      for (const s of src.sourceFilter) {
-        const ids = await enrichPending(s);
-        newlyEnrichedIds.push(...ids);
-        enrichedTotal += ids.length;
-      }
-      summaries.push({ source: src.name, fetched: raws.length, inserted, enriched: enrichedTotal });
-      if (runId) {
-        await supabaseAdmin.from("ingestion_runs").update({
-          finished_at: new Date().toISOString(),
-          fetched_count: raws.length,
-          new_count: inserted,
-          enriched_count: enrichedTotal,
-          status: "ok",
-        }).eq("id", runId);
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.error(`Ingestion failed for ${src.name}:`, msg);
-      summaries.push({ source: src.name, fetched: 0, inserted: 0, enriched: 0, error: msg });
-      if (runId) {
-        await supabaseAdmin.from("ingestion_runs").update({
-          finished_at: new Date().toISOString(), status: "error", error: msg,
-        }).eq("id", runId);
-      }
+export const INGESTION_SOURCE_NAMES = [
+  "sam_gov", "openfda", "gdelt", "clinicaltrials",
+  "reddit", "bluesky", "funding_rss", "cms_open_payments",
+] as const;
+export type IngestionSourceName = (typeof INGESTION_SOURCE_NAMES)[number];
+
+async function runOneSource(src: SourceSpec): Promise<{ summary: IngestionSummary; enrichedIds: string[] }> {
+  const runRow = await supabaseAdmin.from("ingestion_runs").insert({ source: src.name }).select().single();
+  const runId = runRow.data?.id;
+  const enrichedIds: string[] = [];
+  try {
+    const raws = await src.fn();
+    const inserted = await persistRaws(raws);
+    let enrichedTotal = 0;
+    for (const s of src.sourceFilter) {
+      const ids = await enrichPending(s);
+      enrichedIds.push(...ids);
+      enrichedTotal += ids.length;
     }
+    if (runId) {
+      await supabaseAdmin.from("ingestion_runs").update({
+        finished_at: new Date().toISOString(),
+        fetched_count: raws.length,
+        new_count: inserted,
+        enriched_count: enrichedTotal,
+        status: "ok",
+      }).eq("id", runId);
+    }
+    return { summary: { source: src.name, fetched: raws.length, inserted, enriched: enrichedTotal }, enrichedIds };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`Ingestion failed for ${src.name}:`, msg);
+    if (runId) {
+      await supabaseAdmin.from("ingestion_runs").update({
+        finished_at: new Date().toISOString(), status: "error", error: msg,
+      }).eq("id", runId);
+    }
+    return { summary: { source: src.name, fetched: 0, inserted: 0, enriched: 0, error: msg }, enrichedIds };
   }
+}
 
+export async function runIngestionForSource(
+  name: IngestionSourceName,
+  forUserId?: string,
+): Promise<IngestionSummary> {
+  const src = buildSources().find((s) => s.name === name);
+  if (!src) throw new Error(`Unknown ingestion source: ${name}`);
+  const { summary, enrichedIds } = await runOneSource(src);
+  if (enrichedIds.length > 0) {
+    try { await evaluateAlerts(enrichedIds, forUserId); }
+    catch (e) { console.error("alerts evaluation failed:", e); }
+  }
+  return summary;
+}
+
+export async function runIngestion(forUserId?: string): Promise<IngestionSummary[]> {
+  const sources = buildSources();
+  const summaries: IngestionSummary[] = [];
+  const newlyEnrichedIds: string[] = [];
+  for (const src of sources) {
+    const { summary, enrichedIds } = await runOneSource(src);
+    summaries.push(summary);
+    newlyEnrichedIds.push(...enrichedIds);
+  }
   if (newlyEnrichedIds.length > 0) {
     try { await evaluateAlerts(newlyEnrichedIds, forUserId); }
     catch (e) { console.error("alerts evaluation failed:", e); }

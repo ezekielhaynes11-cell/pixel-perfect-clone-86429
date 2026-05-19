@@ -2,9 +2,11 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { OWNER_ID } from "./owner.server";
-import { runIngestion } from "./ingest/run.server";
+import { runIngestion, runIngestionForSource, INGESTION_SOURCE_NAMES, type IngestionSourceName } from "./ingest/run.server";
 import { draftOutreachEmail } from "./outreach.server";
 import { generateDailyBriefing, type BriefingLead } from "./briefings.server";
+
+export const INGESTION_SOURCES = INGESTION_SOURCE_NAMES;
 
 export const listLeads = createServerFn({ method: "GET" }).handler(async () => {
   const { data, error } = await supabaseAdmin
@@ -21,6 +23,14 @@ export const listLeads = createServerFn({ method: "GET" }).handler(async () => {
 export const triggerIngestion = createServerFn({ method: "POST" }).handler(async () => {
   return await runIngestion(OWNER_ID);
 });
+
+export const triggerIngestionForSource = createServerFn({ method: "POST" })
+  .inputValidator((input) =>
+    z.object({ source: z.enum(INGESTION_SOURCE_NAMES) }).parse(input),
+  )
+  .handler(async ({ data }) => {
+    return await runIngestionForSource(data.source as IngestionSourceName, OWNER_ID);
+  });
 
 export const listLeadActions = createServerFn({ method: "GET" }).handler(async () => {
   const { data, error } = await supabaseAdmin
