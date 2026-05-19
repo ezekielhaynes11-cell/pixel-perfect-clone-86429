@@ -188,17 +188,6 @@ function Dashboard() {
           >
             <BarChart3 className="h-3.5 w-3.5" /> Pipeline
           </Link>
-          <span
-            className="hidden cursor-help rounded-md border border-border bg-surface-2 px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground md:inline-block"
-            title={
-              "Auto-refresh: 7am + 1pm PT\n" +
-              "Per refresh: 20–60 new leads\n" +
-              "Per week: 200–400 new leads\n" +
-              "Worth opening (conf ≥75): 50–100/wk"
-            }
-          >
-            2× daily
-          </span>
           <button
             onClick={() => setSearchesOpen(true)}
             className="hidden items-center gap-1.5 rounded-md border border-border bg-surface-2 px-3 py-1.5 text-xs font-medium text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground md:flex"
