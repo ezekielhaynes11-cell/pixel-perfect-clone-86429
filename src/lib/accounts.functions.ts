@@ -1,6 +1,61 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { OWNER_ID } from "./owner.server";
+import { runAccountResearch } from "./research-agent.server";
+
+export interface AccountBriefStructured {
+  exec_summary: string;
+  vendor_footprint: string[];
+  capital_plans: string[];
+  key_people: Array<{ name: string; role: string }>;
+  recent_signals: string[];
+  recommended_next_steps: string[];
+  sources: Array<{ url: string; note: string }>;
+}
+
+export interface AccountBriefRow {
+  id: string;
+  account_id: string;
+  markdown: string;
+  structured: AccountBriefStructured;
+  sources: Array<{ url: string; note: string }>;
+  model: string;
+  created_at: string;
+}
+
+export const listAccountBriefs = createServerFn({ method: "POST" })
+  .inputValidator((input) => z.object({ account_id: z.string().uuid() }).parse(input))
+  .handler(async ({ data }): Promise<AccountBriefRow[]> => {
+    const { data: rows, error } = await supabaseAdmin
+      .from("account_briefs")
+      .select("id, account_id, markdown, structured, sources, model, created_at")
+      .eq("account_id", data.account_id)
+      .order("created_at", { ascending: false })
+      .limit(5);
+    if (error) throw new Error(error.message);
+    return (rows ?? []) as unknown as AccountBriefRow[];
+  });
+
+export const researchAccount = createServerFn({ method: "POST" })
+  .inputValidator((input) => z.object({ account_id: z.string().uuid() }).parse(input))
+  .handler(async ({ data }) => {
+    const result = await runAccountResearch(data.account_id);
+    const { data: saved, error } = await supabaseAdmin
+      .from("account_briefs")
+      .insert({
+        account_id: data.account_id,
+        markdown: result.markdown,
+        structured: result.brief as never,
+        sources: result.sources as never,
+        model: "google/gemini-2.5-flash",
+        created_by: OWNER_ID,
+      })
+      .select("id, account_id, markdown, structured, sources, model, created_at")
+      .single();
+    if (error) throw new Error(error.message);
+    return { brief: saved as unknown as AccountBriefRow, steps: result.steps };
+  });
 
 export interface AccountDetail {
   account: {

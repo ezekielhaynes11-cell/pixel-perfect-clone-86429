@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { ArrowLeft, Building2, MapPin, Shield, ExternalLink, Phone, FileText, Zap } from "lucide-react";
 import { getAccountDetail } from "@/lib/accounts.functions";
+import { AccountBrief } from "@/components/dashboard/AccountBrief";
 import { timeAgo, formatUsd } from "@/data/leads";
 
 export const Route = createFileRoute("/accounts/$id")({
@@ -83,6 +84,8 @@ function AccountPage() {
             </div>
           </div>
         </div>
+
+        <AccountBrief accountId={account.id} />
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
           <div className="space-y-6">

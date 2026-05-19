@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { RefreshCw, TrendingUp, Bookmark, BarChart3, AlertCircle, EyeOff, Eye, XCircle, RotateCcw } from "lucide-react";
+import { RefreshCw, TrendingUp, Bookmark, BarChart3, AlertCircle, EyeOff, Eye, XCircle, RotateCcw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { listLeads, triggerIngestion, setLeadAction, listLeadActions, getRecentIngestionRuns, listLeadPhysicians, bulkSetLeadAction, type LeadPhysician } from "@/lib/leads.functions";
 import { rowToLead, leadStateCode, type Lead, type LeadRow } from "@/data/leads";
@@ -14,6 +14,7 @@ import { Sidebar } from "@/components/dashboard/Sidebar";
 import { OutreachDraftDialog } from "@/components/dashboard/OutreachDraftDialog";
 import { SavedSearchesDrawer } from "@/components/dashboard/SavedSearchesDrawer";
 import { AlertsBell } from "@/components/dashboard/AlertsBell";
+import { CopilotPanel } from "@/components/dashboard/CopilotPanel";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -31,6 +32,7 @@ function Dashboard() {
   const [active, setActive] = useState<Lead | null>(null);
   const [draftFor, setDraftFor] = useState<Lead | null>(null);
   const [searchesOpen, setSearchesOpen] = useState(false);
+  const [copilotOpen, setCopilotOpen] = useState(false);
   const [showDismissed, setShowDismissed] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const qc = useQueryClient();
@@ -202,6 +204,13 @@ function Dashboard() {
             className="hidden items-center gap-1.5 rounded-md border border-border bg-surface-2 px-3 py-1.5 text-xs font-medium text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground md:flex"
           >
             <Bookmark className="h-3.5 w-3.5" /> Saved
+          </button>
+          <button
+            onClick={() => setCopilotOpen(true)}
+            className="flex items-center gap-1.5 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20"
+            title="Open Copilot"
+          >
+            <Sparkles className="h-3.5 w-3.5" /> Copilot
           </button>
           <AlertsBell leads={activeLeads} onOpenLead={setActive} />
           <button
@@ -379,6 +388,7 @@ function Dashboard() {
         currentFilters={filters}
         onApply={setFilters}
       />
+      <CopilotPanel open={copilotOpen} onClose={() => setCopilotOpen(false)} />
     </div>
   );
 }
