@@ -1,70 +1,99 @@
-## Pre-handoff sprint (no email/Resend work)
+# Plan: Two Agentic Capabilities
 
-Goal: get the dashboard to a state Mike can use day-one without manual triggering.
+Adding the two highest-impact agents on top of the existing Lead Radar without disturbing the working ingestion/feed/dismiss pipeline.
 
-### 1. Seed `keyword_lists` from the PRD
+## 1. Account Research Agent (deep-dive on `/accounts/$id`)
 
-Insert the full vendor/product/role taxonomy so Reddit/Bluesky/GDELT adapters have something to match against. Three `kind` values:
+**Goal:** One-click "Research this account" button that autonomously gathers fresh intel and writes a structured brief.
 
-- `vendor` — GE Healthcare, Mindray, SonoSite (Fujifilm), Samsung, Canon, Siemens, Konica Minolta, Esaote, Butterfly, Clarius, EchoNous, Kosmos, Exo
-- `product` — Venue Fit, Venue Go, Vivid iq, Voluson, Logiq, M9, ME8, TE7, X-Porte, Edge II, PX, HS50, HS60, Aplio i-series, Acuson Juniper, P20, IQ
-- `role` — POCUS Director, Fellowship Director, Emergency Ultrasound Director, Chief of EM, Critical Care Director, Biomed Director, Imaging Director, Chief Radiologist
+### Backend
+- New table `account_briefs` (id, account_id, markdown, structured jsonb, sources jsonb, model, created_at, created_by)
+  - RLS: signed-in read; admins write (briefs are insert-only, never user-edited)
+- New server fn `researchAccount({ accountId })` in `src/lib/accounts.functions.ts`
+  - Agent loop, **max 6 steps** (cost guardrail), single Gemini Flash model
+  - Tools the model can call:
+    1. `web_search(query)` — reuses existing approach (no new key; uses Lovable AI's grounded search via prompt context, OR a single SAM/GDELT lookup if cheaper)
+    2. `scrape_url(url)` — reuses `scrape-url.server.ts`
+    3. `read_existing_signals()` — pulls last 50 leads + scraped_pages already in DB for this account (free, no LLM tokens)
+    4. `finish(brief)` — structured tool call: { exec_summary, vendor_footprint, capital_plans, key_people, recent_signals, recommended_next_steps, sources[] }
+  - Hard stop at 6 tool calls OR when `finish` is called
+  - Persists one row in `account_briefs`; returns it
 
-Done via `supabase--insert` (data, not schema).
+### Frontend
+- `/accounts/$id` page: "Research account" button (top right of header)
+  - Shows latest existing brief if any (collapsible)
+  - Button triggers `researchAccount`, shows step-by-step progress (tool name + brief status)
+  - On completion, renders markdown brief + sources list
 
-### 2. FilterBar chips for the new metadata
+**Cost control:** Single agent call, capped steps, Flash model, dedup (if brief < 7 days old, prompt to view existing instead of re-running).
 
-Add to `src/components/dashboard/FilterBar.tsx`:
-- **Signal type** multi-select: recall, RFP, funding, M&A, expansion, sentiment, incumbency
-- **Account type** toggle: VA / Non-VA / All
-- **Vendor** multi-select sourced from `keyword_lists` where kind='vendor'
-- **State** chips: TX / OK / AR / LA (Mike's territory)
+---
 
-Wire into `useLeads` filter object and `leads.functions.ts` query builder.
+## 2. Conversational Lead Copilot (sidebar chat)
 
-### 3. `/accounts/$id` deep-dive page
+**Goal:** Natural-language interface over the existing data. Mike can ask "Show VA accounts in TX with ultrasound recall signals this month and draft intros to their POCUS directors."
 
-New route `src/routes/accounts.$id.tsx` showing:
-- Header: account name, state, VA badge, system
-- Vendor footprint card (aggregated `vendor_mentions` across that account's leads)
-- Timeline of signals (leads grouped by `signal_type`, newest first)
-- Linked physicians (from `lead_physicians` joined through `leads.account_id`)
-- Scraped pages list (from `scraped_pages` where `account_id` matches)
+### Backend
+- New server fn `copilotChat({ messages })` in `src/lib/copilot.functions.ts`
+  - **Streams** via async generator (per `tanstack-server-functions` AI streaming pattern) — token-by-token
+  - Tool-calling loop, **max 8 tool calls per turn** (cost guardrail)
+  - Tools exposed to model (all read against existing tables, no new schema):
+    1. `query_leads(filters)` — state, signal_type, source, vendor, account_type, min_confidence, date_from, limit≤50
+    2. `query_accounts(filters)` — name search, state, is_va, limit≤25
+    3. `query_physicians(filters)` — specialty, state, role_hint, limit≤25
+    4. `get_account_brief(account_id)` — returns latest brief if exists (lets the copilot reuse Agent #1's output)
+    5. `draft_outreach(lead_id, tone)` — reuses existing `outreach.server.ts`
+  - System prompt scoped to Philips territory + grounding rules ("only state facts present in tool results")
+  - No conversation persistence in v1 (in-memory client state, like a chat panel) — keeps scope tight
 
-LeadCard gets a "View account" link when `account_id` is set.
+### Frontend
+- New `<CopilotPanel />` component, slide-over drawer triggered from the dashboard header (sparkle icon next to AlertsBell)
+- Messages list with markdown rendering (`react-markdown` — add dep)
+- Streams assistant tokens; renders tool calls inline as collapsed chips ("Searching leads… 12 results")
+- "Open lead" / "Open account" inline links generated from tool results jump into existing routes
+- Mobile: full-screen sheet
 
-### 4. End-to-end ingestion test
+### Cost control
+- Flash model default (`google/gemini-2.5-flash`)
+- Hard step cap (8 tool calls per user turn)
+- Per-tool row caps (50 / 25)
+- No background polling, no auto-suggestions — only fires on explicit user send
 
-- Trigger `/api/public/ingest` once manually via `stack_modern--invoke-server-function`
-- Read `ingestion_runs` + sample 10 enriched leads
-- Spot-check that signal_type, vendor_mentions, account_type are populated
-- Fix any adapter producing junk before scheduling
+---
 
-### 5. Schedule ingestion via pg_cron
+## Files
 
-Enable `pg_cron` + `pg_net`, then schedule `/api/public/ingest` every 4 hours using the documented `apikey: <anon>` pattern. SQL goes through `supabase--insert` (not migration) since URL + anon key are environment-specific.
+**New**
+- `src/lib/accounts.functions.ts` — add `researchAccount` (extend existing file)
+- `src/lib/research-agent.server.ts` — agent loop helper
+- `src/lib/copilot.functions.ts` — `copilotChat` streaming server fn
+- `src/lib/copilot-tools.server.ts` — tool implementations (query_*, draft_outreach wrapper)
+- `src/components/dashboard/CopilotPanel.tsx`
+- `src/components/dashboard/AccountBrief.tsx` (renders brief + sources)
 
-### 6. Provision Mike's admin account
+**Edited**
+- `src/routes/accounts.$id.tsx` — Research button + brief display
+- `src/routes/index.tsx` — Copilot trigger in header
+- `src/components/dashboard/Header.tsx` — sparkle icon button
 
-Two-step:
-- Ask user for Mike's email (one ask_questions call)
-- Once we have it, insert a row into `user_roles` with role='admin' after he signs up — OR if he hasn't signed up yet, document the one-line SQL Mike can run after his first login. Cleanest: have Mike sign up first, then I flip his role.
+**Migration**
+- `account_briefs` table + RLS
 
-### Technical notes
+**Dep**
+- `react-markdown` (already common; ~30KB)
 
-- All data writes (taxonomy seed, cron schedule, role grant) go through `supabase--insert`, not migrations.
-- No new tables, no new columns — schema is already in place from the last migration.
-- FilterBar and accounts page are pure frontend + server-fn query extensions; no new dependencies.
-- Ingest cron URL: `https://project--4153fd65-1b3f-4a50-9892-2fe6d3062712.lovable.app/api/public/ingest`
+---
 
-### Out of scope (explicitly deferred)
+## What I will NOT do (to protect the build & credits)
+- No new ingestion source
+- No re-architecting existing server fns
+- No re-doing the index page; copilot is an additive drawer
+- No persistent chat history table in v1 (can add later if Mike wants)
+- No new model tier (sticks to existing `google/gemini-2.5-flash` already in use)
+- No additional API keys requested
 
-- Morning email digest (needs Resend domain)
-- Apollo / LinkedIn / X / Facebook
-- Saved-search alert email delivery (in-app alerts still work)
-
-### Order of execution
-
-1 → 2 → 3 → 4 → 5 → 6. Steps 1–3 are independent code; 4 validates; 5 automates; 6 hands over.
-
-Approve and I'll build straight through.
+## Execution order
+1. Migration: `account_briefs` table (await approval)
+2. Implement Account Research Agent (backend + UI on `/accounts/$id`)
+3. Implement Copilot (backend + drawer)
+4. Smoke test: trigger research on one existing account, ask copilot 2 questions

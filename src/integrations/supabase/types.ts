@@ -14,6 +14,47 @@ export type Database = {
   }
   public: {
     Tables: {
+      account_briefs: {
+        Row: {
+          account_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          markdown: string
+          model: string
+          sources: Json
+          structured: Json
+        }
+        Insert: {
+          account_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          markdown: string
+          model?: string
+          sources?: Json
+          structured?: Json
+        }
+        Update: {
+          account_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          markdown?: string
+          model?: string
+          sources?: Json
+          structured?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "account_briefs_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       accounts: {
         Row: {
           account_type: string | null
