@@ -142,6 +142,31 @@ function KeywordsPage() {
           })}
         </div>
       </section>
+
+      <section className="rounded-md border border-border bg-surface-2 p-4">
+        <h2 className="mb-1 font-medium">Bulk enrich physicians via Apollo</h2>
+        <p className="mb-3 text-xs text-muted-foreground">
+          {unenrichedQ.data?.count ?? "—"} physicians have no Apollo data yet. Runs sequentially with a short delay; counts against your Apollo quota.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="number"
+            min={1}
+            max={100}
+            value={enrichLimit}
+            onChange={(e) => setEnrichLimit(Math.max(1, Math.min(100, Number(e.target.value) || 1)))}
+            className="h-9 w-24 rounded-md border border-border bg-surface-3 px-3 text-sm"
+          />
+          <button
+            onClick={() => doBulkEnrich.mutate()}
+            disabled={doBulkEnrich.isPending || (unenrichedQ.data?.count ?? 0) === 0}
+            className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
+          >
+            {doBulkEnrich.isPending ? "Enriching…" : "Run enrichment"}
+          </button>
+        </div>
+      </section>
     </div>
+
   );
 }
