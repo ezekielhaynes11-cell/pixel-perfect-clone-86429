@@ -424,7 +424,7 @@ function Dashboard() {
         </footer>
       </main>
 
-      <LeadDetailModal lead={active} onClose={() => setActive(null)} />
+      <LeadDetailModal lead={active} physicians={active ? physiciansByLead.get(active.id) ?? [] : []} onClose={() => setActive(null)} />
       <OutreachDraftDialog lead={draftFor} open={!!draftFor} onClose={() => setDraftFor(null)} />
       <SavedSearchesDrawer
         open={searchesOpen}

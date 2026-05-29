@@ -6,18 +6,13 @@ import {
   XCircle,
   Building2,
   Stethoscope,
-  UserRound,
-  Phone,
-  Mail,
-  Linkedin,
-  ChevronDown,
   RotateCcw,
 } from "lucide-react";
 
-import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { type Lead, timeAgo } from "@/data/leads";
 import type { LeadPhysician } from "@/lib/leads.functions";
+import { ContactSection } from "./ContactSection";
 
 const sourceMeta: Record<string, { label: string; cls: string }> = {
   sam_gov: { label: "SAM.gov", cls: "bg-blue-500/15 text-blue-300 border-blue-500/30" },
@@ -68,11 +63,9 @@ export function LeadCard({
   dismissed?: boolean;
   onRestore?: () => void;
 }) {
-  const [showDocs, setShowDocs] = useState(physicians.length === 1);
   const meta = sourceMeta[lead.source] ?? { label: lead.source, cls: "bg-surface-3 text-foreground border-border" };
   const conf = confidenceColor(lead.confidence);
-  const topPhys = physicians[0];
-  const hasInlineContact = !!(topPhys && (topPhys.email || topPhys.linkedin_url || topPhys.practice_phone));
+
 
   return (
     <article
@@ -144,109 +137,9 @@ export function LeadCard({
         ))}
       </div>
 
-      {/* Physicians */}
-      {physicians.length > 0 && (
-        <div className="mb-3 rounded-md border border-border/60 bg-surface/60 p-2">
-          {hasInlineContact && !showDocs && (
-            <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-              <span className="font-medium text-foreground">
-                {topPhys.full_name}
-                {topPhys.credentials ? `, ${topPhys.credentials}` : ""}
-              </span>
-              {topPhys.title && (
-                <span className="text-muted-foreground">{topPhys.title}</span>
-              )}
-              {topPhys.email && (
-                <a href={`mailto:${topPhys.email}`} className="flex items-center gap-1 text-primary hover:underline">
-                  <Mail className="h-3 w-3" />
-                  {topPhys.email}
-                </a>
-              )}
-              {topPhys.linkedin_url && (
-                <a href={topPhys.linkedin_url} target="_blank" rel="noreferrer" className="text-primary hover:underline" aria-label="LinkedIn">
-                  <Linkedin className="h-3 w-3" />
-                </a>
-              )}
-              {topPhys.practice_phone && (
-                <a href={`tel:${topPhys.practice_phone}`} className="flex items-center gap-1 text-primary hover:underline">
-                  <Phone className="h-3 w-3" />
-                  {topPhys.practice_phone}
-                </a>
-              )}
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={() => setShowDocs((v) => !v)}
-            className="flex w-full items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
-          >
-            <UserRound className="h-3 w-3" />
-            {physicians.length} Physician{physicians.length > 1 ? "s" : ""}
-            <ChevronDown className={`ml-auto h-3 w-3 transition-transform ${showDocs ? "rotate-180" : ""}`} />
-          </button>
+      {/* Contact */}
+      <ContactSection sourceContacts={lead.sourceContacts ?? []} physicians={physicians} />
 
-          {showDocs && (
-            <ul className="mt-2 space-y-1.5">
-              {physicians.slice(0, 6).map((p) => (
-                <li key={p.npi} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
-                  <span className="font-medium text-foreground">
-                    {p.full_name}
-                    {p.credentials ? `, ${p.credentials}` : ""}
-                  </span>
-                  {p.title && (
-                    <span className="text-muted-foreground">· {p.title}</span>
-                  )}
-                  {p.primary_specialty && (
-                    <span className="text-muted-foreground">· {p.primary_specialty}</span>
-                  )}
-                  {(p.practice_city || p.practice_state) && (
-                    <span className="text-muted-foreground">
-                      · {[p.practice_city, p.practice_state].filter(Boolean).join(", ")}
-                    </span>
-                  )}
-                  {p.apollo_enriched_at && (
-                    <span className="rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] uppercase tracking-wide text-primary/80">
-                      Apollo · {timeAgo(p.apollo_enriched_at)}
-                    </span>
-                  )}
-                  <div className="ml-auto flex items-center gap-2">
-                    {p.email && (
-                      <a
-                        href={`mailto:${p.email}`}
-                        className="flex items-center gap-1 text-primary hover:underline"
-                      >
-                        <Mail className="h-3 w-3" />
-                        {p.email}
-                      </a>
-                    )}
-                    {p.linkedin_url && (
-                      <a
-                        href={p.linkedin_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-primary hover:underline"
-                        aria-label="LinkedIn"
-                      >
-                        <Linkedin className="h-3 w-3" />
-                      </a>
-                    )}
-                    {p.practice_phone && (
-                      <a
-                        href={`tel:${p.practice_phone}`}
-                        className="flex items-center gap-1 text-primary hover:underline"
-                      >
-                        <Phone className="h-3 w-3" />
-                        {p.practice_phone}
-                      </a>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-
-          )}
-        </div>
-      )}
 
       {/* Actions */}
       <div className="flex flex-wrap items-center gap-2">

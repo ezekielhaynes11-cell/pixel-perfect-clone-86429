@@ -1,14 +1,19 @@
 import { useEffect } from "react";
 import { X, ExternalLink, Building2, User2, Wrench, Tag } from "lucide-react";
 import { type Lead, timeAgo } from "@/data/leads";
+import type { LeadPhysician } from "@/lib/leads.functions";
+import { ContactSection } from "./ContactSection";
 
 export function LeadDetailModal({
   lead,
+  physicians = [],
   onClose,
 }: {
   lead: Lead | null;
+  physicians?: LeadPhysician[];
   onClose: () => void;
 }) {
+
   useEffect(() => {
     const fn = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", fn);
@@ -45,6 +50,9 @@ export function LeadDetailModal({
 
         <div className="space-y-5 p-5">
           <p className="text-sm leading-relaxed text-foreground/90">{lead.summary}</p>
+
+          <ContactSection sourceContacts={lead.sourceContacts ?? []} physicians={physicians} />
+
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <EntityBlock icon={<Building2 />} title="Hospitals" items={lead.entities.hospitals} />

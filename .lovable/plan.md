@@ -1,53 +1,90 @@
-## Why the cards still show no emails
+# Always-visible Contact section + SAM.gov POC capture
 
-The DB confirms the root cause:
-- 6 `physician_contacts` rows exist
-- 0 have `email`
-- 0 have `apollo_enriched_at`
-- Recent ingestion runs all report `new_count = 0`
+## Problem
 
-The previous change only triggers Apollo *inside* `attachPhysiciansToLead`. That code path runs only when a brand-new physician is being linked to a lead. Since ingestion finds nothing new, the auto-enrich never fires, and the existing 6 physicians stay un-enriched forever. Hitting "Refresh feed" produces zero Apollo calls — matching the empty server logs.
+Contacts on the feed today come only from `physician_contacts` (NPPES + Apollo). When a lead has no linked physician, the card shows nothing. SAM.gov opportunities ship a `pointOfContact[]` array (contracting officer, etc.) in `raw_payload`, but it is never surfaced. openFDA and GDELT have no contact data, but the UI gives no signal explaining the absence.
 
-## Fix: backfill sweep on every ingestion + on demand
+## Fix
 
-Add a small backfill that enriches any physician already linked to a lead but missing Apollo data, gated by the same daily cap.
+Two parts: persist SAM.gov POCs as first-class data, and render a Contact section on every lead — always visible, with "Not available" per missing field and a "No contact on file" badge when nothing exists.
 
-### 1. `src/lib/apollo/service.server.ts` — add `backfillApolloForLinkedPhysicians`
+## 1. Data — capture SAM.gov pointOfContact
 
-New exported function:
-- Query `physician_contacts` where `apollo_enriched_at IS NULL` AND `apollo_id IS NULL` AND `npi NOT LIKE 'APL-%'`.
-- Only include NPIs that appear in `lead_physicians` (so we don't enrich orphans).
-- Cap the batch (e.g. 25 per call) to stay safe.
-- For each, call `tryConsumeApolloCall()`; if false, stop and log once.
-- Call `apolloEnrichPhysician({ npi })` inside try/catch, 300 ms pacing.
-- Return `{ attempted, matched, skippedCap }`.
+**Schema** — add one nullable jsonb column to `leads`:
 
-### 2. `src/lib/ingest/run.server.ts` — call backfill at end of run
+```text
+source_contacts jsonb  -- normalized array of LeadContact, default null
+```
 
-After the existing `enrichPending` loop in `runIngestion` (and `runIngestionForSource`), invoke `backfillApolloForLinkedPhysicians()` once. Wrap in try/catch; log summary. This guarantees every "Refresh feed" click also catches up the previously-missed contacts.
+`LeadContact` shape (stored as JSON, also the UI type):
 
-### 3. `src/lib/leads.functions.ts` — one-shot manual trigger
+```text
+{ name, title, organization, email, phone, address, type, source_origin }
+```
 
-Add `triggerApolloBackfill = createServerFn(...)` that simply calls `backfillApolloForLinkedPhysicians({ limit: 50 })`. Returns counts. No UI wiring required for this task, but useful from copilot/devtools so the user can force enrichment of the current 6 rows immediately without waiting for the next ingestion run.
+**`src/lib/ingest/types.ts`** — extend `RawLead`:
 
-### 4. No UI changes
+```text
+source_contacts?: LeadContact[]
+```
 
-`LeadCard` already renders email/title/LinkedIn the moment those columns populate. Once the backfill runs successfully, the cards will surface contacts on next page load (TanStack Query refetch).
+**`src/lib/ingest/sam-gov.server.ts`**:
+- Type the `pointOfContact[]` array on `SamOpportunity`.
+- Map each POC to `LeadContact`:
+  - `name` = `[firstName, middleName, lastName].filter(Boolean).join(" ")` or `fullName` fallback
+  - `title` = `title`
+  - `organization` = `o.department` / `o.subTier` / `o.officeAddress?.name`
+  - `email`, `phone`, `type` (e.g. `primary` / `secondary`)
+  - `address` = formatted `o.officeAddress` (street, city, state, zip) — POCs typically inherit office address
+- Attach `source_contacts` to the `RawLead`.
+- Also append a short POC block to `raw_text` so the enrichment LLM can reference it in the summary.
 
-## Verification
+**`src/lib/ingest/openfda.server.ts`, `gdelt.server.ts`** — leave `source_contacts` undefined. (FDA enforcement does include `recalling_firm` address; we can optionally include it as an `organization`-only contact, but treat as out of scope for this plan to keep the diff small. Mention this as a future enhancement.)
 
-1. Click "Refresh feed" once → server logs show `backfillApolloForLinkedPhysicians` activity and per-NPI Apollo calls.
-2. `SELECT npi, email, apollo_enriched_at FROM physician_contacts` shows non-null `apollo_enriched_at` (and emails where Apollo had a match) for the 6 rows.
-3. Reload `/` → top physician on each LeadCard shows ✉️ email / LinkedIn / phone inline.
-4. Re-run ingestion → backfill returns `attempted: 0` (idempotent fast-path in `apolloEnrichPhysician` already skips).
+**`src/lib/ingest/run.server.ts`** — when inserting the lead row, persist `source_contacts: raw.source_contacts ?? null`.
 
-## Out of scope
+**`src/lib/leads.functions.ts`** — add `source_contacts` to `LEAD_LIST_COLUMNS` and to `LeadRow` / `Lead` types (`src/data/leads.ts`), mapped through `rowToLead`.
 
-- No new DB migrations, no schema changes.
-- No changes to `apollo/client.server.ts` or NPPES logic.
-- No changes to the daily-cap module.
-- Bulk-enrich button stays as-is.
+## 2. UI — always-on Contact section
 
-## Risk
+**New component `src/components/dashboard/ContactSection.tsx`**:
+- Accepts `sourceContacts: LeadContact[]` and `physicians: LeadPhysician[]`.
+- Normalizes both into a unified `LeadContact[]` (physician → `{ name: full_name, title, organization: practice (city/state), email, phone: practice_phone, address: practice_address }`).
+- Renders a "Contact" header. For each contact, renders six labelled rows: Name, Title, Organization, Phone, Email, Address. Missing values render `<span className="text-muted-foreground italic">Not available</span>` — rows never disappear.
+- Multi-contact: collapsible list, first contact expanded by default.
+- Zero contacts: render the section anyway with all six rows showing "Not available" plus a `No contact on file` badge with tooltip "This source did not include contact data."
 
-If Apollo returns no match for these 6 NPIs (some look incomplete, e.g. `-- RAVINDER KAUR`), `apollo_enriched_at` will stay null and the card stays empty. That's an Apollo data-quality limit, not a code bug — the logs will say "No Apollo match for this physician."
+**`src/components/dashboard/LeadCard.tsx`**:
+- Replace the conditional `{physicians.length > 0 && ...}` block with `<ContactSection sourceContacts={lead.sourceContacts ?? []} physicians={physicians} />` — always rendered.
+- Keep the existing physician details (specialty, Apollo badge, LinkedIn) inside `ContactSection` so nothing regresses.
+
+**`src/components/dashboard/LeadDetailModal.tsx`**:
+- Add the same `<ContactSection />` above the existing entity grid. Pass `physicians` (modal currently doesn't receive them — wire through from the parent that opens the modal, or fetch via `listLeadPhysicians` once if simpler — pick the prop route, parents already have the data via `useLeadPhysicians`).
+
+## 3. Files touched
+
+```text
+supabase migration         add leads.source_contacts jsonb
+src/lib/ingest/types.ts    +LeadContact, RawLead.source_contacts
+src/lib/ingest/sam-gov.server.ts   map pointOfContact[]
+src/lib/ingest/run.server.ts       persist source_contacts
+src/lib/leads.functions.ts         include in LEAD_LIST_COLUMNS
+src/data/leads.ts                  +sourceContacts on Lead
+src/components/dashboard/ContactSection.tsx   (new)
+src/components/dashboard/LeadCard.tsx         use ContactSection
+src/components/dashboard/LeadDetailModal.tsx  use ContactSection + receive physicians prop
+src/routes/index.tsx (or wherever modal mounts)  pass physicians to modal
+```
+
+## 4. Verification
+
+- Run a SAM.gov ingestion; query `select source_contacts from leads where source='sam_gov' limit 5;` — expect populated arrays.
+- Open a SAM.gov lead in the feed → Contact section lists the contracting officer with email/phone.
+- Open an openFDA or GDELT lead → Contact section shows six "Not available" rows + "No contact on file" badge.
+- Open a lead linked to a NPPES physician → Contact section shows physician contact, no badge.
+
+## 5. Out of scope
+
+- No changes to Apollo enrichment, NPPES pipeline, or the bulk-enrich button.
+- openFDA/GDELT contact extraction beyond the "No contact on file" badge.
+- No backfill script for the existing SAM.gov rows already in `leads` (their `raw_payload` still has `pointOfContact` — a one-off migration could repopulate, but is deferred unless you want it).

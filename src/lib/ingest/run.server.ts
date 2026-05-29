@@ -182,6 +182,7 @@ async function persistRaws(raws: RawLead[]): Promise<number> {
       title: r.title.slice(0, 500),
       summary: r.raw_text.slice(0, 600),
       raw_payload: r.raw_payload as never,
+      source_contacts: (r.source_contacts ?? null) as never,
       date_discovered: r.date_discovered,
       confidence: 0,
       enriched: false,
