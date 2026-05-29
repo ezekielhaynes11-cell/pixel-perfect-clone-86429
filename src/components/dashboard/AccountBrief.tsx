@@ -21,6 +21,7 @@ export function AccountBrief({ accountId }: { accountId: string }) {
   const qc = useQueryClient();
   const list = useServerFn(listAccountBriefs);
   const research = useServerFn(researchAccount);
+  const enrichApollo = useServerFn(enrichAccountApollo);
   const [open, setOpen] = useState(true);
   const [steps, setSteps] = useState<Array<{ tool: string; note: string }>>([]);
 
