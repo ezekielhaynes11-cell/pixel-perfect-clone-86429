@@ -326,6 +326,7 @@ export type Database = {
           raw_payload: Json | null
           signal_type: string | null
           source: string
+          source_contacts: Json | null
           source_external_id: string
           source_url: string | null
           specialty: string | null
@@ -353,6 +354,7 @@ export type Database = {
           raw_payload?: Json | null
           signal_type?: string | null
           source: string
+          source_contacts?: Json | null
           source_external_id: string
           source_url?: string | null
           specialty?: string | null
@@ -380,6 +382,7 @@ export type Database = {
           raw_payload?: Json | null
           signal_type?: string | null
           source?: string
+          source_contacts?: Json | null
           source_external_id?: string
           source_url?: string | null
           specialty?: string | null
