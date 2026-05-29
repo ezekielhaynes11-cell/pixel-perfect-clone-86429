@@ -159,6 +159,9 @@ export function LeadCard({
                     {p.full_name}
                     {p.credentials ? `, ${p.credentials}` : ""}
                   </span>
+                  {p.title && (
+                    <span className="text-muted-foreground">· {p.title}</span>
+                  )}
                   {p.primary_specialty && (
                     <span className="text-muted-foreground">· {p.primary_specialty}</span>
                   )}
@@ -167,18 +170,46 @@ export function LeadCard({
                       · {[p.practice_city, p.practice_state].filter(Boolean).join(", ")}
                     </span>
                   )}
-                  {p.practice_phone && (
-                    <a
-                      href={`tel:${p.practice_phone}`}
-                      className="ml-auto flex items-center gap-1 text-primary hover:underline"
-                    >
-                      <Phone className="h-3 w-3" />
-                      {p.practice_phone}
-                    </a>
+                  {p.apollo_enriched_at && (
+                    <span className="rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] uppercase tracking-wide text-primary/80">
+                      Apollo · {timeAgo(p.apollo_enriched_at)}
+                    </span>
                   )}
+                  <div className="ml-auto flex items-center gap-2">
+                    {p.email && (
+                      <a
+                        href={`mailto:${p.email}`}
+                        className="flex items-center gap-1 text-primary hover:underline"
+                      >
+                        <Mail className="h-3 w-3" />
+                        {p.email}
+                      </a>
+                    )}
+                    {p.linkedin_url && (
+                      <a
+                        href={p.linkedin_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-primary hover:underline"
+                        aria-label="LinkedIn"
+                      >
+                        <Linkedin className="h-3 w-3" />
+                      </a>
+                    )}
+                    {p.practice_phone && (
+                      <a
+                        href={`tel:${p.practice_phone}`}
+                        className="flex items-center gap-1 text-primary hover:underline"
+                      >
+                        <Phone className="h-3 w-3" />
+                        {p.practice_phone}
+                      </a>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>
+
           )}
         </div>
       )}
