@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import {
   UserRound,
   Mail,
@@ -9,9 +11,11 @@ import {
   Briefcase,
   AlertCircle,
   ChevronDown,
+  CheckCircle2,
+  Loader2,
 } from "lucide-react";
 import type { LeadContact } from "@/data/leads";
-import type { LeadPhysician } from "@/lib/leads.functions";
+import { enrichLeadContact, type LeadPhysician } from "@/lib/leads.functions";
 
 interface UnifiedContact {
   key: string;
@@ -97,9 +101,11 @@ function Row({
 export function ContactSection({
   sourceContacts,
   physicians,
+  leadId,
 }: {
   sourceContacts: LeadContact[];
   physicians: LeadPhysician[];
+  leadId?: string;
 }) {
   const unified: UnifiedContact[] = [
     ...sourceContacts.map(sourceToContact),
@@ -107,6 +113,14 @@ export function ContactSection({
   ];
   const empty = unified.length === 0;
   const [expanded, setExpanded] = useState(0);
+
+  const enrichFn = useServerFn(enrichLeadContact);
+  const enrichQ = useQuery({
+    queryKey: ["contact_enrichment", leadId],
+    queryFn: () => enrichFn({ data: { lead_id: leadId! } }),
+    enabled: !!leadId,
+    staleTime: 1000 * 60 * 60,
+  });
 
   return (
     <section className="mb-3 rounded-md border border-border/60 bg-surface/60 p-3">
