@@ -26,6 +26,21 @@ const STATE_TO_CODE: Record<string, string> = {
   wyoming: "WY",
 };
 
+// Heuristic: filter out Reddit usernames (junk names that won't match NPPES).
+function looksLikeRedditUsername(name: string): boolean {
+  const n = name.trim();
+  if (n.length < 4) return true;
+  if (n.startsWith("u/") || n.startsWith("/u/")) return true;
+  if (n.includes("_") || n.includes("-")) return true;
+  if (!n.includes(" ")) {
+    // Single token: very likely a handle, especially if it has digits
+    if (/\d/.test(n)) return true;
+    return true;
+  }
+  return false;
+}
+
+
 export interface IngestionSummary {
   source: string;
   fetched: number;
