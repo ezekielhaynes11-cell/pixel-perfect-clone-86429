@@ -214,12 +214,13 @@ export async function attachPhysiciansToLead(
       }
 
       // Auto-enrich with Apollo (idempotent fast-path inside the service skips already-enriched).
-      const cachedRow = (ref.knownNpi ? (await supabaseAdmin
+      const { data: enrichRow } = await supabaseAdmin
         .from("physician_contacts")
         .select("apollo_enriched_at, apollo_id")
         .eq("npi", contact.npi)
-        .maybeSingle()).data : null) as { apollo_enriched_at: string | null; apollo_id: string | null } | null;
-      const alreadyEnriched = !!(cachedRow?.apollo_enriched_at || cachedRow?.apollo_id);
+        .maybeSingle();
+      const alreadyEnriched = !!(enrichRow?.apollo_enriched_at || enrichRow?.apollo_id);
+
       if (!alreadyEnriched && !contact.npi.startsWith("APL-")) {
         if (tryConsumeApolloCall()) {
           try {
