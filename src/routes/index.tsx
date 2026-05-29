@@ -391,7 +391,8 @@ function Dashboard() {
                       index={i}
                       physicians={physiciansByLead.get(lead.id) ?? []}
                       onView={setActive}
-                      onSave={() => act.mutate({ lead_id: lead.id, action: "saved" })}
+                      saved={savedIds.has(lead.id)}
+                      onSave={() => act.mutate({ lead_id: lead.id, action: "saved", remove: savedIds.has(lead.id) })}
                       onDismiss={() => act.mutate({ lead_id: lead.id, action: "dismissed" })}
                       onDraft={() => setDraftFor(lead)}
                       selectable
