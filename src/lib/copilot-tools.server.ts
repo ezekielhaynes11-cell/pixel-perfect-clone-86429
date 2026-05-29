@@ -170,10 +170,10 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
       const a = args as ToolArgs["query_leads"];
       let q = supabaseAdmin
         .from("leads")
-        .select("id, title, summary, hospital, specialty, territory, source, signal_type, account_type, vendor_mentions, confidence, estimated_value_usd, win_probability, date_discovered, source_url, account_id")
-        .eq("enriched", true)
+        .select("id, title, summary, hospital, specialty, territory, source, signal_type, account_type, vendor_mentions, confidence, estimated_value_usd, win_probability, date_discovered, source_url, account_id, enriched")
         .order("confidence", { ascending: false })
-        .limit(Math.min(a.limit ?? 25, 50));
+        .limit(Math.min(a.limit ?? 50, 100));
+      if (a.enriched_only) q = q.eq("enriched", true);
       if (a.signal_type) q = q.eq("signal_type", a.signal_type);
       if (a.source) q = q.eq("source", a.source);
       if (a.account_type) q = q.eq("account_type", a.account_type);
@@ -185,7 +185,19 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
       if (a.state) {
         const code = a.state.toUpperCase();
         const stateMap: Record<string, string> = { TX: "texas", OK: "oklahoma", AR: "arkansas", LA: "louisiana" };
-        q = q.eq("territory", stateMap[code] ?? a.state.toLowerCase());
+        const name = stateMap[code] ?? a.state.toLowerCase();
+        // Match either the full state name or the 2-letter code, anywhere in the
+        // dirty territory string (handles "Texas", "minnesota,north carolina,texas",
+        // "(Multiple states: AL, AZ, FL, HI, LA, MD, OH, VA)", etc.).
+        q = q.or(`territory.ilike.%${name}%,territory.ilike.%${code}%`);
+      }
+      if (a.text_search) {
+        const needle = a.text_search.replace(/[%,]/g, " ").trim();
+        if (needle) {
+          q = q.or(
+            `title.ilike.%${needle}%,summary.ilike.%${needle}%,hospital.ilike.%${needle}%`,
+          );
+        }
       }
       const { data, error } = await q;
       if (error) return { error: error.message };
