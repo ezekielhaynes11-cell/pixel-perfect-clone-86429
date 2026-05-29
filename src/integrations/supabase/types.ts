@@ -172,6 +172,42 @@ export type Database = {
         }
         Relationships: []
       }
+      contact_enrichment: {
+        Row: {
+          created_at: string
+          email: string | null
+          lead_id: string
+          linkedin_url: string | null
+          name: string | null
+          organization: string | null
+          phone: string | null
+          status: string
+          title: string | null
+        }
+        Insert: {
+          created_at?: string
+          email?: string | null
+          lead_id: string
+          linkedin_url?: string | null
+          name?: string | null
+          organization?: string | null
+          phone?: string | null
+          status: string
+          title?: string | null
+        }
+        Update: {
+          created_at?: string
+          email?: string | null
+          lead_id?: string
+          linkedin_url?: string | null
+          name?: string | null
+          organization?: string | null
+          phone?: string | null
+          status?: string
+          title?: string | null
+        }
+        Relationships: []
+      }
       ingestion_runs: {
         Row: {
           enriched_count: number
