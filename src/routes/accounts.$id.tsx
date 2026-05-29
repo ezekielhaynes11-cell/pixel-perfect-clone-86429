@@ -2,7 +2,7 @@ import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { ArrowLeft, Building2, MapPin, Shield, ExternalLink, Phone, FileText, Zap, Sparkles, Loader2, Mail } from "lucide-react";
+import { ArrowLeft, Building2, MapPin, Shield, ExternalLink, Phone, FileText, Zap, Sparkles, Loader2, Mail, Linkedin } from "lucide-react";
 import { toast } from "sonner";
 import { getAccountDetail } from "@/lib/accounts.functions";
 import { enrichPhysicianApollo, prospectContactsApollo } from "@/lib/apollo.functions";
