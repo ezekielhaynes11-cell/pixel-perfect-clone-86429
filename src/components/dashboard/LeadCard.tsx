@@ -67,6 +67,7 @@ export function LeadCard({
 }) {
   const meta = sourceMeta[lead.source] ?? { label: lead.source, cls: "bg-surface-3 text-foreground border-border" };
   const conf = confidenceColor(lead.confidence);
+  const [contactOpen, setContactOpen] = useState(false);
 
 
   return (
