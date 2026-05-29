@@ -2,9 +2,9 @@ import type { RawLead } from "./types";
 
 // CMS Open Payments — Socrata-style API at openpaymentsdata.cms.gov
 // Docs: https://www.cms.gov/openpayments/data
-// We pull recent high-value payments from Phillips' main competitors to US physicians.
+// We pull recent high-value payments from Philips' main competitors to US physicians.
 // Each row becomes a buying-signal lead: "Dr. X at Hospital Y just took $40k from GE — that's
-// the incumbent. Time to flip them or shore up Phillips champions nearby."
+// the incumbent. Time to flip them or shore up Philips champions nearby."
 
 const COMPETITORS = [
   "Siemens Healthineers",
@@ -114,7 +114,7 @@ export async function fetchCmsOpenPayments(opts: { limit?: number; minAmount?: n
           `Last payment date: ${lastDate ?? "n/a"}`,
           `Most-recent transfer nature: ${g.rows[0].Nature_of_Payment_or_Transfer_of_Value ?? ""}`,
           `Device/program: ${g.rows[0].Name_of_Drug_or_Biological_or_Device_or_Medical_Supply_1 ?? ""}`,
-          `Signal: Incumbent vendor relationship — assess whether this physician is a Phillips switcher candidate, or whether to neutralize their influence on the buying committee.`,
+          `Signal: Incumbent vendor relationship — assess whether this physician is a Philips switcher candidate, or whether to neutralize their influence on the buying committee.`,
         ].join("\n"),
         date_discovered: lastDate ? new Date(lastDate).toISOString() : new Date().toISOString(),
         raw_payload: { rows: g.rows, total: g.total } as unknown as Record<string, unknown>,

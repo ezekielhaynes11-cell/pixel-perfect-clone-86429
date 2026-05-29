@@ -122,9 +122,13 @@ export function LeadCard({
             {lead.specialty}
           </span>
         )}
-        {lead.estimatedValueUsd != null && (
+        {lead.estimatedValueUsd != null && lead.estimatedValueUsd > 0 ? (
           <span className="rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[11px] text-success">
             Est. {lead.estimatedValueUsd >= 1e6 ? `$${(lead.estimatedValueUsd / 1e6).toFixed(1)}M` : `$${Math.round(lead.estimatedValueUsd / 1000)}k`}
+          </span>
+        ) : (
+          <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] text-muted-foreground">
+            Est. value TBD
           </span>
         )}
         {lead.entities.keywords.slice(0, 2).map((k) => (
@@ -138,7 +142,7 @@ export function LeadCard({
       </div>
 
       {/* Contact */}
-      <ContactSection sourceContacts={lead.sourceContacts ?? []} physicians={physicians} />
+      <ContactSection sourceContacts={lead.sourceContacts ?? []} physicians={physicians} leadId={lead.id} />
 
 
       {/* Actions */}

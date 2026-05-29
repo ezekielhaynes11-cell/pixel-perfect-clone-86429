@@ -527,3 +527,116 @@ export const listLeadPhysicians = createServerFn({ method: "GET" }).handler(asyn
   }));
 });
 
+/* -------------------- Decision-maker contact enrichment (Apollo) -------------------- */
+
+export interface ContactEnrichmentRow {
+  lead_id: string;
+  status: "found" | "none";
+  name: string | null;
+  title: string | null;
+  organization: string | null;
+  phone: string | null;
+  email: string | null;
+  linkedin_url: string | null;
+  created_at: string;
+}
+
+const DECISION_MAKER_TITLES = [
+  "VP Supply Chain",
+  "Director Procurement",
+  "CMO",
+  "VP Clinical Operations",
+  "Materials Manager",
+  "Director of Surgery",
+  "CNO",
+];
+
+export const enrichLeadContact = createServerFn({ method: "POST" })
+  .inputValidator((input) => z.object({ lead_id: z.string().uuid() }).parse(input))
+  .handler(async ({ data }): Promise<ContactEnrichmentRow> => {
+    // 1. Cache hit?
+    const { data: cached } = await supabaseAdmin
+      .from("contact_enrichment")
+      .select("*")
+      .eq("lead_id", data.lead_id)
+      .maybeSingle();
+    if (cached) return cached as ContactEnrichmentRow;
+
+    // 2. Load lead to get org name.
+    const { data: lead, error: leadErr } = await supabaseAdmin
+      .from("leads")
+      .select("hospital, entities")
+      .eq("id", data.lead_id)
+      .single();
+    if (leadErr || !lead) throw new Error("Lead not found");
+
+    const ents = (lead.entities as { hospitals?: string[] }) ?? {};
+    const org =
+      (lead.hospital && lead.hospital.trim()) ||
+      (ents.hospitals?.[0] && ents.hospitals[0].trim()) ||
+      null;
+
+    const writeAndReturn = async (row: Omit<ContactEnrichmentRow, "created_at">) => {
+      const { data: saved, error: insErr } = await supabaseAdmin
+        .from("contact_enrichment")
+        .upsert(row, { onConflict: "lead_id" })
+        .select()
+        .single();
+      if (insErr) throw new Error(insErr.message);
+      return saved as ContactEnrichmentRow;
+    };
+
+    if (!org) {
+      return writeAndReturn({
+        lead_id: data.lead_id,
+        status: "none",
+        name: null, title: null, organization: null,
+        phone: null, email: null, linkedin_url: null,
+      });
+    }
+
+    // 3. Apollo search.
+    try {
+      const { apolloPeopleSearch } = await import("./apollo/client.server");
+      const res = await apolloPeopleSearch({
+        organization_name: org,
+        person_titles: DECISION_MAKER_TITLES,
+        per_page: 10,
+      });
+      const person = (res.people ?? [])[0];
+      if (!person) {
+        return writeAndReturn({
+          lead_id: data.lead_id, status: "none",
+          name: null, title: null, organization: org,
+          phone: null, email: null, linkedin_url: null,
+        });
+      }
+      const name =
+        person.name ||
+        [person.first_name, person.last_name].filter(Boolean).join(" ") ||
+        null;
+      const phone =
+        person.phone_numbers?.[0]?.sanitized_number ??
+        person.phone_numbers?.[0]?.raw_number ??
+        null;
+      return writeAndReturn({
+        lead_id: data.lead_id,
+        status: "found",
+        name,
+        title: person.title ?? null,
+        organization: person.organization?.name ?? org,
+        phone,
+        email: person.email ?? null,
+        linkedin_url: person.linkedin_url ?? null,
+      });
+    } catch (e) {
+      console.error("enrichLeadContact apollo failed:", e instanceof Error ? e.message : e);
+      return writeAndReturn({
+        lead_id: data.lead_id, status: "none",
+        name: null, title: null, organization: org,
+        phone: null, email: null, linkedin_url: null,
+      });
+    }
+  });
+
+

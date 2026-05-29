@@ -5,7 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { RefreshCw, Bookmark, BarChart3, AlertCircle, EyeOff, Eye, XCircle, RotateCcw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { listLeads, triggerIngestionForSource, setLeadAction, listLeadActions, getRecentIngestionRuns, listLeadPhysicians, bulkSetLeadAction, INGESTION_SOURCES, type LeadPhysician } from "@/lib/leads.functions";
-import { rowToLead, leadStateCode, type Lead, type LeadRow } from "@/data/leads";
+import { rowToLead, leadStateCode, leadIsHighPriority, type Lead, type LeadRow } from "@/data/leads";
 import { SummaryCard } from "@/components/dashboard/SummaryCard";
 import { FilterBar, emptyFilters, type Filters } from "@/components/dashboard/FilterBar";
 import { LeadCard } from "@/components/dashboard/LeadCard";
@@ -19,7 +19,7 @@ import { CopilotPanel } from "@/components/dashboard/CopilotPanel";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Yield Architect — Phillips Sales Intelligence" },
+      { title: "Yield Architect — Philips Sales Intelligence" },
       { name: "description", content: "Live AI-powered medical device sales intelligence." },
     ],
   }),
@@ -34,6 +34,8 @@ function Dashboard() {
   const [searchesOpen, setSearchesOpen] = useState(false);
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [showDismissed, setShowDismissed] = useState(false);
+  const [showOld, setShowOld] = useState(false);
+  const [showAllTerritories, setShowAllTerritories] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const qc = useQueryClient();
   const fetchLeads = useServerFn(listLeads);
@@ -159,9 +161,17 @@ function Dashboard() {
     [visibleLeads],
   );
 
+  const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
+  const TERRITORY_STATES = new Set(["TX", "OK", "AR", "LA"]);
+
   const filtered = useMemo(
     () =>
       visibleLeads.filter((l) => {
+        if (!showOld && Date.now() - new Date(l.dateDiscovered).getTime() > NINETY_DAYS_MS) return false;
+        if (!showAllTerritories && filters.states.length === 0) {
+          const code = leadStateCode(l);
+          if (!code || !TERRITORY_STATES.has(code)) return false;
+        }
         if (filters.hospitals.length && (!l.hospital || !filters.hospitals.includes(l.hospital))) return false;
         if (filters.specialties.length && (!l.specialty || !filters.specialties.includes(l.specialty))) return false;
         if (filters.sources.length && !filters.sources.includes(l.source)) return false;
@@ -178,10 +188,10 @@ function Dashboard() {
         }
         return true;
       }),
-    [visibleLeads, filters],
+    [visibleLeads, filters, showOld, showAllTerritories, NINETY_DAYS_MS],
   );
 
-  const highPriority = activeLeads.filter((l) => l.priority === "high").length;
+  const highPriority = activeLeads.filter(leadIsHighPriority).length;
   const pipelineUsd = activeLeads.reduce(
     (s, l) => s + (l.estimatedValueUsd ?? 0) * (l.winProbability ?? 0),
     0,
@@ -194,7 +204,7 @@ function Dashboard() {
           <div className="font-display text-base font-bold tracking-tight">
             ⚡ Yield Architect
             <span className="ml-2 hidden rounded-sm bg-surface-2 px-1.5 py-0.5 font-sans text-[10px] uppercase tracking-wider text-muted-foreground sm:inline">
-              Phillips Medical
+              Philips Medical
             </span>
           </div>
           <div className="flex-1" />
@@ -305,6 +315,20 @@ function Dashboard() {
               >
                 {showDismissed ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
                 {showDismissed ? "Show active" : `Show dismissed (${dismissedLeads.length})`}
+              </button>
+              <button
+                onClick={() => setShowOld((v) => !v)}
+                className={`flex h-7 items-center gap-1.5 rounded-sm border px-2.5 text-[11px] font-medium transition-colors ${showOld ? "border-primary/50 bg-primary/10 text-primary" : "border-border bg-surface-2 text-foreground/80 hover:bg-surface-3"}`}
+                title="Include leads older than 90 days"
+              >
+                {showOld ? "Hide older leads" : "Show older leads"}
+              </button>
+              <button
+                onClick={() => setShowAllTerritories((v) => !v)}
+                className={`flex h-7 items-center gap-1.5 rounded-sm border px-2.5 text-[11px] font-medium transition-colors ${showAllTerritories ? "border-primary/50 bg-primary/10 text-primary" : "border-border bg-surface-2 text-foreground/80 hover:bg-surface-3"}`}
+                title="Include leads outside OK · AR · LA · TX"
+              >
+                {showAllTerritories ? "Territory: TX/OK/AR/LA" : "Show all territories"}
               </button>
               {filtered.length > 0 && (
                 <button
@@ -419,7 +443,7 @@ function Dashboard() {
         </div>
 
         <footer className="mt-12 flex flex-wrap items-center justify-between border-t border-border pt-4 text-xs text-muted-foreground">
-          <span>Live data from SAM.gov · openFDA · GDELT · Enriched by Lovable AI</span>
+          <span>Live data from SAM.gov · openFDA · GDELT · Enriched by Yield AI</span>
           <span>Single-user mode</span>
         </footer>
       </main>

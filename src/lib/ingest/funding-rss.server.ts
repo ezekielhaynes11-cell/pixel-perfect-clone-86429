@@ -53,7 +53,7 @@ export async function fetchFundingRss(): Promise<RawLead[]> {
   const out: RawLead[] = [];
   for (const f of FEEDS) {
     try {
-      const res = await fetch(f.url, { headers: { "User-Agent": "PhillipsLeadRadar/1.0" } });
+      const res = await fetch(f.url, { headers: { "User-Agent": "PhilipsLeadRadar/1.0" } });
       if (!res.ok) continue;
       const xml = await res.text();
       const items = parseRss(xml);
