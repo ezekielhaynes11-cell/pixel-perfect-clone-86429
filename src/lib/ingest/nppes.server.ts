@@ -212,6 +212,28 @@ export async function attachPhysiciansToLead(
       else if (!linkErr.message?.includes("duplicate")) {
         console.error("lead_physicians insert:", linkErr.message);
       }
+
+      // Auto-enrich with Apollo (idempotent fast-path inside the service skips already-enriched).
+      const cachedRow = (ref.knownNpi ? (await supabaseAdmin
+        .from("physician_contacts")
+        .select("apollo_enriched_at, apollo_id")
+        .eq("npi", contact.npi)
+        .maybeSingle()).data : null) as { apollo_enriched_at: string | null; apollo_id: string | null } | null;
+      const alreadyEnriched = !!(cachedRow?.apollo_enriched_at || cachedRow?.apollo_id);
+      if (!alreadyEnriched && !contact.npi.startsWith("APL-")) {
+        if (tryConsumeApolloCall()) {
+          try {
+            await apolloEnrichPhysician({ npi: contact.npi });
+          } catch (e) {
+            console.error("apollo auto-enrich failed for", contact.npi, e instanceof Error ? e.message : e);
+          }
+          await new Promise((r) => setTimeout(r, 300));
+        } else if (!capLoggedThisRun) {
+          console.warn("apollo daily cap reached, skipping further enrichment this run");
+          capLoggedThisRun = true;
+        }
+      }
+
     } catch (e) {
       console.error("NPPES lookup failed:", e instanceof Error ? e.message : e);
     }
