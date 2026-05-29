@@ -279,11 +279,19 @@ function AccountPage() {
                       {p.practice_phone && (
                         <a
                           href={`tel:${p.practice_phone}`}
-                          className="ml-auto flex items-center gap-1 text-xs text-primary hover:underline"
+                          className="flex items-center gap-1 text-xs text-primary hover:underline"
                         >
                           <Phone className="h-3 w-3" /> {p.practice_phone}
                         </a>
                       )}
+                      <button
+                        onClick={() => enrichMut.mutate(p.npi)}
+                        disabled={enrichMut.isPending}
+                        className="ml-auto flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-0.5 text-[11px] text-foreground/80 hover:bg-surface-3 disabled:opacity-50"
+                        title="Enrich with Apollo (email, title, LinkedIn)"
+                      >
+                        <Mail className="h-3 w-3" /> Enrich
+                      </button>
                     </li>
                   ))}
                 </ul>
