@@ -19,9 +19,55 @@ export const Route = createFileRoute("/accounts/$id")({
 function AccountPage() {
   const { id } = Route.useParams();
   const fetchDetail = useServerFn(getAccountDetail);
+  const qc = useQueryClient();
+  const enrichPhys = useServerFn(enrichPhysicianApollo);
+  const prospect = useServerFn(prospectContactsApollo);
+  const [showProspect, setShowProspect] = useState(false);
+  const [titles, setTitles] = useState("POCUS Director, Ultrasound Director, Chief of Radiology");
+  const [keywords, setKeywords] = useState("");
+  const [limit, setLimit] = useState(15);
   const q = useQuery({
     queryKey: ["account", id],
     queryFn: () => fetchDetail({ data: { id } }),
+  });
+
+  const enrichMut = useMutation({
+    mutationFn: (npi: string) => enrichPhys({ data: { npi } }),
+    onMutate: () => toast.loading("Enriching…", { id: "apollo-phys" }),
+    onSuccess: (res) => {
+      if ("error" in res && res.error) return toast.error(res.error, { id: "apollo-phys" });
+      if ("exists" in res && !res.exists)
+        return toast.message(res.message ?? "No Apollo match.", { id: "apollo-phys" });
+      const r = res as { email?: string | null; title?: string | null };
+      toast.success(`${r.title ?? "Match"} · ${r.email ?? "no email"}`, { id: "apollo-phys" });
+      qc.invalidateQueries({ queryKey: ["account", id] });
+    },
+    onError: (e: unknown) =>
+      toast.error(e instanceof Error ? e.message : "Enrich failed", { id: "apollo-phys" }),
+  });
+
+  const prospectMut = useMutation({
+    mutationFn: () =>
+      prospect({
+        data: {
+          account_id: id,
+          titles: titles.split(",").map((s) => s.trim()).filter(Boolean),
+          keywords: keywords || undefined,
+          limit,
+        },
+      }),
+    onMutate: () => toast.loading("Prospecting via Apollo…", { id: "apollo-prospect" }),
+    onSuccess: (res) => {
+      if ("error" in res && res.error) return toast.error(res.error, { id: "apollo-prospect" });
+      const r = res as { count: number };
+      toast.success(`Added ${r.count} contact${r.count === 1 ? "" : "s"}`, {
+        id: "apollo-prospect",
+      });
+      setShowProspect(false);
+      qc.invalidateQueries({ queryKey: ["account", id] });
+    },
+    onError: (e: unknown) =>
+      toast.error(e instanceof Error ? e.message : "Prospect failed", { id: "apollo-prospect" }),
   });
 
   if (q.isLoading) {
