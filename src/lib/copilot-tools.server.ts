@@ -140,7 +140,23 @@ export const COPILOT_TOOLS = [
       },
     },
   },
+  {
+    type: "function" as const,
+    function: {
+      name: "apollo_bulk_enrich",
+      description:
+        "Bulk-enrich physician contacts that have no Apollo data yet. Defaults to 25, max 100. Confirm with the user before running with limit > 25 because it consumes Apollo quota.",
+      parameters: {
+        type: "object",
+        properties: {
+          limit: { type: "number", minimum: 1, maximum: 100 },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
 ];
+
 
 interface ToolArgs {
   query_leads: {
