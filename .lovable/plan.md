@@ -1,51 +1,53 @@
-## Auto-enrich physicians with Apollo at ingestion (with daily cap)
+## Why the cards still show no emails
 
-### Goal
-Every physician attached to a newly enriched lead gets an Apollo lookup automatically during ingestion, so emails / titles / LinkedIn badges show up on the main feed without clicking "Bulk enrich". A daily cap keeps Apollo credit usage bounded.
+The DB confirms the root cause:
+- 6 `physician_contacts` rows exist
+- 0 have `email`
+- 0 have `apollo_enriched_at`
+- Recent ingestion runs all report `new_count = 0`
 
-### Changes
+The previous change only triggers Apollo *inside* `attachPhysiciansToLead`. That code path runs only when a brand-new physician is being linked to a lead. Since ingestion finds nothing new, the auto-enrich never fires, and the existing 6 physicians stay un-enriched forever. Hitting "Refresh feed" produces zero Apollo calls — matching the empty server logs.
 
-**1. `src/lib/ingest/nppes.server.ts` — `attachPhysiciansToLead`**
-- After each successful `physician_contacts` upsert, if the cached row does not already have `apollo_enriched_at` AND the NPI does not start with `APL-`, call `apolloEnrichPhysician({ npi })` inline.
-- Wrap the Apollo call in its own `try/catch` — a failure (rate limit, 402 credits, 403 endpoint) never breaks NPPES linkage. Log status only.
-- Sequential, ~300ms gap between Apollo calls (same pattern as `bulkEnrichApollo`).
-- Honor the shared daily cap (see step 3). When cap is hit, skip Apollo for the rest of the run and log once.
-- Import `apolloEnrichPhysician` from `@/lib/apollo/service.server`.
+## Fix: backfill sweep on every ingestion + on demand
 
-**2. `src/lib/apollo/service.server.ts` — `apolloEnrichPhysician`**
-- Add an idempotent fast-path: if `existing.apollo_id` or `existing.apollo_enriched_at` is already set, return `{ skipped: true }` without calling Apollo.
-- Existing return shape extended with optional `skipped` boolean — no caller break.
+Add a small backfill that enriches any physician already linked to a lead but missing Apollo data, gated by the same daily cap.
 
-**3. New `src/lib/apollo/quota.server.ts` — in-process daily cap**
-- Module-scope counter `{ dayKey: "YYYY-MM-DD", count: number }`, default cap **150 calls/day** (configurable via `APOLLO_DAILY_CAP` env var, read at call time).
-- Exports `tryConsumeApolloCall(): boolean` — increments and returns false when cap is reached for the current UTC day.
-- Exports `getApolloUsage(): { used, cap, dayKey }` for diagnostics / future UI surfacing.
-- Caveat (documented in file header): Worker isolates may reset the counter independently; this is a best-effort soft cap, not a hard distributed limit. Acceptable for current ingestion volume; can be upgraded to a DB-backed counter later if needed.
+### 1. `src/lib/apollo/service.server.ts` — add `backfillApolloForLinkedPhysicians`
 
-**4. `src/lib/ingest/run.server.ts`**
-- No structural change — `enrichPending` already calls `attachPhysiciansToLead`. Once (1) is in place, every newly enriched lead automatically gets Apollo-enriched physicians.
-- Add a single debug log per lead: `{ leadId, attached, apolloAttempted, apolloMatched, apolloSkippedCapped }`.
+New exported function:
+- Query `physician_contacts` where `apollo_enriched_at IS NULL` AND `apollo_id IS NULL` AND `npi NOT LIKE 'APL-%'`.
+- Only include NPIs that appear in `lead_physicians` (so we don't enrich orphans).
+- Cap the batch (e.g. 25 per call) to stay safe.
+- For each, call `tryConsumeApolloCall()`; if false, stop and log once.
+- Call `apolloEnrichPhysician({ npi })` inside try/catch, 300 ms pacing.
+- Return `{ attempted, matched, skippedCap }`.
 
-**5. `src/components/dashboard/LeadCard.tsx` — surface contacts on first load**
-- Currently emails / LinkedIn / phone are hidden behind the collapsible "N Physicians" toggle.
-- Change defaults:
-  - If `physicians.length === 1`, expand the list by default.
-  - Always render a compact inline contact row above the toggle with the top physician's email + LinkedIn icon + phone (when present), so contact info is visible without clicking.
-- No new data fetches — `listLeadPhysicians` already returns `email`, `title`, `linkedin_url`, `apollo_enriched_at`.
+### 2. `src/lib/ingest/run.server.ts` — call backfill at end of run
 
-### Out of scope
-- No DB migrations.
-- No new tools or buttons.
-- No changes to `apollo/client.server.ts` (already logs status + body).
-- Bulk-enrich button stays as manual backfill for old leads.
+After the existing `enrichPending` loop in `runIngestion` (and `runIngestionForSource`), invoke `backfillApolloForLinkedPhysicians()` once. Wrap in try/catch; log summary. This guarantees every "Refresh feed" click also catches up the previously-missed contacts.
 
-### Technical notes
-- Daily cap is per-Worker-isolate in-memory. With Cloudflare's typical isolate reuse this is "good enough" to prevent runaway burns from a single ingestion run, but is not a strict cluster-wide cap. If stricter caps are needed later, swap `quota.server.ts` to insert/select against a small `apollo_usage(day, count)` table.
-- Per ingestion run estimate: ~20 leads × 1–3 physicians ≈ up to 60 Apollo calls. Default cap 150/day → ~2.5 refresh runs/day before backoff. Tunable via `APOLLO_DAILY_CAP`.
+### 3. `src/lib/leads.functions.ts` — one-shot manual trigger
 
-### Verification
-1. Trigger ingestion (Refresh feed). Check `server-function-logs` for per-lead summary lines and `apolloEnrichPhysician` activity.
-2. `read_query` `physician_contacts` for newly attached NPIs — `apollo_enriched_at` should be set.
-3. Reload `/` — top physician on each LeadCard shows ✉️ email / LinkedIn / phone inline, no manual click required.
-4. Re-run ingestion — no duplicate Apollo calls (idempotent fast-path).
-5. Force cap (temporarily set `APOLLO_DAILY_CAP=1`) → logs show "apollo daily cap reached, skipping" and ingestion still completes.
+Add `triggerApolloBackfill = createServerFn(...)` that simply calls `backfillApolloForLinkedPhysicians({ limit: 50 })`. Returns counts. No UI wiring required for this task, but useful from copilot/devtools so the user can force enrichment of the current 6 rows immediately without waiting for the next ingestion run.
+
+### 4. No UI changes
+
+`LeadCard` already renders email/title/LinkedIn the moment those columns populate. Once the backfill runs successfully, the cards will surface contacts on next page load (TanStack Query refetch).
+
+## Verification
+
+1. Click "Refresh feed" once → server logs show `backfillApolloForLinkedPhysicians` activity and per-NPI Apollo calls.
+2. `SELECT npi, email, apollo_enriched_at FROM physician_contacts` shows non-null `apollo_enriched_at` (and emails where Apollo had a match) for the 6 rows.
+3. Reload `/` → top physician on each LeadCard shows ✉️ email / LinkedIn / phone inline.
+4. Re-run ingestion → backfill returns `attempted: 0` (idempotent fast-path in `apolloEnrichPhysician` already skips).
+
+## Out of scope
+
+- No new DB migrations, no schema changes.
+- No changes to `apollo/client.server.ts` or NPPES logic.
+- No changes to the daily-cap module.
+- Bulk-enrich button stays as-is.
+
+## Risk
+
+If Apollo returns no match for these 6 NPIs (some look incomplete, e.g. `-- RAVINDER KAUR`), `apollo_enriched_at` will stay null and the card stays empty. That's an Apollo data-quality limit, not a code bug — the logs will say "No Apollo match for this physician."
