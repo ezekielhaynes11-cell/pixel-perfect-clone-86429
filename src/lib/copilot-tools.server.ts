@@ -1,6 +1,11 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { OWNER_ID } from "./owner.server";
 import { draftOutreachEmail } from "./outreach.server";
+import {
+  apolloEnrichPhysician,
+  apolloEnrichAccount,
+  apolloProspectContacts,
+} from "./apollo/service.server";
 
 export const COPILOT_TOOLS = [
   {
