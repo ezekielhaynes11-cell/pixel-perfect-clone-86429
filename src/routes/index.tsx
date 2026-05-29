@@ -114,7 +114,13 @@ function Dashboard() {
   const act = useMutation({
     mutationFn: (input: { lead_id: string; action: "saved" | "dismissed" | "pushed_sfdc"; remove?: boolean }) =>
       actionFn({ data: input }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["lead_actions"] }),
+    onSuccess: (_res, vars) => {
+      if (vars.action === "saved") {
+        toast.success(vars.remove ? "Unsaved" : "Saved");
+      }
+      qc.invalidateQueries({ queryKey: ["lead_actions"] });
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Action failed"),
   });
 
   const bulkAct = useMutation({
@@ -134,6 +140,10 @@ function Dashboard() {
   );
   const dismissedIds = useMemo(
     () => new Set((actionsQ.data ?? []).filter((a) => a.action === "dismissed").map((a) => a.lead_id)),
+    [actionsQ.data],
+  );
+  const savedIds = useMemo(
+    () => new Set((actionsQ.data ?? []).filter((a) => a.action === "saved").map((a) => a.lead_id)),
     [actionsQ.data],
   );
   const activeLeads = useMemo(() => leads.filter((l) => !dismissedIds.has(l.id)), [leads, dismissedIds]);
@@ -381,7 +391,8 @@ function Dashboard() {
                       index={i}
                       physicians={physiciansByLead.get(lead.id) ?? []}
                       onView={setActive}
-                      onSave={() => act.mutate({ lead_id: lead.id, action: "saved" })}
+                      saved={savedIds.has(lead.id)}
+                      onSave={() => act.mutate({ lead_id: lead.id, action: "saved", remove: savedIds.has(lead.id) })}
                       onDismiss={() => act.mutate({ lead_id: lead.id, action: "dismissed" })}
                       onDraft={() => setDraftFor(lead)}
                       selectable

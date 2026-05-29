@@ -45,6 +45,7 @@ export function LeadCard({
   index,
   physicians = [],
   onSave,
+  saved = false,
   onDismiss,
   onDraft,
   selectable = false,
@@ -58,6 +59,7 @@ export function LeadCard({
   index: number;
   physicians?: LeadPhysician[];
   onSave?: () => void;
+  saved?: boolean;
   onDismiss?: () => void;
   onDraft?: () => void;
   selectable?: boolean;
@@ -232,10 +234,14 @@ export function LeadCard({
         </button>
         <button
           onClick={onSave}
-          className="flex h-8 items-center gap-1.5 rounded-sm border border-border px-3 text-xs text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground"
+          className={
+            saved
+              ? "flex h-8 items-center gap-1.5 rounded-sm border border-primary/40 bg-primary/10 px-3 text-xs text-primary transition-colors hover:bg-primary/20"
+              : "flex h-8 items-center gap-1.5 rounded-sm border border-border px-3 text-xs text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground"
+          }
         >
-          <Bookmark className="h-3.5 w-3.5" />
-          Save
+          <Bookmark className="h-3.5 w-3.5" fill={saved ? "currentColor" : "none"} />
+          {saved ? "Saved" : "Save"}
         </button>
         {dismissed ? (
           <button
