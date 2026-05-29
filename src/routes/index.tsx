@@ -466,8 +466,21 @@ function Dashboard() {
           <Sidebar leads={filtered.length ? filtered : visibleLeads} />
         </div>
 
-        <footer className="mt-12 flex flex-wrap items-center justify-between border-t border-border pt-4 text-xs text-muted-foreground">
-          <span>Live data from SAM.gov · openFDA · GDELT · Enriched by Yield AI</span>
+        <footer className="mt-12 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4 text-xs text-muted-foreground">
+          {(() => {
+            const labels: Record<string, string> = {
+              sam_gov: "SAM.gov", openfda: "openFDA", gdelt: "GDELT",
+              gdelt_m_and_a: "GDELT", gdelt_va_funding: "GDELT",
+              reddit: "Reddit", bluesky: "Bluesky", news: "News",
+              clinicaltrials: "ClinicalTrials", cms_open_payments: "CMS Payments",
+              funding_rss: "Gov Funding RSS",
+            };
+            const active = Array.from(
+              new Set(activeLeads.map((l) => labels[l.source] ?? l.source))
+            ).sort();
+            const list = active.length ? active.join(" · ") : "active sources";
+            return <span>Live data from {list} · Enriched by Yield AI</span>;
+          })()}
           <span>Single-user mode</span>
         </footer>
       </main>
