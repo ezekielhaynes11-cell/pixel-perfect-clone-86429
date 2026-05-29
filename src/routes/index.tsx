@@ -302,7 +302,7 @@ function Dashboard() {
           return (
             <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
               <span className={`inline-block h-1.5 w-1.5 rounded-full bg-current ${color}`} />
-              Last scan: {ago} · {last.source} · {last.new_count ?? 0} new · {last.enriched_count ?? 0} enriched
+              Last scan: {ago} · {last.source} · {last.new_count ?? 0} new · {enrichedCountQ.data?.count ?? 0} enriched
               {last.status === "error" ? " · failed" : ""}
             </div>
           );
