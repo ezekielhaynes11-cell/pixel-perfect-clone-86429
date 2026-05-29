@@ -1,111 +1,32 @@
-# Pre-Publish Beta QA Checklist
+# Fix slow / "not loading" lead feed
 
-Run through each item in order in the preview. Mark ✅ / ❌ / ⚠️ and note anything off. Apollo items hit the live API and burn credits — minimize repeats.
+## Diagnosis
 
-## 0. Environment sanity
-- [ ] Preview loads without console errors (open DevTools first)
-- [ ] No "REPLACE this" / placeholder content on `/`
-- [ ] Favicon, page title, and meta description set on landing
+- DB has 446 leads (302 enriched). Data is intact.
+- `listLeads` in `src/lib/leads.functions.ts` returns `select("*")` including the `raw_payload` jsonb column. Each row is tens of KB; the full response for 200 rows is several MB and takes ~3.5s over the network.
+- Result: the dashboard renders "Loading leads… (0)" with all-zero summary cards for several seconds on first paint. To the user this looks broken.
+- `getRecentIngestionRuns`, `listLeadActions`, `listLeadPhysicians` all complete in ~1.2s; only `listLeads` is the bottleneck.
 
-## 1. Auth
-- [ ] `/login` renders; email+password signup works
-- [ ] Google sign-in works (if enabled)
-- [ ] Email verification required (unless explicitly disabled)
-- [ ] After login, redirected to dashboard
-- [ ] Logout clears session, blocks protected routes
-- [ ] Hitting `/_authenticated/*` while signed-out redirects to `/login`
+## Changes
 
-## 2. Dashboard / Home
-- [ ] Summary cards show real numbers (leads today, week, enriched, etc.)
-- [ ] **"Last sync" timestamp is in user's local TZ, not PST** (regression check)
-- [ ] No "AI enrichment" copy on summary cards (regression check)
-- [ ] Top leads list renders, links to lead detail
-- [ ] Empty state renders cleanly for brand-new user
+1. **`src/lib/leads.functions.ts → listLeads`**
+   - Replace `.select("*")` with an explicit column list that excludes `raw_payload` and `entities` raw blobs we don't need on the dashboard. Keep: `id, source, source_external_id, source_url, title, summary, confidence, priority, hospital, specialty, territory, entities, estimated_value_usd, win_probability, competitor_incumbent, date_discovered, date_ingested, enriched, vendor_mentions, account_type, signal_type, account_id`.
+   - Lead detail modal already re-fetches per-lead when needed (or can — verify); if it currently relies on `raw_payload` from the list, add a small `getLeadById` server fn that returns full row including `raw_payload`, and have the modal call it on open.
 
-## 3. Ingestion
-- [ ] "Run ingestion" / sync button starts a run
-- [ ] `ingestion_runs` row appears (status `running` → `success`)
-- [ ] **No "upstream request timeout" error** on sam.gov (regression check)
-- [ ] Failed runs surface error text in UI, not just spin
-- [ ] New leads land in `leads` table with source, title, summary populated
-- [ ] Retrying after a failure works
+2. **`src/routes/index.tsx` loading UX**
+   - Replace the flat "Loading leads…" string with a skeleton list (3-5 placeholder cards) so users see structure immediately.
+   - Show a small "Syncing first batch…" banner only when `runsQ.data?.length === 0` AND `leadsQ.data?.length === 0` AND `ingest.isPending` — not when leads are simply still fetching.
 
-## 4. Leads list & filters
-- [ ] Leads page paginates / loads without hitting 1000-row cap silently
-- [ ] State / territory filter returns results for TX, OK, AR, LA (case-insensitive)
-- [ ] Priority / signal-type / account-type filters work
-- [ ] Search box matches title, summary, hospital
-- [ ] Sort by date/confidence works
-- [ ] Empty filter result shows "no matches" with reset
+3. **`rowToLead` mapper**
+   - Adjust the typing so `raw_payload` is optional; only LeadDetailModal pulls it via the new per-lead fetch.
 
-## 5. Lead detail modal
-- [ ] Opens from list, URL is shareable
-- [ ] Title, summary, source link, hospital, territory, vendor mentions all render
-- [ ] Linked physicians render with NPI; rows show enrichment state
-- [ ] "Save", "Dismiss", "Mark contacted" actions persist to `lead_actions`
-- [ ] Generate outreach draft → produces subject + body, saves to `outreach_drafts`
-- [ ] Per-physician **Apollo Enrich** button (live):
-  - [ ] Pulls email, title, LinkedIn for at least one known physician
-  - [ ] `physician_contacts.apollo_enriched_at` updates
-  - [ ] No-match case shows graceful message, no crash
+## Out of scope
 
-## 6. Copilot
-- [ ] Chat opens, message history persists across reload
-- [ ] **Asks "leads in Texas" → returns results** (regression: was "no results")
-- [ ] Asks "leads about robotic surgery" → text_search returns matches
-- [ ] Asks something with zero matches → tries broader query before giving up
-- [ ] Cites lead IDs / links back to lead detail
-- [ ] Markdown renders (lists, bold, links)
-- [ ] Tool calls visible/transparent (or at least not breaking UI)
-- [ ] Apollo tools work from chat:
-  - [ ] "Enrich account <Name>" → fills domain + employee count
-  - [ ] "Prospect cardiologists at <Account>" → creates physician_contacts rows
-  - [ ] "Enrich Dr. <Name>" → fills email/title/LinkedIn
+- Pagination / virtualization of the lead feed (separate follow-up).
+- Compressing `raw_payload` storage.
 
-## 7. Accounts
-- [ ] Accounts list renders, search works
-- [ ] Account detail page loads brief, linked leads, physicians
-- [ ] **Account Brief → "Enrich (Apollo)"** (live): domain + employee_count populate, `apollo_enriched_at` set, button disables while running
-- [ ] **Prospect (Apollo) dialog** (live): titles + keywords form submits, new contacts appear with `npi: APL-…`, dedupes on re-run
-- [ ] Generate brief writes to `account_briefs`, markdown renders, sources cited
+## Verification
 
-## 8. Saved searches & alerts
-- [ ] Save current filter as search
-- [ ] Saved searches list shows item, can delete
-- [ ] Alert toggle persists
-- [ ] (If wired) alerts row created when matching lead arrives
-
-## 9. Briefings
-- [ ] "Generate daily briefing" produces markdown with top leads
-- [ ] Stored in `briefings`, retrievable on reload
-- [ ] Top lead links work
-
-## 10. Permissions / RLS
-- [ ] Second test user can't see first user's `saved_searches`, `alerts`, `briefings`, `outreach_drafts`, `lead_actions`
-- [ ] Non-admin cannot mutate `leads`, `accounts`, `keyword_lists` from client
-- [ ] Apollo writes happen server-side only (no service-role key in browser)
-
-## 11. Errors & edge cases
-- [ ] Disconnect network → app shows toast / error, doesn't white-screen
-- [ ] Visit `/some-bogus-route` → notFoundComponent renders
-- [ ] Force an error in a loader → errorComponent + Retry actually re-runs
-- [ ] Long titles / summaries don't overflow cards
-- [ ] Mobile width (375px): nav, dashboard, lead modal, Copilot all usable
-
-## 12. Performance / polish
-- [ ] No unexplained 4xx/5xx in Network tab during normal flow
-- [ ] Server function logs clean (`stack_modern--server-function-logs`)
-- [ ] Database linter clean (`supabase--linter`)
-- [ ] Security scan clean (`security--run_security_scan`)
-- [ ] `APOLLO_API_KEY` and `SAM_GOV_API_KEY` present as secrets, not in code
-- [ ] Lighthouse / quick a11y pass: contrast, alt text, single H1
-
-## 13. Publish settings
-- [ ] Confirm publish visibility (public vs private workspace-only)
-- [ ] Custom domain (if any) wired
-- [ ] Decide on "Edit with Lovable" badge
-
----
-
-**Reporting format** when you find issues, paste back as:
-`#<section>.<item>` — short description — repro steps. I'll triage and fix in build mode.
+- Reload `/` in preview, confirm dashboard cards populate within ~1s and feed shows skeletons → real cards.
+- Open a lead, confirm detail modal still has full source/raw data.
+- `network` tab: `listLeads` response shrinks from MBs to <200 KB.
