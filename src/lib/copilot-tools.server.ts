@@ -320,6 +320,33 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
       const a = args as ToolArgs["apollo_prospect"];
       return apolloProspectContacts(a);
     }
+    case "apollo_bulk_enrich": {
+      const a = args as ToolArgs["apollo_bulk_enrich"];
+      const limit = Math.min(Math.max(a.limit ?? 25, 1), 100);
+      const { data: rows, error } = await supabaseAdmin
+        .from("physician_contacts")
+        .select("npi")
+        .is("apollo_id", null)
+        .is("apollo_enriched_at", null)
+        .order("last_verified_at", { ascending: false })
+        .limit(limit);
+      if (error) return { error: error.message };
+      const targets = rows ?? [];
+      let matched = 0;
+      let errors = 0;
+      for (const row of targets) {
+        try {
+          const r = await apolloEnrichPhysician({ npi: row.npi });
+          if (r && (r as { exists?: boolean }).exists) matched++;
+        } catch (e) {
+          console.error("apollo_bulk_enrich failed for", row.npi, e instanceof Error ? e.message : e);
+          errors++;
+        }
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      return { attempted: targets.length, matched, errors };
+    }
+
     default:
       return { error: `Unknown tool: ${name}` };
   }
