@@ -560,7 +560,7 @@ export const enrichLeadContact = createServerFn({ method: "POST" })
       .select("*")
       .eq("lead_id", data.lead_id)
       .maybeSingle();
-    if (cached) return cached as ContactEnrichmentRow;
+    if (cached && cached.status === "found") return cached as ContactEnrichmentRow;
 
     // 2. Load lead to get org name.
     const { data: lead, error: leadErr } = await supabaseAdmin
