@@ -290,6 +290,18 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
         .single();
       return { draft_id: saved?.id, subject: draft.subject, body: draft.body };
     }
+    case "apollo_enrich_physician": {
+      const a = args as ToolArgs["apollo_enrich_physician"];
+      return apolloEnrichPhysician({ npi: a.npi });
+    }
+    case "apollo_enrich_account": {
+      const a = args as ToolArgs["apollo_enrich_account"];
+      return apolloEnrichAccount({ account_id: a.account_id });
+    }
+    case "apollo_prospect": {
+      const a = args as ToolArgs["apollo_prospect"];
+      return apolloProspectContacts(a);
+    }
     default:
       return { error: `Unknown tool: ${name}` };
   }
