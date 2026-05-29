@@ -149,14 +149,19 @@ interface ToolArgs {
     source?: string;
     account_type?: string;
     vendor?: string;
+    text_search?: string;
     min_confidence?: number;
     days_back?: number;
+    enriched_only?: boolean;
     limit?: number;
   };
   query_accounts: { name_contains?: string; state?: string; is_va?: boolean; limit?: number };
   query_physicians: { specialty_contains?: string; state?: string; role_hint_contains?: string; limit?: number };
   get_account_brief: { account_id: string };
   draft_outreach: { lead_id: string; tone?: "discovery" | "follow_up" | "executive_intro" | "switch_pitch" };
+  apollo_enrich_physician: { npi: string };
+  apollo_enrich_account: { account_id: string };
+  apollo_prospect: { account_id?: string; state?: string; titles?: string[]; keywords?: string; limit?: number };
 }
 
 export async function runCopilotTool(name: string, args: Record<string, unknown>): Promise<unknown> {
