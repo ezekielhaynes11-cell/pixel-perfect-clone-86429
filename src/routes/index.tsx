@@ -185,13 +185,13 @@ function Dashboard() {
     [visibleLeads],
   );
 
-  const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
+  const AGE_FILTER_MS = 365 * 24 * 60 * 60 * 1000;
   const TERRITORY_STATES = new Set(["TX", "OK", "AR", "LA"]);
 
   const filtered = useMemo(
     () =>
       visibleLeads.filter((l) => {
-        if (!showOld && Date.now() - new Date(l.dateDiscovered).getTime() > NINETY_DAYS_MS) return false;
+        if (!showOld && Date.now() - new Date(l.dateDiscovered).getTime() > AGE_FILTER_MS) return false;
         if (!showAllTerritories && filters.states.length === 0) {
           const code = leadStateCode(l);
           if (!code || !TERRITORY_STATES.has(code)) return false;
