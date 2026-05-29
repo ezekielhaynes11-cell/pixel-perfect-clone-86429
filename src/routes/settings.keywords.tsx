@@ -22,13 +22,18 @@ function KeywordsPage() {
   const del = useServerFn(deleteKeyword);
   const scrape = useServerFn(scrapePageForAccount);
   const pages = useServerFn(listScrapedPages);
+  const bulkEnrich = useServerFn(bulkEnrichApollo);
+  const countUnenriched = useServerFn(countUnenrichedPhysicians);
 
   const kw = useQuery({ queryKey: ["keywords"], queryFn: () => list() });
   const sp = useQuery({ queryKey: ["scraped_pages"], queryFn: () => pages() });
+  const unenrichedQ = useQuery({ queryKey: ["physician_contacts_unenriched_count"], queryFn: () => countUnenriched() });
 
   const [kind, setKind] = useState<Kind>("vendor");
   const [value, setValue] = useState("");
   const [url, setUrl] = useState("");
+  const [enrichLimit, setEnrichLimit] = useState(25);
+
 
   const add = useMutation({
     mutationFn: () => upsert({ data: { kind, value: value.trim(), active: true } }),
