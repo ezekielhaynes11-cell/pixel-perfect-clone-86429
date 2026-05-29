@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   ExternalLink,
   Eye,
@@ -7,6 +8,7 @@ import {
   Building2,
   Stethoscope,
   RotateCcw,
+  UserRound,
 } from "lucide-react";
 
 import { Link } from "@tanstack/react-router";
