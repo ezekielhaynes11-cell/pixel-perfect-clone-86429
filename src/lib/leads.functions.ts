@@ -19,16 +19,31 @@ const LEAD_LIST_COLUMNS =
   "id, source, source_external_id, source_url, title, summary, confidence, priority, hospital, specialty, territory, entities, estimated_value_usd, win_probability, competitor_incumbent, date_discovered, date_ingested, enriched, vendor_mentions, account_type, signal_type, account_id, source_contacts";
 
 export const listLeads = createServerFn({ method: "GET" }).handler(async () => {
-  const { data, error } = await supabaseAdmin
+  // Exclude leads the user has already dismissed so a growing dismiss pile
+  // doesn't drain the fixed-size feed window.
+  const { data: dismissed, error: dismissedErr } = await supabaseAdmin
+    .from("lead_actions")
+    .select("lead_id")
+    .eq("user_id", OWNER_ID)
+    .eq("action", "dismissed");
+  if (dismissedErr) throw new Error(dismissedErr.message);
+  const dismissedIds = (dismissed ?? []).map((r) => r.lead_id);
+
+  let q = supabaseAdmin
     .from("leads")
     .select(LEAD_LIST_COLUMNS)
     .eq("enriched", true)
     .order("confidence", { ascending: false })
     .order("date_discovered", { ascending: false })
-    .limit(200);
+    .limit(500);
+  if (dismissedIds.length > 0) {
+    q = q.not("id", "in", `(${dismissedIds.join(",")})`);
+  }
+  const { data, error } = await q;
   if (error) throw new Error(error.message);
   return data ?? [];
 });
+
 
 export const triggerIngestion = createServerFn({ method: "POST" }).handler(async () => {
   return await runIngestion(OWNER_ID);
