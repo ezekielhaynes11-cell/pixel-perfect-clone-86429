@@ -343,7 +343,7 @@ function Dashboard() {
               <button
                 onClick={() => setShowOld((v) => !v)}
                 className={`flex h-7 items-center gap-1.5 rounded-sm border px-2.5 text-[11px] font-medium transition-colors ${showOld ? "border-primary/50 bg-primary/10 text-primary" : "border-border bg-surface-2 text-foreground/80 hover:bg-surface-3"}`}
-                title="Include leads older than 90 days"
+                title="Include leads older than 365 days"
               >
                 {showOld ? "Hide older leads" : "Show older leads"}
               </button>
