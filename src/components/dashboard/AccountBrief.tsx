@@ -84,6 +84,19 @@ export function AccountBrief({ accountId }: { accountId: string }) {
         )}
         <div className="ml-auto flex items-center gap-2">
           <button
+            onClick={() => apollo.mutate()}
+            disabled={apollo.isPending}
+            className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-xs font-semibold text-foreground/80 transition-colors hover:bg-surface-3 disabled:opacity-50"
+            title="Enrich account with Apollo.io (domain, employees, industry)"
+          >
+            {apollo.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Building2 className="h-3.5 w-3.5" />
+            )}
+            Enrich (Apollo)
+          </button>
+          <button
             onClick={() => run.mutate()}
             disabled={run.isPending}
             className="flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
