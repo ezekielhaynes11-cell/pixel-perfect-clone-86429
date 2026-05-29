@@ -3,6 +3,9 @@
 // Docs: https://npiregistry.cms.hhs.gov/api-page
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { apolloEnrichPhysician } from "@/lib/apollo/service.server";
+import { tryConsumeApolloCall } from "@/lib/apollo/quota.server";
+
 
 const NPPES_URL = "https://npiregistry.cms.hhs.gov/api/?version=2.1";
 
@@ -141,6 +144,8 @@ export async function attachPhysiciansToLead(
 ): Promise<number> {
   if (refs.length === 0) return 0;
   let linked = 0;
+  let capLoggedThisRun = false;
+
 
   // Dedup by best key
   const seen = new Set<string>();
@@ -207,6 +212,29 @@ export async function attachPhysiciansToLead(
       else if (!linkErr.message?.includes("duplicate")) {
         console.error("lead_physicians insert:", linkErr.message);
       }
+
+      // Auto-enrich with Apollo (idempotent fast-path inside the service skips already-enriched).
+      const { data: enrichRow } = await supabaseAdmin
+        .from("physician_contacts")
+        .select("apollo_enriched_at, apollo_id")
+        .eq("npi", contact.npi)
+        .maybeSingle();
+      const alreadyEnriched = !!(enrichRow?.apollo_enriched_at || enrichRow?.apollo_id);
+
+      if (!alreadyEnriched && !contact.npi.startsWith("APL-")) {
+        if (tryConsumeApolloCall()) {
+          try {
+            await apolloEnrichPhysician({ npi: contact.npi });
+          } catch (e) {
+            console.error("apollo auto-enrich failed for", contact.npi, e instanceof Error ? e.message : e);
+          }
+          await new Promise((r) => setTimeout(r, 300));
+        } else if (!capLoggedThisRun) {
+          console.warn("apollo daily cap reached, skipping further enrichment this run");
+          capLoggedThisRun = true;
+        }
+      }
+
     } catch (e) {
       console.error("NPPES lookup failed:", e instanceof Error ? e.message : e);
     }

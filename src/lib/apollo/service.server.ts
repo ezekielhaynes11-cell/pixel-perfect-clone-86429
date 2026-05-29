@@ -32,11 +32,17 @@ function firstPhone(p: ApolloPerson): string | null {
 export async function apolloEnrichPhysician(args: { npi: string }) {
   const { data: existing, error: readErr } = await supabaseAdmin
     .from("physician_contacts")
-    .select("npi, full_name, practice_state, email, title, linkedin_url, apollo_id")
+    .select("npi, full_name, practice_state, email, title, linkedin_url, apollo_id, apollo_enriched_at")
     .eq("npi", args.npi)
     .maybeSingle();
   if (readErr) return { error: readErr.message };
   if (!existing) return { error: "Physician not found" };
+
+  // Idempotent fast-path: already enriched, skip.
+  if (existing.apollo_id || existing.apollo_enriched_at) {
+    return { skipped: true, exists: true, npi: args.npi };
+  }
+
 
   const [first, ...rest] = (existing.full_name ?? "").trim().split(/\s+/);
   const last = rest.join(" ");

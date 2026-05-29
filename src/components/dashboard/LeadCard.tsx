@@ -68,9 +68,12 @@ export function LeadCard({
   dismissed?: boolean;
   onRestore?: () => void;
 }) {
-  const [showDocs, setShowDocs] = useState(false);
+  const [showDocs, setShowDocs] = useState(physicians.length === 1);
   const meta = sourceMeta[lead.source] ?? { label: lead.source, cls: "bg-surface-3 text-foreground border-border" };
   const conf = confidenceColor(lead.confidence);
+  const topPhys = physicians[0];
+  const hasInlineContact = !!(topPhys && (topPhys.email || topPhys.linkedin_url || topPhys.practice_phone));
+
   return (
     <article
       className={`fade-up group rounded-md border bg-surface-2 p-4 transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:bg-surface-3 hover:shadow-card-hover ${
@@ -144,6 +147,34 @@ export function LeadCard({
       {/* Physicians */}
       {physicians.length > 0 && (
         <div className="mb-3 rounded-md border border-border/60 bg-surface/60 p-2">
+          {hasInlineContact && !showDocs && (
+            <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+              <span className="font-medium text-foreground">
+                {topPhys.full_name}
+                {topPhys.credentials ? `, ${topPhys.credentials}` : ""}
+              </span>
+              {topPhys.title && (
+                <span className="text-muted-foreground">{topPhys.title}</span>
+              )}
+              {topPhys.email && (
+                <a href={`mailto:${topPhys.email}`} className="flex items-center gap-1 text-primary hover:underline">
+                  <Mail className="h-3 w-3" />
+                  {topPhys.email}
+                </a>
+              )}
+              {topPhys.linkedin_url && (
+                <a href={topPhys.linkedin_url} target="_blank" rel="noreferrer" className="text-primary hover:underline" aria-label="LinkedIn">
+                  <Linkedin className="h-3 w-3" />
+                </a>
+              )}
+              {topPhys.practice_phone && (
+                <a href={`tel:${topPhys.practice_phone}`} className="flex items-center gap-1 text-primary hover:underline">
+                  <Phone className="h-3 w-3" />
+                  {topPhys.practice_phone}
+                </a>
+              )}
+            </div>
+          )}
           <button
             type="button"
             onClick={() => setShowDocs((v) => !v)}
@@ -153,6 +184,7 @@ export function LeadCard({
             {physicians.length} Physician{physicians.length > 1 ? "s" : ""}
             <ChevronDown className={`ml-auto h-3 w-3 transition-transform ${showDocs ? "rotate-180" : ""}`} />
           </button>
+
           {showDocs && (
             <ul className="mt-2 space-y-1.5">
               {physicians.slice(0, 6).map((p) => (
