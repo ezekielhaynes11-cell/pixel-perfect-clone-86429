@@ -11,6 +11,17 @@ export type LeadSource =
   | "cms_open_payments"
   | "funding_rss";
 
+export interface LeadContact {
+  name: string | null;
+  title: string | null;
+  organization: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  type?: string | null;
+  source_origin?: string | null;
+}
+
 export interface RawLead {
   source: LeadSource;
   source_external_id: string;
@@ -19,6 +30,7 @@ export interface RawLead {
   raw_text: string;
   date_discovered: string;
   raw_payload: Record<string, unknown>;
+  source_contacts?: LeadContact[];
 }
 
 export type SignalType =
