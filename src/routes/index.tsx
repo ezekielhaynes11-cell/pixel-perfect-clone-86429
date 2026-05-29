@@ -316,6 +316,20 @@ function Dashboard() {
                 {showDismissed ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
                 {showDismissed ? "Show active" : `Show dismissed (${dismissedLeads.length})`}
               </button>
+              <button
+                onClick={() => setShowOld((v) => !v)}
+                className={`flex h-7 items-center gap-1.5 rounded-sm border px-2.5 text-[11px] font-medium transition-colors ${showOld ? "border-primary/50 bg-primary/10 text-primary" : "border-border bg-surface-2 text-foreground/80 hover:bg-surface-3"}`}
+                title="Include leads older than 90 days"
+              >
+                {showOld ? "Hide older leads" : "Show older leads"}
+              </button>
+              <button
+                onClick={() => setShowAllTerritories((v) => !v)}
+                className={`flex h-7 items-center gap-1.5 rounded-sm border px-2.5 text-[11px] font-medium transition-colors ${showAllTerritories ? "border-primary/50 bg-primary/10 text-primary" : "border-border bg-surface-2 text-foreground/80 hover:bg-surface-3"}`}
+                title="Include leads outside OK · AR · LA · TX"
+              >
+                {showAllTerritories ? "Territory: TX/OK/AR/LA" : "Show all territories"}
+              </button>
               {filtered.length > 0 && (
                 <button
                   onClick={() => {
@@ -429,7 +443,7 @@ function Dashboard() {
         </div>
 
         <footer className="mt-12 flex flex-wrap items-center justify-between border-t border-border pt-4 text-xs text-muted-foreground">
-          <span>Live data from SAM.gov · openFDA · GDELT · Enriched by Lovable AI</span>
+          <span>Live data from SAM.gov · openFDA · GDELT · Enriched by Yield AI</span>
           <span>Single-user mode</span>
         </footer>
       </main>
