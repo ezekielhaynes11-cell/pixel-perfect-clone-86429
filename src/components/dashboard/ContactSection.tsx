@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
   UserRound,
@@ -114,17 +114,25 @@ export function ContactSection({
   const empty = unified.length === 0;
   const [expanded, setExpanded] = useState(0);
 
+  const qc = useQueryClient();
   const enrichFn = useServerFn(enrichLeadContact);
   const enrichQ = useQuery({
     queryKey: ["contact_enrichment", leadId],
     queryFn: () => enrichFn({ data: { lead_id: leadId! } }),
     enabled: !!leadId,
     staleTime: 1000 * 60 * 60,
+    retry: false,
   });
 
   const enrich = enrichQ.data;
   const enrichLoading = leadId && enrichQ.isLoading;
   const enrichFound = enrich?.status === "found";
+
+  useEffect(() => {
+    if (enrichFound) {
+      qc.invalidateQueries({ queryKey: ["contact_enrichment_count"] });
+    }
+  }, [enrichFound, qc]);
 
   return (
     <section className="mb-3 rounded-md border border-border/60 bg-surface/60 p-3">

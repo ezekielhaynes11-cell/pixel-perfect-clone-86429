@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   ExternalLink,
   Eye,
@@ -7,6 +8,7 @@ import {
   Building2,
   Stethoscope,
   RotateCcw,
+  UserRound,
 } from "lucide-react";
 
 import { Link } from "@tanstack/react-router";
@@ -65,6 +67,7 @@ export function LeadCard({
 }) {
   const meta = sourceMeta[lead.source] ?? { label: lead.source, cls: "bg-surface-3 text-foreground border-border" };
   const conf = confidenceColor(lead.confidence);
+  const [contactOpen, setContactOpen] = useState(false);
 
 
   return (
@@ -141,8 +144,19 @@ export function LeadCard({
         ))}
       </div>
 
-      {/* Contact */}
-      <ContactSection sourceContacts={lead.sourceContacts ?? []} physicians={physicians} leadId={lead.id} />
+      {/* Contact (lazy: only enrich when user clicks) */}
+      {contactOpen ? (
+        <ContactSection sourceContacts={lead.sourceContacts ?? []} physicians={physicians} leadId={lead.id} />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setContactOpen(true)}
+          className="mb-3 flex w-full items-center gap-2 rounded-md border border-dashed border-border bg-surface/40 px-3 py-2 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-surface-3 hover:text-foreground"
+        >
+          <UserRound className="h-3.5 w-3.5" />
+          Show contact &amp; enrich decision-maker
+        </button>
+      )}
 
 
       {/* Actions */}

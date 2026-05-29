@@ -560,7 +560,7 @@ export const enrichLeadContact = createServerFn({ method: "POST" })
       .select("*")
       .eq("lead_id", data.lead_id)
       .maybeSingle();
-    if (cached) return cached as ContactEnrichmentRow;
+    if (cached && cached.status === "found") return cached as ContactEnrichmentRow;
 
     // 2. Load lead to get org name.
     const { data: lead, error: leadErr } = await supabaseAdmin
@@ -631,12 +631,23 @@ export const enrichLeadContact = createServerFn({ method: "POST" })
       });
     } catch (e) {
       console.error("enrichLeadContact apollo failed:", e instanceof Error ? e.message : e);
-      return writeAndReturn({
+      // Do NOT cache failures — return ephemeral none so a retry can fire later.
+      return {
         lead_id: data.lead_id, status: "none",
         name: null, title: null, organization: org,
         phone: null, email: null, linkedin_url: null,
-      });
+        created_at: new Date().toISOString(),
+      };
     }
   });
+
+export const getEnrichedContactCount = createServerFn({ method: "GET" }).handler(async () => {
+  const { count, error } = await supabaseAdmin
+    .from("contact_enrichment")
+    .select("lead_id", { count: "exact", head: true })
+    .eq("status", "found");
+  if (error) throw new Error(error.message);
+  return { count: count ?? 0 };
+});
 
 

@@ -45,7 +45,7 @@ export const emptyFilters: Filters = {
   accountTypes: [],
   vendors: [],
   states: [],
-  minConfidence: 65,
+  minConfidence: 50,
 };
 
 export const signalTypeOptions: SignalType[] = [

@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { RefreshCw, Bookmark, BarChart3, AlertCircle, EyeOff, Eye, XCircle, RotateCcw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
-import { listLeads, triggerIngestionForSource, setLeadAction, listLeadActions, getRecentIngestionRuns, listLeadPhysicians, bulkSetLeadAction, INGESTION_SOURCES, type LeadPhysician } from "@/lib/leads.functions";
+import { listLeads, triggerIngestionForSource, setLeadAction, listLeadActions, getRecentIngestionRuns, listLeadPhysicians, bulkSetLeadAction, getEnrichedContactCount, INGESTION_SOURCES, type LeadPhysician } from "@/lib/leads.functions";
 import { rowToLead, leadStateCode, leadIsHighPriority, type Lead, type LeadRow } from "@/data/leads";
 import { SummaryCard } from "@/components/dashboard/SummaryCard";
 import { FilterBar, emptyFilters, type Filters } from "@/components/dashboard/FilterBar";
@@ -62,6 +62,12 @@ function Dashboard() {
   const physiciansQ = useQuery({
     queryKey: ["lead_physicians"],
     queryFn: () => fetchPhysicians(),
+  });
+  const fetchEnrichedCount = useServerFn(getEnrichedContactCount);
+  const enrichedCountQ = useQuery({
+    queryKey: ["contact_enrichment_count"],
+    queryFn: () => fetchEnrichedCount(),
+    refetchInterval: 30_000,
   });
   const physiciansByLead = useMemo(() => {
     const map = new Map<string, LeadPhysician[]>();
@@ -137,7 +143,25 @@ function Dashboard() {
   });
 
   const leads: Lead[] = useMemo(
-    () => (leadsQ.data ?? []).map((r) => rowToLead(r as LeadRow)),
+    () => {
+      const mapped = (leadsQ.data ?? []).map((r) => rowToLead(r as LeadRow));
+      // Dedupe by normalized headline AND by source_url, keep highest confidence (tiebreak newest).
+      const better = (a: Lead, b: Lead) =>
+        a.confidence !== b.confidence
+          ? a.confidence > b.confidence
+          : new Date(a.dateDiscovered).getTime() > new Date(b.dateDiscovered).getTime();
+      const byKey = new Map<string, Lead>();
+      const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+      for (const l of mapped) {
+        const keys = [`t:${norm(l.title)}`];
+        if (l.sourceUrl) keys.push(`u:${l.sourceUrl}`);
+        const existing = keys.map((k) => byKey.get(k)).find(Boolean);
+        if (!existing || better(l, existing)) {
+          for (const k of keys) byKey.set(k, l);
+        }
+      }
+      return Array.from(new Set(byKey.values()));
+    },
     [leadsQ.data],
   );
   const dismissedIds = useMemo(
@@ -161,13 +185,13 @@ function Dashboard() {
     [visibleLeads],
   );
 
-  const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
+  const AGE_FILTER_MS = 365 * 24 * 60 * 60 * 1000;
   const TERRITORY_STATES = new Set(["TX", "OK", "AR", "LA"]);
 
   const filtered = useMemo(
     () =>
       visibleLeads.filter((l) => {
-        if (!showOld && Date.now() - new Date(l.dateDiscovered).getTime() > NINETY_DAYS_MS) return false;
+        if (!showOld && Date.now() - new Date(l.dateDiscovered).getTime() > AGE_FILTER_MS) return false;
         if (!showAllTerritories && filters.states.length === 0) {
           const code = leadStateCode(l);
           if (!code || !TERRITORY_STATES.has(code)) return false;
@@ -188,7 +212,7 @@ function Dashboard() {
         }
         return true;
       }),
-    [visibleLeads, filters, showOld, showAllTerritories, NINETY_DAYS_MS],
+    [visibleLeads, filters, showOld, showAllTerritories, AGE_FILTER_MS],
   );
 
   const highPriority = activeLeads.filter(leadIsHighPriority).length;
@@ -278,7 +302,7 @@ function Dashboard() {
           return (
             <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
               <span className={`inline-block h-1.5 w-1.5 rounded-full bg-current ${color}`} />
-              Last scan: {ago} · {last.source} · {last.new_count ?? 0} new · {last.enriched_count ?? 0} enriched
+              Last scan: {ago} · {last.source} · {last.new_count ?? 0} new · {enrichedCountQ.data?.count ?? 0} enriched
               {last.status === "error" ? " · failed" : ""}
             </div>
           );
@@ -319,7 +343,7 @@ function Dashboard() {
               <button
                 onClick={() => setShowOld((v) => !v)}
                 className={`flex h-7 items-center gap-1.5 rounded-sm border px-2.5 text-[11px] font-medium transition-colors ${showOld ? "border-primary/50 bg-primary/10 text-primary" : "border-border bg-surface-2 text-foreground/80 hover:bg-surface-3"}`}
-                title="Include leads older than 90 days"
+                title="Include leads older than 365 days"
               >
                 {showOld ? "Hide older leads" : "Show older leads"}
               </button>
@@ -442,8 +466,21 @@ function Dashboard() {
           <Sidebar leads={filtered.length ? filtered : visibleLeads} />
         </div>
 
-        <footer className="mt-12 flex flex-wrap items-center justify-between border-t border-border pt-4 text-xs text-muted-foreground">
-          <span>Live data from SAM.gov · openFDA · GDELT · Enriched by Yield AI</span>
+        <footer className="mt-12 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4 text-xs text-muted-foreground">
+          {(() => {
+            const labels: Record<string, string> = {
+              sam_gov: "SAM.gov", openfda: "openFDA", gdelt: "GDELT",
+              gdelt_m_and_a: "GDELT", gdelt_va_funding: "GDELT",
+              reddit: "Reddit", bluesky: "Bluesky", news: "News",
+              clinicaltrials: "ClinicalTrials", cms_open_payments: "CMS Payments",
+              funding_rss: "Gov Funding RSS",
+            };
+            const active = Array.from(
+              new Set(activeLeads.map((l) => labels[l.source] ?? l.source))
+            ).sort();
+            const list = active.length ? active.join(" · ") : "active sources";
+            return <span>Live data from {list} · Enriched by Yield AI</span>;
+          })()}
           <span>Single-user mode</span>
         </footer>
       </main>
