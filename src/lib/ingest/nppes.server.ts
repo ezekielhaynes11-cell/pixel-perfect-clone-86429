@@ -144,6 +144,8 @@ export async function attachPhysiciansToLead(
 ): Promise<number> {
   if (refs.length === 0) return 0;
   let linked = 0;
+  let capLoggedThisRun = false;
+
 
   // Dedup by best key
   const seen = new Set<string>();
