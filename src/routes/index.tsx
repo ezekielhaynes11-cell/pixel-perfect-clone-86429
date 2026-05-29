@@ -143,7 +143,25 @@ function Dashboard() {
   });
 
   const leads: Lead[] = useMemo(
-    () => (leadsQ.data ?? []).map((r) => rowToLead(r as LeadRow)),
+    () => {
+      const mapped = (leadsQ.data ?? []).map((r) => rowToLead(r as LeadRow));
+      // Dedupe by normalized headline AND by source_url, keep highest confidence (tiebreak newest).
+      const better = (a: Lead, b: Lead) =>
+        a.confidence !== b.confidence
+          ? a.confidence > b.confidence
+          : new Date(a.dateDiscovered).getTime() > new Date(b.dateDiscovered).getTime();
+      const byKey = new Map<string, Lead>();
+      const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+      for (const l of mapped) {
+        const keys = [`t:${norm(l.title)}`];
+        if (l.sourceUrl) keys.push(`u:${l.sourceUrl}`);
+        const existing = keys.map((k) => byKey.get(k)).find(Boolean);
+        if (!existing || better(l, existing)) {
+          for (const k of keys) byKey.set(k, l);
+        }
+      }
+      return Array.from(new Set(byKey.values()));
+    },
     [leadsQ.data],
   );
   const dismissedIds = useMemo(
