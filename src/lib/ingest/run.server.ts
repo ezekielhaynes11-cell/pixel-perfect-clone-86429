@@ -9,6 +9,7 @@ import { fetchBluesky } from "./bluesky.server";
 import { fetchFundingRss } from "./funding-rss.server";
 import { enrichRawLead } from "./enrich.server";
 import { attachPhysiciansToLead, type PhysicianLookupInput } from "./nppes.server";
+import { backfillApolloForLinkedPhysicians } from "@/lib/apollo/service.server";
 import type { LeadSource, RawLead } from "./types";
 
 // Map US state name → 2-letter code for NPPES name lookups
@@ -147,6 +148,8 @@ export async function runIngestionForSource(
     try { await evaluateAlerts(enrichedIds, forUserId); }
     catch (e) { console.error("alerts evaluation failed:", e); }
   }
+  try { await backfillApolloForLinkedPhysicians({ limit: 25 }); }
+  catch (e) { console.error("apollo backfill failed:", e); }
   return summary;
 }
 
@@ -163,6 +166,8 @@ export async function runIngestion(forUserId?: string): Promise<IngestionSummary
     try { await evaluateAlerts(newlyEnrichedIds, forUserId); }
     catch (e) { console.error("alerts evaluation failed:", e); }
   }
+  try { await backfillApolloForLinkedPhysicians({ limit: 50 }); }
+  catch (e) { console.error("apollo backfill failed:", e); }
   return summaries;
 }
 

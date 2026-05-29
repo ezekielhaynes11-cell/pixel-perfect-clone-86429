@@ -3,8 +3,13 @@ import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { OWNER_ID } from "./owner.server";
 import { runIngestion, runIngestionForSource, INGESTION_SOURCE_NAMES, type IngestionSourceName } from "./ingest/run.server";
+import { backfillApolloForLinkedPhysicians } from "./apollo/service.server";
 import { draftOutreachEmail } from "./outreach.server";
 import { generateDailyBriefing, type BriefingLead } from "./briefings.server";
+
+export const triggerApolloBackfill = createServerFn({ method: "POST" }).handler(async () => {
+  return await backfillApolloForLinkedPhysicians({ limit: 50 });
+});
 
 export const INGESTION_SOURCES = INGESTION_SOURCE_NAMES;
 
