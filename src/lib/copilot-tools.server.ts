@@ -178,6 +178,8 @@ interface ToolArgs {
   apollo_enrich_physician: { npi: string };
   apollo_enrich_account: { account_id: string };
   apollo_prospect: { account_id?: string; state?: string; titles?: string[]; keywords?: string; limit?: number };
+  apollo_bulk_enrich: { limit?: number };
+
 }
 
 export async function runCopilotTool(name: string, args: Record<string, unknown>): Promise<unknown> {
