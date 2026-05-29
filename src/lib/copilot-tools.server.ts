@@ -53,14 +53,18 @@ export const COPILOT_TOOLS = [
     type: "function" as const,
     function: {
       name: "query_physicians",
-      description: "Search physician contacts. Returns up to 25 rows.",
+      description:
+        "Search physician contacts (returns email, title, LinkedIn, phone). Use lead_state to find physicians linked to leads in a given state (TX/OK/AR/LA). Use has_email=true to only return contacts with an email on file. Returns up to 50 rows.",
       parameters: {
         type: "object",
         properties: {
           specialty_contains: { type: "string" },
-          state: { type: "string" },
+          state: { type: "string", description: "Two-letter US state code matched on physician practice_state." },
+          lead_state: { type: "string", description: "Two-letter US state code. Restricts to physicians linked to leads whose territory matches this state." },
+          name_contains: { type: "string" },
           role_hint_contains: { type: "string" },
-          limit: { type: "number", minimum: 1, maximum: 25 },
+          has_email: { type: "boolean", description: "If true, only return contacts with an email on file." },
+          limit: { type: "number", minimum: 1, maximum: 50 },
         },
         additionalProperties: false,
       },
