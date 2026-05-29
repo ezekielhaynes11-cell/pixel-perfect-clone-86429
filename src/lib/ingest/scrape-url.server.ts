@@ -74,7 +74,7 @@ export async function scrapeUrlForAccount(args: {
 
   const res = await fetch(args.url, {
     headers: {
-      "User-Agent": "PhillipsLeadRadar/1.0 (+contact: sales-intel)",
+      "User-Agent": "PhilipsLeadRadar/1.0 (+contact: sales-intel)",
       Accept: "text/html,application/xhtml+xml",
     },
   });

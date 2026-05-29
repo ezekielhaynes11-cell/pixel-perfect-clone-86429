@@ -12,7 +12,7 @@ const SUBS = [
   "medlabprofessionals",
 ];
 
-const UA = "PhillipsLeadRadar/1.0";
+const UA = "PhilipsLeadRadar/1.0";
 
 interface RedditPost {
   id: string;
