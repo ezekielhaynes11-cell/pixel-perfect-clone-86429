@@ -68,9 +68,12 @@ export function LeadCard({
   dismissed?: boolean;
   onRestore?: () => void;
 }) {
-  const [showDocs, setShowDocs] = useState(false);
+  const [showDocs, setShowDocs] = useState(physicians.length === 1);
   const meta = sourceMeta[lead.source] ?? { label: lead.source, cls: "bg-surface-3 text-foreground border-border" };
   const conf = confidenceColor(lead.confidence);
+  const topPhys = physicians[0];
+  const hasInlineContact = !!(topPhys && (topPhys.email || topPhys.linkedin_url || topPhys.practice_phone));
+
   return (
     <article
       className={`fade-up group rounded-md border bg-surface-2 p-4 transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:bg-surface-3 hover:shadow-card-hover ${
