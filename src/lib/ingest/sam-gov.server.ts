@@ -99,8 +99,9 @@ function mapPocs(o: SamOpportunity): LeadContact[] {
   return list
     .map((p): LeadContact => {
       const name =
-        p.fullName ??
-        ([p.firstName, p.middleName, p.lastName].filter(Boolean).join(" ").trim() || null);
+        p.fullName ||
+        [p.firstName, p.middleName, p.lastName].filter(Boolean).join(" ").trim() ||
+        null;
       return {
         name: name && name.length > 0 ? name : null,
         title: p.title ?? null,
