@@ -341,8 +341,25 @@ function Dashboard() {
             </div>
 
             {leadsQ.isLoading ? (
-              <div className="rounded-md border border-dashed border-border p-12 text-center text-sm text-muted-foreground">
-                Loading leads…
+              <div className="space-y-3" aria-busy="true" aria-label="Loading leads">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="animate-pulse rounded-md border border-border bg-surface-2/40 p-4"
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="h-4 w-16 rounded bg-surface-3" />
+                      <div className="h-4 w-24 rounded bg-surface-3" />
+                    </div>
+                    <div className="mt-3 h-5 w-3/4 rounded bg-surface-3" />
+                    <div className="mt-2 h-4 w-full rounded bg-surface-3/70" />
+                    <div className="mt-1 h-4 w-5/6 rounded bg-surface-3/70" />
+                    <div className="mt-4 flex gap-2">
+                      <div className="h-6 w-28 rounded bg-surface-3" />
+                      <div className="h-6 w-20 rounded bg-surface-3" />
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : filtered.length === 0 ? (
               <div className="rounded-md border border-dashed border-border p-12 text-center text-sm text-muted-foreground">
