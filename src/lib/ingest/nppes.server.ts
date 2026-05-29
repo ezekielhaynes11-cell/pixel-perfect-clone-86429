@@ -3,6 +3,9 @@
 // Docs: https://npiregistry.cms.hhs.gov/api-page
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { apolloEnrichPhysician } from "@/lib/apollo/service.server";
+import { tryConsumeApolloCall } from "@/lib/apollo/quota.server";
+
 
 const NPPES_URL = "https://npiregistry.cms.hhs.gov/api/?version=2.1";
 
