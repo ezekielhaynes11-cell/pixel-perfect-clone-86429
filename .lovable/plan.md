@@ -1,76 +1,111 @@
-# Plan: Fix Copilot search + add Apollo integration
+# Pre-Publish Beta QA Checklist
 
-## Part 1 — Fix "no results" in Copilot
+Run through each item in order in the preview. Mark ✅ / ❌ / ⚠️ and note anything off. Apollo items hit the live API and burn credits — minimize repeats.
 
-Two root causes in `src/lib/copilot-tools.server.ts → query_leads`:
+## 0. Environment sanity
+- [ ] Preview loads without console errors (open DevTools first)
+- [ ] No "REPLACE this" / placeholder content on `/`
+- [ ] Favicon, page title, and meta description set on landing
 
-1. **Hardcoded `.eq("enriched", true)`** drops 144 / 446 leads.
-2. **State filter is exact-match** on a dirty `territory` column (37 rows say `texas`, but other rows are `Texas`, `(Multiple states)`, `null`, etc., so `state: "TX"` misses most of them).
+## 1. Auth
+- [ ] `/login` renders; email+password signup works
+- [ ] Google sign-in works (if enabled)
+- [ ] Email verification required (unless explicitly disabled)
+- [ ] After login, redirected to dashboard
+- [ ] Logout clears session, blocks protected routes
+- [ ] Hitting `/_authenticated/*` while signed-out redirects to `/login`
 
-Plus the system prompt tells the model "always call a tool before answering" but never tells it to broaden a query when the first call returns 0. So one empty result → "no results."
+## 2. Dashboard / Home
+- [ ] Summary cards show real numbers (leads today, week, enriched, etc.)
+- [ ] **"Last sync" timestamp is in user's local TZ, not PST** (regression check)
+- [ ] No "AI enrichment" copy on summary cards (regression check)
+- [ ] Top leads list renders, links to lead detail
+- [ ] Empty state renders cleanly for brand-new user
 
-### Changes
-- `query_leads`: drop the hard `enriched=true` filter; add an optional `enriched_only` arg (default `false`). Replace `eq("territory", …)` with `ilike("territory", "%texas%")` style matching, plus a state-code → state-name map for TX/OK/AR/LA → matches `texas`, `oklahoma`, etc. case-insensitively. Also widen `hospital`/`title`/`summary` search via a new optional `text_search` arg using `or(...)` with `ilike` across title/summary/hospital.
-- System prompt in `src/lib/copilot.functions.ts`: add a rule — "If a tool returns 0 results, try ONE broader call (drop the narrowest filter) before saying nothing matched."
-- Bump per-tool result cap from 50 → 100 and keep the 16 KB serialized-tool-output truncation, but switch to a structured slim shape (drop `raw_payload`-style fields we already exclude) so 100 rows fit.
+## 3. Ingestion
+- [ ] "Run ingestion" / sync button starts a run
+- [ ] `ingestion_runs` row appears (status `running` → `success`)
+- [ ] **No "upstream request timeout" error** on sam.gov (regression check)
+- [ ] Failed runs surface error text in UI, not just spin
+- [ ] New leads land in `leads` table with source, title, summary populated
+- [ ] Retrying after a failure works
 
-### Why not stream
-Copilot already returns the final text in one yield (no SSE from gateway). Not the cause of "no results"; leaving as-is.
+## 4. Leads list & filters
+- [ ] Leads page paginates / loads without hitting 1000-row cap silently
+- [ ] State / territory filter returns results for TX, OK, AR, LA (case-insensitive)
+- [ ] Priority / signal-type / account-type filters work
+- [ ] Search box matches title, summary, hospital
+- [ ] Sort by date/confidence works
+- [ ] Empty filter result shows "no matches" with reset
 
-## Part 2 — Apollo integration
+## 5. Lead detail modal
+- [ ] Opens from list, URL is shareable
+- [ ] Title, summary, source link, hospital, territory, vendor mentions all render
+- [ ] Linked physicians render with NPI; rows show enrichment state
+- [ ] "Save", "Dismiss", "Mark contacted" actions persist to `lead_actions`
+- [ ] Generate outreach draft → produces subject + body, saves to `outreach_drafts`
+- [ ] Per-physician **Apollo Enrich** button (live):
+  - [ ] Pulls email, title, LinkedIn for at least one known physician
+  - [ ] `physician_contacts.apollo_enriched_at` updates
+  - [ ] No-match case shows graceful message, no crash
 
-Apollo provides an `X-Api-Key` REST API at `https://api.apollo.io/api/v1`. We'll use:
-- `POST /mixed_people/search` — find people by title/location/keyword
-- `POST /people/match` — enrich one person by name + org (returns email/phone/title/LinkedIn)
-- `POST /mixed_companies/search` — find/enrich orgs by name/domain/location
+## 6. Copilot
+- [ ] Chat opens, message history persists across reload
+- [ ] **Asks "leads in Texas" → returns results** (regression: was "no results")
+- [ ] Asks "leads about robotic surgery" → text_search returns matches
+- [ ] Asks something with zero matches → tries broader query before giving up
+- [ ] Cites lead IDs / links back to lead detail
+- [ ] Markdown renders (lists, bold, links)
+- [ ] Tool calls visible/transparent (or at least not breaking UI)
+- [ ] Apollo tools work from chat:
+  - [ ] "Enrich account <Name>" → fills domain + employee count
+  - [ ] "Prospect cardiologists at <Account>" → creates physician_contacts rows
+  - [ ] "Enrich Dr. <Name>" → fills email/title/LinkedIn
 
-### New secret
-- `APOLLO_API_KEY` (requested via `add_secret` tool once plan is approved).
+## 7. Accounts
+- [ ] Accounts list renders, search works
+- [ ] Account detail page loads brief, linked leads, physicians
+- [ ] **Account Brief → "Enrich (Apollo)"** (live): domain + employee_count populate, `apollo_enriched_at` set, button disables while running
+- [ ] **Prospect (Apollo) dialog** (live): titles + keywords form submits, new contacts appear with `npi: APL-…`, dedupes on re-run
+- [ ] Generate brief writes to `account_briefs`, markdown renders, sources cited
 
-### New schema
-Add columns to `physician_contacts`:
-- `email text`, `linkedin_url text`, `title text`, `apollo_id text`, `apollo_enriched_at timestamptz`
+## 8. Saved searches & alerts
+- [ ] Save current filter as search
+- [ ] Saved searches list shows item, can delete
+- [ ] Alert toggle persists
+- [ ] (If wired) alerts row created when matching lead arrives
 
-Add columns to `accounts`:
-- `domain text`, `apollo_org_id text`, `employee_count int`, `apollo_enriched_at timestamptz`
+## 9. Briefings
+- [ ] "Generate daily briefing" produces markdown with top leads
+- [ ] Stored in `briefings`, retrievable on reload
+- [ ] Top lead links work
 
-(GRANTs + existing RLS stay; both tables are already readable by authenticated.)
+## 10. Permissions / RLS
+- [ ] Second test user can't see first user's `saved_searches`, `alerts`, `briefings`, `outreach_drafts`, `lead_actions`
+- [ ] Non-admin cannot mutate `leads`, `accounts`, `keyword_lists` from client
+- [ ] Apollo writes happen server-side only (no service-role key in browser)
 
-### New server module: `src/lib/apollo/client.server.ts`
-Thin wrapper with three functions: `apolloPeopleSearch`, `apolloPersonMatch`, `apolloOrgSearch`. Handles `APOLLO_API_KEY`, rate-limit / 402 surfacing, and a 30 s timeout.
+## 11. Errors & edge cases
+- [ ] Disconnect network → app shows toast / error, doesn't white-screen
+- [ ] Visit `/some-bogus-route` → notFoundComponent renders
+- [ ] Force an error in a loader → errorComponent + Retry actually re-runs
+- [ ] Long titles / summaries don't overflow cards
+- [ ] Mobile width (375px): nav, dashboard, lead modal, Copilot all usable
 
-### New server functions (`src/lib/apollo.functions.ts`)
-All under `requireSupabaseAuth`:
-1. `enrichPhysicianContact({ npi })` — calls `people/match` using existing name + state, writes back email/phone/title/linkedin/apollo_id.
-2. `enrichAccount({ accountId })` — calls `mixed_companies/search` by name+state, writes domain/employee_count/apollo_org_id.
-3. `prospectContacts({ accountId?, state, titles[], keywords[], limit })` — calls `mixed_people/search`, upserts results into `physician_contacts` (using `apollo_id` as the key when no NPI), and optionally links them to an account.
+## 12. Performance / polish
+- [ ] No unexplained 4xx/5xx in Network tab during normal flow
+- [ ] Server function logs clean (`stack_modern--server-function-logs`)
+- [ ] Database linter clean (`supabase--linter`)
+- [ ] Security scan clean (`security--run_security_scan`)
+- [ ] `APOLLO_API_KEY` and `SAM_GOV_API_KEY` present as secrets, not in code
+- [ ] Lighthouse / quick a11y pass: contrast, alt text, single H1
 
-### Wire into existing UI (small touches)
-- `AccountBrief.tsx`: add "Enrich with Apollo" button → calls `enrichAccount`, then triggers existing brief refresh.
-- `LeadDetailModal.tsx`: each linked physician gets an "Enrich" link → calls `enrichPhysicianContact`.
-- New "Prospect" button on `accounts/$id` page → opens a small dialog (titles, keyword, limit) and calls `prospectContacts`.
+## 13. Publish settings
+- [ ] Confirm publish visibility (public vs private workspace-only)
+- [ ] Custom domain (if any) wired
+- [ ] Decide on "Edit with Lovable" badge
 
-### Power Copilot search — add 3 tools to `COPILOT_TOOLS`
-- `apollo_prospect` → wraps `prospectContacts` (persists results).
-- `apollo_enrich_account` → wraps `enrichAccount`.
-- `apollo_enrich_physician` → wraps `enrichPhysicianContact`.
+---
 
-Update Copilot system prompt: "You can prospect new contacts and enrich physicians/accounts via Apollo. Confirm before prospecting more than 25 contacts in one call."
-
-## Files touched
-
-- `src/lib/copilot-tools.server.ts` — query_leads fix + 3 Apollo tool entries
-- `src/lib/copilot.functions.ts` — prompt update
-- `src/lib/apollo/client.server.ts` — new
-- `src/lib/apollo.functions.ts` — new
-- `src/components/dashboard/AccountBrief.tsx` — Enrich button
-- `src/components/dashboard/LeadDetailModal.tsx` — per-physician Enrich
-- `src/routes/accounts.$id.tsx` — Prospect dialog
-- Migration: add columns to `physician_contacts` and `accounts`
-
-## Out of scope (ask before adding)
-
-- Backfill job that bulk-enriches every existing account/physician.
-- Apollo email-sequence sending.
-- Storing Apollo's raw payloads long-term.
-
+**Reporting format** when you find issues, paste back as:
+`#<section>.<item>` — short description — repro steps. I'll triage and fix in build mode.
