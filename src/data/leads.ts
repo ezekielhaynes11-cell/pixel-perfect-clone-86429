@@ -22,6 +22,17 @@ export interface LeadEntities {
   keywords: string[];
 }
 
+export interface LeadContact {
+  name: string | null;
+  title: string | null;
+  organization: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  type?: string | null;
+  source_origin?: string | null;
+}
+
 export interface Lead {
   id: string;
   title: string;
@@ -42,6 +53,7 @@ export interface Lead {
   accountType: string | null;
   vendorMentions: string[];
   accountId: string | null;
+  sourceContacts: LeadContact[];
 }
 
 // DB row → UI Lead
@@ -65,10 +77,14 @@ export interface LeadRow {
   account_type?: string | null;
   vendor_mentions?: string[] | null;
   account_id?: string | null;
+  source_contacts?: unknown;
 }
 
 export function rowToLead(r: LeadRow): Lead {
   const ents = (r.entities as Partial<LeadEntities>) ?? {};
+  const contacts = Array.isArray(r.source_contacts)
+    ? (r.source_contacts as LeadContact[])
+    : [];
   return {
     id: r.id,
     title: r.title,
@@ -94,6 +110,7 @@ export function rowToLead(r: LeadRow): Lead {
     accountType: r.account_type ?? null,
     vendorMentions: r.vendor_mentions ?? [],
     accountId: r.account_id ?? null,
+    sourceContacts: contacts,
   };
 }
 
