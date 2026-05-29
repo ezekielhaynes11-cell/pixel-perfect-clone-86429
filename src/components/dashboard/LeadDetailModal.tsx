@@ -1,14 +1,19 @@
 import { useEffect } from "react";
 import { X, ExternalLink, Building2, User2, Wrench, Tag } from "lucide-react";
 import { type Lead, timeAgo } from "@/data/leads";
+import type { LeadPhysician } from "@/lib/leads.functions";
+import { ContactSection } from "./ContactSection";
 
 export function LeadDetailModal({
   lead,
+  physicians = [],
   onClose,
 }: {
   lead: Lead | null;
+  physicians?: LeadPhysician[];
   onClose: () => void;
 }) {
+
   useEffect(() => {
     const fn = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", fn);
