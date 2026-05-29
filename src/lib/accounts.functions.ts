@@ -89,7 +89,12 @@ export interface AccountDetail {
     practice_city: string | null;
     practice_state: string | null;
     practice_phone: string | null;
+    email: string | null;
+    title: string | null;
+    linkedin_url: string | null;
+    apollo_enriched_at: string | null;
   }>;
+
   scrapedPages: Array<{
     id: string;
     url: string;
@@ -131,6 +136,10 @@ export const getAccountDetail = createServerFn({ method: "POST" })
         practice_city: string | null;
         practice_state: string | null;
         practice_phone: string | null;
+        email: string | null;
+        title: string | null;
+        linkedin_url: string | null;
+        apollo_enriched_at: string | null;
       };
     };
     let physicians: AccountDetail["physicians"] = [];
@@ -138,7 +147,7 @@ export const getAccountDetail = createServerFn({ method: "POST" })
       const { data: physRows } = await supabaseAdmin
         .from("lead_physicians")
         .select(
-          "role, role_hint, physician_contacts!inner(npi, full_name, credentials, primary_specialty, practice_city, practice_state, practice_phone)",
+          "role, role_hint, physician_contacts!inner(npi, full_name, credentials, primary_specialty, practice_city, practice_state, practice_phone, email, title, linkedin_url, apollo_enriched_at)",
         )
         .in("lead_id", leadIds)
         .limit(200);
@@ -159,8 +168,13 @@ export const getAccountDetail = createServerFn({ method: "POST" })
           practice_city: r.physician_contacts.practice_city,
           practice_state: r.physician_contacts.practice_state,
           practice_phone: r.physician_contacts.practice_phone,
+          email: r.physician_contacts.email,
+          title: r.physician_contacts.title,
+          linkedin_url: r.physician_contacts.linkedin_url,
+          apollo_enriched_at: r.physician_contacts.apollo_enriched_at,
         }));
     }
+
 
     const { data: scrapedPages } = await supabaseAdmin
       .from("scraped_pages")

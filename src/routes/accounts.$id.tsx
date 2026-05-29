@@ -2,7 +2,7 @@ import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { ArrowLeft, Building2, MapPin, Shield, ExternalLink, Phone, FileText, Zap, Sparkles, Loader2, Mail } from "lucide-react";
+import { ArrowLeft, Building2, MapPin, Shield, ExternalLink, Phone, FileText, Zap, Sparkles, Loader2, Mail, Linkedin } from "lucide-react";
 import { toast } from "sonner";
 import { getAccountDetail } from "@/lib/accounts.functions";
 import { enrichPhysicianApollo, prospectContactsApollo } from "@/lib/apollo.functions";
@@ -284,6 +284,33 @@ function AccountPage() {
                           <Phone className="h-3 w-3" /> {p.practice_phone}
                         </a>
                       )}
+                      {p.title && (
+                        <span className="text-xs text-muted-foreground">{p.title}</span>
+                      )}
+                      {p.email && (
+                        <a
+                          href={`mailto:${p.email}`}
+                          className="flex items-center gap-1 text-xs text-primary hover:underline"
+                        >
+                          <Mail className="h-3 w-3" /> {p.email}
+                        </a>
+                      )}
+                      {p.linkedin_url && (
+                        <a
+                          href={p.linkedin_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center text-primary hover:underline"
+                          title="LinkedIn profile"
+                        >
+                          <Linkedin className="h-3.5 w-3.5" />
+                        </a>
+                      )}
+                      {p.apollo_enriched_at && (
+                        <span className="rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] uppercase tracking-wide text-primary/80">
+                          Apollo · {timeAgo(p.apollo_enriched_at)}
+                        </span>
+                      )}
                       <button
                         onClick={() => enrichMut.mutate(p.npi)}
                         disabled={enrichMut.isPending}
@@ -292,6 +319,7 @@ function AccountPage() {
                       >
                         <Mail className="h-3 w-3" /> Enrich
                       </button>
+
                     </li>
                   ))}
                 </ul>
