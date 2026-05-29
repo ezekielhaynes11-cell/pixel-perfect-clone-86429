@@ -122,21 +122,42 @@ export function ContactSection({
     staleTime: 1000 * 60 * 60,
   });
 
+  const enrich = enrichQ.data;
+  const enrichLoading = leadId && enrichQ.isLoading;
+  const enrichFound = enrich?.status === "found";
+
   return (
     <section className="mb-3 rounded-md border border-border/60 bg-surface/60 p-3">
-      <header className="mb-2 flex items-center gap-2">
+      <header className="mb-2 flex flex-wrap items-center gap-2">
         <UserRound className="h-3.5 w-3.5 text-muted-foreground" />
         <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           Contact
         </h4>
+        {leadId && (
+          enrichLoading ? (
+            <span className="inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Enriching…
+            </span>
+          ) : enrichFound ? (
+            <span className="inline-flex items-center gap-1 rounded-full border border-success/40 bg-success/10 px-2 py-0.5 text-[10px] font-medium text-success">
+              <CheckCircle2 className="h-3 w-3" />
+              Contact found
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">
+              <AlertCircle className="h-3 w-3" />
+              No contact on file
+            </span>
+          )
+        )}
         {empty ? (
-          <span
-            className="ml-auto inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning"
-            title="This source did not include contact data."
-          >
-            <AlertCircle className="h-3 w-3" />
-            No contact on file
-          </span>
+          !leadId && (
+            <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">
+              <AlertCircle className="h-3 w-3" />
+              No contact on file
+            </span>
+          )
         ) : (
           <span className="ml-auto text-[10px] text-muted-foreground">
             {unified.length} contact{unified.length > 1 ? "s" : ""}
@@ -144,9 +165,30 @@ export function ContactSection({
         )}
       </header>
 
-      {empty ? (
+      {enrichFound && enrich && (
+        <div className="mb-2 rounded border border-success/30 bg-success/5 px-2 py-2">
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-success">
+            Decision-maker
+          </div>
+          <ContactCard
+            contact={{
+              key: `apollo:${enrich.lead_id}`,
+              name: enrich.name,
+              title: enrich.title,
+              organization: enrich.organization,
+              phone: enrich.phone,
+              email: enrich.email,
+              address: null,
+              linkedin_url: enrich.linkedin_url,
+              origin: "Apollo",
+            }}
+          />
+        </div>
+      )}
+
+      {empty && !enrichFound ? (
         <ContactCard contact={null} />
-      ) : (
+      ) : !empty ? (
         <ul className="space-y-2">
           {unified.map((c, i) => {
             const isOpen = i === expanded;
