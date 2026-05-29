@@ -48,15 +48,22 @@ export async function apolloEnrichPhysician(args: { npi: string }) {
   const p = matched.person;
   if (!p) return { exists: false, message: "No Apollo match for this physician." };
 
-  const patch: Record<string, unknown> = {
+  const phone = firstPhone(p);
+  const patch: {
+    apollo_id: string;
+    apollo_enriched_at: string;
+    email?: string;
+    title?: string;
+    linkedin_url?: string;
+    practice_phone?: string;
+  } = {
     apollo_id: p.id,
     apollo_enriched_at: new Date().toISOString(),
   };
   if (p.email) patch.email = p.email;
   if (p.title) patch.title = p.title;
   if (p.linkedin_url) patch.linkedin_url = p.linkedin_url;
-  const phone = firstPhone(p);
-  if (phone && !existing.email /* don't clobber human-entered numbers */) patch.practice_phone = phone;
+  if (phone && !existing.email) patch.practice_phone = phone;
 
   const { error: upErr } = await supabaseAdmin
     .from("physician_contacts")
