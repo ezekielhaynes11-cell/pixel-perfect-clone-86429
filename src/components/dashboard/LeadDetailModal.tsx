@@ -51,6 +51,9 @@ export function LeadDetailModal({
         <div className="space-y-5 p-5">
           <p className="text-sm leading-relaxed text-foreground/90">{lead.summary}</p>
 
+          <ContactSection sourceContacts={lead.sourceContacts ?? []} physicians={physicians} />
+
+
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <EntityBlock icon={<Building2 />} title="Hospitals" items={lead.entities.hospitals} />
             <EntityBlock icon={<User2 />} title="Physicians / Teams" items={lead.entities.physicians} />
