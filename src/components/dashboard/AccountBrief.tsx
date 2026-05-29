@@ -47,6 +47,29 @@ export function AccountBrief({ accountId }: { accountId: string }) {
       toast.error(e instanceof Error ? e.message : "Research failed", { id: "research" }),
   });
 
+  const apollo = useMutation({
+    mutationFn: () => enrichApollo({ data: { account_id: accountId } }),
+    onMutate: () => toast.loading("Enriching with Apollo…", { id: "apollo-acct" }),
+    onSuccess: (res) => {
+      if ("error" in res && res.error) {
+        toast.error(res.error, { id: "apollo-acct" });
+        return;
+      }
+      if ("exists" in res && !res.exists) {
+        toast.message(res.message ?? "No Apollo match found.", { id: "apollo-acct" });
+        return;
+      }
+      const r = res as { domain?: string | null; employee_count?: number | null };
+      toast.success(
+        `Apollo: ${r.domain ?? "no domain"} · ${r.employee_count ?? "?"} employees`,
+        { id: "apollo-acct" },
+      );
+      qc.invalidateQueries({ queryKey: ["account", accountId] });
+    },
+    onError: (e: unknown) =>
+      toast.error(e instanceof Error ? e.message : "Apollo enrich failed", { id: "apollo-acct" }),
+  });
+
   return (
     <section className="mb-6 rounded-md border border-primary/30 bg-gradient-to-br from-primary/5 to-surface-2 p-5">
       <div className="mb-3 flex flex-wrap items-center gap-3">
