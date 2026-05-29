@@ -453,13 +453,17 @@ export interface LeadPhysician {
   practice_phone: string | null;
   practice_address: string | null;
   practice_zip: string | null;
+  email: string | null;
+  title: string | null;
+  linkedin_url: string | null;
+  apollo_enriched_at: string | null;
 }
 
 export const listLeadPhysicians = createServerFn({ method: "GET" }).handler(async (): Promise<LeadPhysician[]> => {
   const { data, error } = await supabaseAdmin
     .from("lead_physicians")
     .select(
-      "lead_id, role, match_confidence, physician_contacts!inner(npi, full_name, credentials, primary_specialty, practice_city, practice_state, practice_phone, practice_address, practice_zip)",
+      "lead_id, role, match_confidence, physician_contacts!inner(npi, full_name, credentials, primary_specialty, practice_city, practice_state, practice_phone, practice_address, practice_zip, email, title, linkedin_url, apollo_enriched_at)",
     )
     .limit(2000);
   if (error) throw new Error(error.message);
@@ -477,6 +481,10 @@ export const listLeadPhysicians = createServerFn({ method: "GET" }).handler(asyn
       practice_phone: string | null;
       practice_address: string | null;
       practice_zip: string | null;
+      email: string | null;
+      title: string | null;
+      linkedin_url: string | null;
+      apollo_enriched_at: string | null;
     };
   };
   return ((data ?? []) as unknown as Row[]).map((r) => ({
@@ -492,5 +500,10 @@ export const listLeadPhysicians = createServerFn({ method: "GET" }).handler(asyn
     practice_phone: r.physician_contacts.practice_phone,
     practice_address: r.physician_contacts.practice_address,
     practice_zip: r.physician_contacts.practice_zip,
+    email: r.physician_contacts.email,
+    title: r.physician_contacts.title,
+    linkedin_url: r.physician_contacts.linkedin_url,
+    apollo_enriched_at: r.physician_contacts.apollo_enriched_at,
   }));
 });
+
