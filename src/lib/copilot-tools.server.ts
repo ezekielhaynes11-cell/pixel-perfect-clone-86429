@@ -95,6 +95,51 @@ export const COPILOT_TOOLS = [
       },
     },
   },
+  {
+    type: "function" as const,
+    function: {
+      name: "apollo_enrich_physician",
+      description: "Use Apollo.io to enrich an existing physician contact (email, title, LinkedIn, phone) by NPI.",
+      parameters: {
+        type: "object",
+        properties: { npi: { type: "string" } },
+        required: ["npi"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "apollo_enrich_account",
+      description: "Use Apollo.io to enrich an account with domain, employee count, and industry.",
+      parameters: {
+        type: "object",
+        properties: { account_id: { type: "string" } },
+        required: ["account_id"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "apollo_prospect",
+      description:
+        "Find NEW contacts in Apollo.io and add them to the physician_contacts table. Use for net-new prospecting. Confirm with the user before requesting more than 25 contacts.",
+      parameters: {
+        type: "object",
+        properties: {
+          account_id: { type: "string", description: "Optional. If set, restricts search to this account's organisation." },
+          state: { type: "string", description: "Two-letter US state code. Inherited from account if omitted." },
+          titles: { type: "array", items: { type: "string" }, description: "Job titles to target, e.g. ['POCUS Director','Chief of Radiology']" },
+          keywords: { type: "string", description: "Free-text keywords (e.g. 'ultrasound POCUS')" },
+          limit: { type: "number", minimum: 1, maximum: 50 },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
 ];
 
 interface ToolArgs {
