@@ -16,7 +16,7 @@ export const INGESTION_SOURCES = INGESTION_SOURCE_NAMES;
 // Explicit column list — exclude `raw_payload` (multi-KB jsonb per row) so the
 // dashboard payload stays small. LeadDetailModal fetches it on-demand if needed.
 const LEAD_LIST_COLUMNS =
-  "id, source, source_external_id, source_url, title, summary, confidence, priority, hospital, specialty, territory, entities, estimated_value_usd, win_probability, competitor_incumbent, date_discovered, date_ingested, enriched, vendor_mentions, account_type, signal_type, account_id";
+  "id, source, source_external_id, source_url, title, summary, confidence, priority, hospital, specialty, territory, entities, estimated_value_usd, win_probability, competitor_incumbent, date_discovered, date_ingested, enriched, vendor_mentions, account_type, signal_type, account_id, source_contacts";
 
 export const listLeads = createServerFn({ method: "GET" }).handler(async () => {
   const { data, error } = await supabaseAdmin
