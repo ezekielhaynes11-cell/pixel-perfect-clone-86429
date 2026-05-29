@@ -8,7 +8,7 @@ export function DashboardHeader() {
           <Zap className="h-5 w-5 text-primary" fill="currentColor" />
           <span>Yield Architect</span>
           <span className="ml-2 hidden rounded-sm bg-surface-2 px-1.5 py-0.5 font-sans text-[10px] uppercase tracking-wider text-muted-foreground sm:inline">
-            Phillips Medical
+            Philips Medical
           </span>
         </div>
 

@@ -138,6 +138,36 @@ export function leadStateCode(lead: Lead): "TX" | "OK" | "AR" | "LA" | null {
   return null;
 }
 
+export function leadIsHighPriority(l: Lead): boolean {
+  if (l.confidence >= 75) return true;
+  if ((l.estimatedValueUsd ?? 0) >= 50_000) return true;
+  if (l.source === "openfda" || l.source === "sam_gov") return true;
+  if (l.accountId) return true;
+  return false;
+}
+
+export function leadHospital(l: Lead): string | null {
+  if (l.hospital && l.hospital.trim()) return l.hospital.trim();
+  const first = l.entities.hospitals?.[0];
+  return first && first.trim() ? first.trim() : null;
+}
+
+export function opportunityType(l: Lead): string {
+  switch (l.signalType) {
+    case "recall": return "Regulatory Response";
+    case "rfp": return "Equipment Replacement";
+    case "funding":
+    case "expansion": return "New Facility";
+    case "m_and_a":
+    case "incumbency": return "Competitive Displacement";
+    case "sentiment": return "Market Intelligence";
+  }
+  if (l.vendorMentions.length > 0 || l.competitorIncumbent) return "Competitive Displacement";
+  if (l.entities.equipment.length > 0) return "Clinical Event";
+  if (l.entities.keywords.length > 0) return "Market Intelligence";
+  return "Other";
+}
+
 export const sources: LeadSource[] = [
   "sam_gov",
   "openfda",

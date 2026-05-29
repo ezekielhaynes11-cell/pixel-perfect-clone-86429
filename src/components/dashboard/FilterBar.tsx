@@ -45,7 +45,7 @@ export const emptyFilters: Filters = {
   accountTypes: [],
   vendors: [],
   states: [],
-  minConfidence: 0,
+  minConfidence: 65,
 };
 
 export const signalTypeOptions: SignalType[] = [
@@ -349,7 +349,7 @@ export function FilterBar({
                 type="range"
                 min={0}
                 max={100}
-                step={25}
+                step={5}
                 value={filters.minConfidence}
                 onChange={(e) =>
                   onChange({ ...filters, minConfidence: Number(e.target.value) })

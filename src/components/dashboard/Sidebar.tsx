@@ -1,16 +1,17 @@
 import { TrendingUp, Building2, PieChart } from "lucide-react";
-import type { Lead } from "@/data/leads";
+import { type Lead, leadHospital, opportunityType } from "@/data/leads";
 
 export function Sidebar({ leads }: { leads: Lead[] }) {
   const typeCounts = leads.reduce<Record<string, number>>((acc, l) => {
-    const k = l.specialty ?? "Unknown";
+    const k = opportunityType(l);
     acc[k] = (acc[k] || 0) + 1;
     return acc;
   }, {});
   const topType = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0];
 
   const hospitalCounts = leads.reduce<Record<string, number>>((acc, l) => {
-    const k = l.hospital ?? "Unknown";
+    const k = leadHospital(l);
+    if (!k) return acc;
     acc[k] = (acc[k] || 0) + 1;
     return acc;
   }, {});
@@ -42,7 +43,7 @@ export function Sidebar({ leads }: { leads: Lead[] }) {
       <Panel icon={<Building2 />} title="Most Active Hospital">
         <div className="font-display text-lg font-semibold">{topHospital?.[0] ?? "—"}</div>
         <div className="text-xs text-muted-foreground">
-          Mentioned in {topHospital?.[1] ?? 0} leads
+          {topHospital ? `Mentioned in ${topHospital[1]} leads` : "No hospital signals yet"}
         </div>
       </Panel>
 
