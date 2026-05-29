@@ -260,6 +260,7 @@ async function enrichPending(source: string): Promise<string[]> {
           }
         }
         for (const phys of enriched.entities.physicians) {
+          if (source === "reddit" && looksLikeRedditUsername(phys.name)) continue;
           refs.push({
             rawName: phys.name,
             state: stateCode,
@@ -268,6 +269,7 @@ async function enrichPending(source: string): Promise<string[]> {
           });
         }
         if (refs.length > 0) await attachPhysiciansToLead(row.id, refs);
+
       } catch (e) {
         console.error("physician enrichment failed:", e instanceof Error ? e.message : e);
       }
