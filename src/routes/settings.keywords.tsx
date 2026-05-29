@@ -49,6 +49,17 @@ function KeywordsPage() {
     onSuccess: () => { setUrl(""); qc.invalidateQueries({ queryKey: ["scraped_pages"] }); toast.success("Scraped"); },
     onError: (e: Error) => toast.error(e.message),
   });
+  const doBulkEnrich = useMutation({
+    mutationFn: () => bulkEnrich({ data: { limit: enrichLimit } }),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["physician_contacts_unenriched_count"] });
+      qc.invalidateQueries({ queryKey: ["lead_physicians"] });
+      qc.invalidateQueries({ queryKey: ["account_physicians"] });
+      toast.success(`Attempted ${r.attempted} · Matched ${r.matched} · ${r.errors} errors`);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
 
   const grouped = (kw.data ?? []).reduce<Record<string, typeof kw.data>>((acc, k) => {
     (acc[k.kind] ||= [] as never).push(k);
