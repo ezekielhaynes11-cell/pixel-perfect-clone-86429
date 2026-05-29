@@ -248,12 +248,50 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
     }
     case "query_physicians": {
       const a = args as ToolArgs["query_physicians"];
+      const limit = Math.min(a.limit ?? 25, 50);
+
+      // If lead_state set, restrict NPI set to physicians linked to leads in that state.
+      let leadNpiSet: Set<string> | null = null;
+      const leadTitleByNpi = new Map<string, { lead_id: string; title: string }>();
+      if (a.lead_state) {
+        const code = a.lead_state.toUpperCase();
+        const stateMap: Record<string, string> = { TX: "texas", OK: "oklahoma", AR: "arkansas", LA: "louisiana" };
+        const name = stateMap[code] ?? a.lead_state.toLowerCase();
+        const { data: leadRows, error: leadErr } = await supabaseAdmin
+          .from("leads")
+          .select("id, title")
+          .or(`territory.ilike.%${name}%,territory.ilike.%${code}%`)
+          .limit(500);
+        if (leadErr) return { error: leadErr.message };
+        const leadIds = (leadRows ?? []).map((r) => r.id);
+        const leadTitleById = new Map((leadRows ?? []).map((r) => [r.id, r.title as string]));
+        if (leadIds.length === 0) return { count: 0, physicians: [] };
+        const { data: lp, error: lpErr } = await supabaseAdmin
+          .from("lead_physicians")
+          .select("npi, lead_id")
+          .in("lead_id", leadIds)
+          .limit(2000);
+        if (lpErr) return { error: lpErr.message };
+        leadNpiSet = new Set<string>();
+        for (const r of lp ?? []) {
+          leadNpiSet.add(r.npi);
+          if (!leadTitleByNpi.has(r.npi)) {
+            const t = leadTitleById.get(r.lead_id);
+            if (t) leadTitleByNpi.set(r.npi, { lead_id: r.lead_id, title: t });
+          }
+        }
+        if (leadNpiSet.size === 0) return { count: 0, physicians: [] };
+      }
+
       let q = supabaseAdmin
         .from("physician_contacts")
-        .select("npi, full_name, credentials, primary_specialty, practice_city, practice_state, practice_phone")
-        .limit(Math.min(a.limit ?? 15, 25));
+        .select("npi, full_name, credentials, primary_specialty, practice_city, practice_state, practice_phone, email, title, linkedin_url, apollo_enriched_at")
+        .limit(limit);
       if (a.state) q = q.eq("practice_state", a.state.toUpperCase());
       if (a.specialty_contains) q = q.ilike("primary_specialty", `%${a.specialty_contains}%`);
+      if (a.name_contains) q = q.ilike("full_name", `%${a.name_contains}%`);
+      if (a.has_email) q = q.not("email", "is", null);
+      if (leadNpiSet) q = q.in("npi", Array.from(leadNpiSet).slice(0, 1000));
       const { data, error } = await q;
       if (error) return { error: error.message };
       let rows = data ?? [];
@@ -266,7 +304,11 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
         const allowed = new Set((lp ?? []).map((r) => r.npi));
         rows = rows.filter((r) => allowed.has(r.npi));
       }
-      return { count: rows.length, physicians: rows };
+      const enriched = rows.map((r) => {
+        const link = leadTitleByNpi.get(r.npi);
+        return link ? { ...r, lead_id: link.lead_id, lead_title: link.title } : r;
+      });
+      return { count: enriched.length, physicians: enriched };
     }
     case "get_account_brief": {
       const a = args as ToolArgs["get_account_brief"];
