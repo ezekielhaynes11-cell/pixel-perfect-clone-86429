@@ -176,7 +176,7 @@ interface ToolArgs {
     limit?: number;
   };
   query_accounts: { name_contains?: string; state?: string; is_va?: boolean; limit?: number };
-  query_physicians: { specialty_contains?: string; state?: string; role_hint_contains?: string; limit?: number };
+  query_physicians: { specialty_contains?: string; state?: string; lead_state?: string; name_contains?: string; role_hint_contains?: string; has_email?: boolean; limit?: number };
   get_account_brief: { account_id: string };
   draft_outreach: { lead_id: string; tone?: "discovery" | "follow_up" | "executive_intro" | "switch_pitch" };
   apollo_enrich_physician: { npi: string };
