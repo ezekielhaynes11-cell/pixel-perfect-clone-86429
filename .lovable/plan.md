@@ -1,50 +1,51 @@
-# Fix Copilot "emails for Texas leads" error
+## Auto-enrich physicians with Apollo at ingestion (with daily cap)
 
-## Root cause
+### Goal
+Every physician attached to a newly enriched lead gets an Apollo lookup automatically during ingestion, so emails / titles / LinkedIn badges show up on the main feed without clicking "Bulk enrich". A daily cap keeps Apollo credit usage bounded.
 
-Two problems stack:
+### Changes
 
-1. **No tool returns emails grounded in leads.** `query_physicians` selects `npi, full_name, credentials, primary_specialty, practice_city, practice_state, practice_phone` — no `email`, `title`, `linkedin_url`. There's also no way to filter physicians to those linked to leads in a state.
-2. **Apollo became the fallback.** The system prompt and tool catalog leave Apollo (`apollo_bulk_enrich`, `apollo_prospect`) as the only path to "get emails", so the model called Apollo. Apollo's response failed (rate limit / 4xx / endpoint), and the raw error was surfaced as the Copilot reply.
+**1. `src/lib/ingest/nppes.server.ts` — `attachPhysiciansToLead`**
+- After each successful `physician_contacts` upsert, if the cached row does not already have `apollo_enriched_at` AND the NPI does not start with `APL-`, call `apolloEnrichPhysician({ npi })` inline.
+- Wrap the Apollo call in its own `try/catch` — a failure (rate limit, 402 credits, 403 endpoint) never breaks NPPES linkage. Log status only.
+- Sequential, ~300ms gap between Apollo calls (same pattern as `bulkEnrichApollo`).
+- Honor the shared daily cap (see step 3). When cap is hit, skip Apollo for the rest of the run and log once.
+- Import `apolloEnrichPhysician` from `@/lib/apollo/service.server`.
 
-We already have emails in `physician_contacts` for previously enriched contacts — the Copilot just can't see them.
+**2. `src/lib/apollo/service.server.ts` — `apolloEnrichPhysician`**
+- Add an idempotent fast-path: if `existing.apollo_id` or `existing.apollo_enriched_at` is already set, return `{ skipped: true }` without calling Apollo.
+- Existing return shape extended with optional `skipped` boolean — no caller break.
 
-## Changes
+**3. New `src/lib/apollo/quota.server.ts` — in-process daily cap**
+- Module-scope counter `{ dayKey: "YYYY-MM-DD", count: number }`, default cap **150 calls/day** (configurable via `APOLLO_DAILY_CAP` env var, read at call time).
+- Exports `tryConsumeApolloCall(): boolean` — increments and returns false when cap is reached for the current UTC day.
+- Exports `getApolloUsage(): { used, cap, dayKey }` for diagnostics / future UI surfacing.
+- Caveat (documented in file header): Worker isolates may reset the counter independently; this is a best-effort soft cap, not a hard distributed limit. Acceptable for current ingestion volume; can be upgraded to a DB-backed counter later if needed.
 
-### 1. Extend `query_physicians` (`src/lib/copilot-tools.server.ts`)
+**4. `src/lib/ingest/run.server.ts`**
+- No structural change — `enrichPending` already calls `attachPhysiciansToLead`. Once (1) is in place, every newly enriched lead automatically gets Apollo-enriched physicians.
+- Add a single debug log per lead: `{ leadId, attached, apolloAttempted, apolloMatched, apolloSkippedCapped }`.
 
-- Add args: `lead_state` (TX/OK/AR/LA — find physicians linked to any lead whose territory matches), `has_email` (boolean), `name_contains`.
-- Expand `select` to include `email, title, linkedin_url, apollo_enriched_at`.
-- When `lead_state` is set: query `leads` for that state (reuse same territory ILIKE/code logic as `query_leads`), then `lead_physicians` for those `lead_id`s, then filter `physician_contacts` to the resulting NPI set. Return each contact with the linked `lead_id` / `lead_title` for citations.
-- When `has_email: true`, filter `email IS NOT NULL`.
+**5. `src/components/dashboard/LeadCard.tsx` — surface contacts on first load**
+- Currently emails / LinkedIn / phone are hidden behind the collapsible "N Physicians" toggle.
+- Change defaults:
+  - If `physicians.length === 1`, expand the list by default.
+  - Always render a compact inline contact row above the toggle with the top physician's email + LinkedIn icon + phone (when present), so contact info is visible without clicking.
+- No new data fetches — `listLeadPhysicians` already returns `email`, `title`, `linkedin_url`, `apollo_enriched_at`.
 
-### 2. Update Copilot system prompt (`src/lib/copilot.functions.ts`)
-
-Add one rule before the Apollo rule:
-
-> To find existing contact info (email, title, LinkedIn) for leads, ALWAYS call `query_physicians` with `lead_state` and `has_email: true` first. Only suggest `apollo_bulk_enrich` if the user explicitly asks to enrich missing contacts.
-
-### 3. Better Apollo error surfacing (`src/lib/apollo/client.server.ts`)
-
-- Log full status + first 500 chars of body to server logs on non-OK responses.
-- Already-thrown messages for 401/402/429 are good; for other 4xx/5xx include the Apollo `message` field if JSON.
-
-### 4. Out of scope
-
+### Out of scope
 - No DB migrations.
-- No bulk Apollo run from this fix.
-- No UI changes.
+- No new tools or buttons.
+- No changes to `apollo/client.server.ts` (already logs status + body).
+- Bulk-enrich button stays as manual backfill for old leads.
 
-## Verification
+### Technical notes
+- Daily cap is per-Worker-isolate in-memory. With Cloudflare's typical isolate reuse this is "good enough" to prevent runaway burns from a single ingestion run, but is not a strict cluster-wide cap. If stricter caps are needed later, swap `quota.server.ts` to insert/select against a small `apollo_usage(day, count)` table.
+- Per ingestion run estimate: ~20 leads × 1–3 physicians ≈ up to 60 Apollo calls. Default cap 150/day → ~2.5 refresh runs/day before backoff. Tunable via `APOLLO_DAILY_CAP`.
 
-1. Open Copilot → "Show me emails for Texas leads".
-   - Expect: model calls `query_physicians({ lead_state: "TX", has_email: true })`, returns a markdown list of `Name — email — title (Lead)`.
-2. Ask "enrich any missing emails for Texas leads".
-   - Expect: model confirms then calls `apollo_bulk_enrich`.
-3. If Apollo still errors, check `stack_modern--server-function-logs` — the new log line shows status/body so we can iterate.
-
-## Files touched
-
-- `src/lib/copilot-tools.server.ts`
-- `src/lib/copilot.functions.ts`
-- `src/lib/apollo/client.server.ts`
+### Verification
+1. Trigger ingestion (Refresh feed). Check `server-function-logs` for per-lead summary lines and `apolloEnrichPhysician` activity.
+2. `read_query` `physician_contacts` for newly attached NPIs — `apollo_enriched_at` should be set.
+3. Reload `/` — top physician on each LeadCard shows ✉️ email / LinkedIn / phone inline, no manual click required.
+4. Re-run ingestion — no duplicate Apollo calls (idempotent fast-path).
+5. Force cap (temporarily set `APOLLO_DAILY_CAP=1`) → logs show "apollo daily cap reached, skipping" and ingestion still completes.
