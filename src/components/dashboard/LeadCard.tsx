@@ -6,18 +6,13 @@ import {
   XCircle,
   Building2,
   Stethoscope,
-  UserRound,
-  Phone,
-  Mail,
-  Linkedin,
-  ChevronDown,
   RotateCcw,
 } from "lucide-react";
 
-import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { type Lead, timeAgo } from "@/data/leads";
 import type { LeadPhysician } from "@/lib/leads.functions";
+import { ContactSection } from "./ContactSection";
 
 const sourceMeta: Record<string, { label: string; cls: string }> = {
   sam_gov: { label: "SAM.gov", cls: "bg-blue-500/15 text-blue-300 border-blue-500/30" },
@@ -68,11 +63,9 @@ export function LeadCard({
   dismissed?: boolean;
   onRestore?: () => void;
 }) {
-  const [showDocs, setShowDocs] = useState(physicians.length === 1);
   const meta = sourceMeta[lead.source] ?? { label: lead.source, cls: "bg-surface-3 text-foreground border-border" };
   const conf = confidenceColor(lead.confidence);
-  const topPhys = physicians[0];
-  const hasInlineContact = !!(topPhys && (topPhys.email || topPhys.linkedin_url || topPhys.practice_phone));
+
 
   return (
     <article
