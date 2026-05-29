@@ -142,6 +142,10 @@ function Dashboard() {
     () => new Set((actionsQ.data ?? []).filter((a) => a.action === "dismissed").map((a) => a.lead_id)),
     [actionsQ.data],
   );
+  const savedIds = useMemo(
+    () => new Set((actionsQ.data ?? []).filter((a) => a.action === "saved").map((a) => a.lead_id)),
+    [actionsQ.data],
+  );
   const activeLeads = useMemo(() => leads.filter((l) => !dismissedIds.has(l.id)), [leads, dismissedIds]);
   const dismissedLeads = useMemo(() => leads.filter((l) => dismissedIds.has(l.id)), [leads, dismissedIds]);
   const visibleLeads = showDismissed ? dismissedLeads : activeLeads;
