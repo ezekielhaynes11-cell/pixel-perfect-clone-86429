@@ -58,7 +58,11 @@ export type Database = {
       accounts: {
         Row: {
           account_type: string | null
+          apollo_enriched_at: string | null
+          apollo_org_id: string | null
           created_at: string
+          domain: string | null
+          employee_count: number | null
           id: string
           is_va: boolean
           name: string
@@ -69,7 +73,11 @@ export type Database = {
         }
         Insert: {
           account_type?: string | null
+          apollo_enriched_at?: string | null
+          apollo_org_id?: string | null
           created_at?: string
+          domain?: string | null
+          employee_count?: number | null
           id?: string
           is_va?: boolean
           name: string
@@ -80,7 +88,11 @@ export type Database = {
         }
         Update: {
           account_type?: string | null
+          apollo_enriched_at?: string | null
+          apollo_org_id?: string | null
           created_at?: string
+          domain?: string | null
+          employee_count?: number | null
           id?: string
           is_va?: boolean
           name?: string
@@ -425,10 +437,14 @@ export type Database = {
       }
       physician_contacts: {
         Row: {
+          apollo_enriched_at: string | null
+          apollo_id: string | null
           created_at: string
           credentials: string | null
+          email: string | null
           full_name: string
           last_verified_at: string
+          linkedin_url: string | null
           npi: string
           practice_address: string | null
           practice_city: string | null
@@ -436,12 +452,17 @@ export type Database = {
           practice_state: string | null
           practice_zip: string | null
           primary_specialty: string | null
+          title: string | null
         }
         Insert: {
+          apollo_enriched_at?: string | null
+          apollo_id?: string | null
           created_at?: string
           credentials?: string | null
+          email?: string | null
           full_name: string
           last_verified_at?: string
+          linkedin_url?: string | null
           npi: string
           practice_address?: string | null
           practice_city?: string | null
@@ -449,12 +470,17 @@ export type Database = {
           practice_state?: string | null
           practice_zip?: string | null
           primary_specialty?: string | null
+          title?: string | null
         }
         Update: {
+          apollo_enriched_at?: string | null
+          apollo_id?: string | null
           created_at?: string
           credentials?: string | null
+          email?: string | null
           full_name?: string
           last_verified_at?: string
+          linkedin_url?: string | null
           npi?: string
           practice_address?: string | null
           practice_city?: string | null
@@ -462,6 +488,7 @@ export type Database = {
           practice_state?: string | null
           practice_zip?: string | null
           primary_specialty?: string | null
+          title?: string | null
         }
         Relationships: []
       }
