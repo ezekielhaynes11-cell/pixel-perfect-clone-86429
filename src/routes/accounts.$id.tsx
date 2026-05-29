@@ -197,9 +197,57 @@ function AccountPage() {
 
             {/* Physicians */}
             <section>
-              <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                Physicians ({physicians.length})
-              </h2>
+              <div className="mb-3 flex items-center gap-2">
+                <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                  Physicians ({physicians.length})
+                </h2>
+                <button
+                  onClick={() => setShowProspect((v) => !v)}
+                  className="ml-auto flex h-7 items-center gap-1 rounded-md border border-border bg-surface-2 px-2 text-xs font-medium text-foreground/80 hover:bg-surface-3"
+                >
+                  <Sparkles className="h-3 w-3" /> Prospect (Apollo)
+                </button>
+              </div>
+              {showProspect && (
+                <div className="mb-3 space-y-2 rounded-md border border-primary/30 bg-surface-2 p-3 text-xs">
+                  <label className="block">
+                    <span className="text-muted-foreground">Titles (comma-separated)</span>
+                    <input
+                      value={titles}
+                      onChange={(e) => setTitles(e.target.value)}
+                      className="mt-1 w-full rounded-md border border-border bg-surface px-2 py-1 text-foreground"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-muted-foreground">Keywords (optional)</span>
+                    <input
+                      value={keywords}
+                      onChange={(e) => setKeywords(e.target.value)}
+                      placeholder="e.g. ultrasound POCUS"
+                      className="mt-1 w-full rounded-md border border-border bg-surface px-2 py-1 text-foreground"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-muted-foreground">Limit: {limit}</span>
+                    <input
+                      type="range"
+                      min={5}
+                      max={50}
+                      value={limit}
+                      onChange={(e) => setLimit(Number(e.target.value))}
+                      className="mt-1 w-full"
+                    />
+                  </label>
+                  <button
+                    onClick={() => prospectMut.mutate()}
+                    disabled={prospectMut.isPending}
+                    className="flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                  >
+                    {prospectMut.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                    Find contacts
+                  </button>
+                </div>
+              )}
               {physicians.length === 0 ? (
                 <div className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
                   No physicians linked yet.
