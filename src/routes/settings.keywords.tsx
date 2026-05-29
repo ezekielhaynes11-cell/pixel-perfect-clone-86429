@@ -4,6 +4,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { listKeywords, upsertKeyword, deleteKeyword, scrapePageForAccount, listScrapedPages } from "@/lib/admin.functions";
+import { bulkEnrichApollo, countUnenrichedPhysicians } from "@/lib/apollo.functions";
+
 
 const KINDS = ["vendor", "product_model", "focus_concept", "role_title", "complaint_signal"] as const;
 type Kind = typeof KINDS[number];
