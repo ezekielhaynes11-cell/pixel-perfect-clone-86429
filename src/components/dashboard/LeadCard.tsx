@@ -45,6 +45,7 @@ export function LeadCard({
   index,
   physicians = [],
   onSave,
+  saved = false,
   onDismiss,
   onDraft,
   selectable = false,
@@ -58,6 +59,7 @@ export function LeadCard({
   index: number;
   physicians?: LeadPhysician[];
   onSave?: () => void;
+  saved?: boolean;
   onDismiss?: () => void;
   onDraft?: () => void;
   selectable?: boolean;
