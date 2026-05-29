@@ -212,7 +212,7 @@ function Dashboard() {
         }
         return true;
       }),
-    [visibleLeads, filters, showOld, showAllTerritories, NINETY_DAYS_MS],
+    [visibleLeads, filters, showOld, showAllTerritories, AGE_FILTER_MS],
   );
 
   const highPriority = activeLeads.filter(leadIsHighPriority).length;
