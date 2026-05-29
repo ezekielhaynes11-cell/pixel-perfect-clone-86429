@@ -89,7 +89,12 @@ export interface AccountDetail {
     practice_city: string | null;
     practice_state: string | null;
     practice_phone: string | null;
+    email: string | null;
+    title: string | null;
+    linkedin_url: string | null;
+    apollo_enriched_at: string | null;
   }>;
+
   scrapedPages: Array<{
     id: string;
     url: string;
