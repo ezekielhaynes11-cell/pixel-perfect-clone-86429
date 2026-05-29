@@ -142,7 +142,7 @@ export function LeadCard({
       </div>
 
       {/* Contact */}
-      <ContactSection sourceContacts={lead.sourceContacts ?? []} physicians={physicians} />
+      <ContactSection sourceContacts={lead.sourceContacts ?? []} physicians={physicians} leadId={lead.id} />
 
 
       {/* Actions */}

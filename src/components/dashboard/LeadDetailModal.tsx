@@ -51,7 +51,7 @@ export function LeadDetailModal({
         <div className="space-y-5 p-5">
           <p className="text-sm leading-relaxed text-foreground/90">{lead.summary}</p>
 
-          <ContactSection sourceContacts={lead.sourceContacts ?? []} physicians={physicians} />
+          <ContactSection sourceContacts={lead.sourceContacts ?? []} physicians={physicians} leadId={lead.id} />
 
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
