@@ -24,11 +24,30 @@ export function Sidebar({ leads }: { leads: Lead[] }) {
   }, {});
   const total = leads.length || 1;
   const sourceColors: Record<string, string> = {
+    sam_gov: "bg-blue-500",
+    openfda: "bg-red-500",
+    gdelt: "bg-violet-500",
+    gdelt_m_and_a: "bg-pink-500",
+    gdelt_va_funding: "bg-cyan-500",
     reddit: "bg-orange-500",
-    government: "bg-blue-500",
+    bluesky: "bg-sky-500",
     news: "bg-violet-500",
-    recalls: "bg-red-500",
-    linkedin: "bg-sky-500",
+    clinicaltrials: "bg-emerald-500",
+    cms_open_payments: "bg-amber-500",
+    funding_rss: "bg-teal-500",
+  };
+  const sourceLabels: Record<string, string> = {
+    sam_gov: "SAM.gov",
+    openfda: "openFDA",
+    gdelt: "GDELT",
+    gdelt_m_and_a: "GDELT M&A",
+    gdelt_va_funding: "GDELT VA Funding",
+    reddit: "Reddit",
+    bluesky: "Bluesky",
+    news: "News",
+    clinicaltrials: "ClinicalTrials",
+    cms_open_payments: "CMS Payments",
+    funding_rss: "Gov Funding RSS",
   };
 
   return (
@@ -43,7 +62,7 @@ export function Sidebar({ leads }: { leads: Lead[] }) {
       <Panel icon={<Building2 />} title="Most Active Hospital">
         <div className="font-display text-lg font-semibold">{topHospital?.[0] ?? "—"}</div>
         <div className="text-xs text-muted-foreground">
-          {topHospital ? `Mentioned in ${topHospital[1]} leads` : "No hospital signals yet"}
+          {topHospital ? `Mentioned in ${topHospital[1]} lead${topHospital[1] === 1 ? "" : "s"}` : "No hospital signals yet"}
         </div>
       </Panel>
 
@@ -63,7 +82,7 @@ export function Sidebar({ leads }: { leads: Lead[] }) {
             .map(([s, c]) => (
               <li key={s} className="flex items-center gap-2 text-xs">
                 <span className={`h-2 w-2 rounded-full ${sourceColors[s] ?? "bg-muted"}`} />
-                <span className="capitalize text-foreground/90">{s}</span>
+                <span className="text-foreground/90">{sourceLabels[s] ?? s}</span>
                 <span className="ml-auto text-muted-foreground">
                   {Math.round((c / total) * 100)}%
                 </span>
