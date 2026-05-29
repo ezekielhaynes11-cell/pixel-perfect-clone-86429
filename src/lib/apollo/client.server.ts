@@ -26,10 +26,17 @@ async function call<T>(path: string, body: Record<string, unknown>): Promise<T> 
     });
     if (!res.ok) {
       const text = await res.text();
+      console.error(`[apollo] ${path} ${res.status} ${res.statusText}: ${text.slice(0, 500)}`);
       if (res.status === 429) throw new Error("Apollo rate limit hit — try again in a minute.");
       if (res.status === 402) throw new Error("Apollo credits exhausted.");
       if (res.status === 401) throw new Error("Apollo API key rejected.");
-      throw new Error(`Apollo ${path} ${res.status}: ${text.slice(0, 300)}`);
+      if (res.status === 403) throw new Error(`Apollo 403 forbidden on ${path} — endpoint may require a paid plan.`);
+      let detail = text.slice(0, 200);
+      try {
+        const j = JSON.parse(text) as { message?: string; error?: string };
+        detail = j.message ?? j.error ?? detail;
+      } catch { /* not json */ }
+      throw new Error(`Apollo ${path} ${res.status}: ${detail}`);
     }
     return (await res.json()) as T;
   } finally {
