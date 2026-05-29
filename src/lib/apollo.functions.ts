@@ -41,7 +41,8 @@ export const bulkEnrichApollo = createServerFn({ method: "POST" })
     for (const row of targets) {
       try {
         const result = await apolloEnrichPhysician({ npi: row.npi });
-        if (result && (result as { matched?: boolean }).matched) matched++;
+        if (result && (result as { exists?: boolean }).exists) matched++;
+
       } catch (e) {
         console.error("bulkEnrichApollo failed for", row.npi, e instanceof Error ? e.message : e);
         errors++;
