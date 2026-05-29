@@ -114,7 +114,13 @@ function Dashboard() {
   const act = useMutation({
     mutationFn: (input: { lead_id: string; action: "saved" | "dismissed" | "pushed_sfdc"; remove?: boolean }) =>
       actionFn({ data: input }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["lead_actions"] }),
+    onSuccess: (_res, vars) => {
+      if (vars.action === "saved") {
+        toast.success(vars.remove ? "Unsaved" : "Saved");
+      }
+      qc.invalidateQueries({ queryKey: ["lead_actions"] });
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Action failed"),
   });
 
   const bulkAct = useMutation({
