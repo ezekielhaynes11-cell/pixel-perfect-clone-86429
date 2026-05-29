@@ -63,6 +63,12 @@ function Dashboard() {
     queryKey: ["lead_physicians"],
     queryFn: () => fetchPhysicians(),
   });
+  const fetchEnrichedCount = useServerFn(getEnrichedContactCount);
+  const enrichedCountQ = useQuery({
+    queryKey: ["contact_enrichment_count"],
+    queryFn: () => fetchEnrichedCount(),
+    refetchInterval: 30_000,
+  });
   const physiciansByLead = useMemo(() => {
     const map = new Map<string, LeadPhysician[]>();
     for (const p of physiciansQ.data ?? []) {
