@@ -4,6 +4,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { listKeywords, upsertKeyword, deleteKeyword, scrapePageForAccount, listScrapedPages } from "@/lib/admin.functions";
+import { bulkEnrichApollo, countUnenrichedPhysicians } from "@/lib/apollo.functions";
+
 
 const KINDS = ["vendor", "product_model", "focus_concept", "role_title", "complaint_signal"] as const;
 type Kind = typeof KINDS[number];
@@ -20,13 +22,18 @@ function KeywordsPage() {
   const del = useServerFn(deleteKeyword);
   const scrape = useServerFn(scrapePageForAccount);
   const pages = useServerFn(listScrapedPages);
+  const bulkEnrich = useServerFn(bulkEnrichApollo);
+  const countUnenriched = useServerFn(countUnenrichedPhysicians);
 
   const kw = useQuery({ queryKey: ["keywords"], queryFn: () => list() });
   const sp = useQuery({ queryKey: ["scraped_pages"], queryFn: () => pages() });
+  const unenrichedQ = useQuery({ queryKey: ["physician_contacts_unenriched_count"], queryFn: () => countUnenriched() });
 
   const [kind, setKind] = useState<Kind>("vendor");
   const [value, setValue] = useState("");
   const [url, setUrl] = useState("");
+  const [enrichLimit, setEnrichLimit] = useState(25);
+
 
   const add = useMutation({
     mutationFn: () => upsert({ data: { kind, value: value.trim(), active: true } }),
@@ -42,6 +49,17 @@ function KeywordsPage() {
     onSuccess: () => { setUrl(""); qc.invalidateQueries({ queryKey: ["scraped_pages"] }); toast.success("Scraped"); },
     onError: (e: Error) => toast.error(e.message),
   });
+  const doBulkEnrich = useMutation({
+    mutationFn: () => bulkEnrich({ data: { limit: enrichLimit } }),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["physician_contacts_unenriched_count"] });
+      qc.invalidateQueries({ queryKey: ["lead_physicians"] });
+      qc.invalidateQueries({ queryKey: ["account_physicians"] });
+      toast.success(`Attempted ${r.attempted} · Matched ${r.matched} · ${r.errors} errors`);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
 
   const grouped = (kw.data ?? []).reduce<Record<string, typeof kw.data>>((acc, k) => {
     (acc[k.kind] ||= [] as never).push(k);
@@ -124,6 +142,31 @@ function KeywordsPage() {
           })}
         </div>
       </section>
+
+      <section className="rounded-md border border-border bg-surface-2 p-4">
+        <h2 className="mb-1 font-medium">Bulk enrich physicians via Apollo</h2>
+        <p className="mb-3 text-xs text-muted-foreground">
+          {unenrichedQ.data?.count ?? "—"} physicians have no Apollo data yet. Runs sequentially with a short delay; counts against your Apollo quota.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="number"
+            min={1}
+            max={100}
+            value={enrichLimit}
+            onChange={(e) => setEnrichLimit(Math.max(1, Math.min(100, Number(e.target.value) || 1)))}
+            className="h-9 w-24 rounded-md border border-border bg-surface-3 px-3 text-sm"
+          />
+          <button
+            onClick={() => doBulkEnrich.mutate()}
+            disabled={doBulkEnrich.isPending || (unenrichedQ.data?.count ?? 0) === 0}
+            className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
+          >
+            {doBulkEnrich.isPending ? "Enriching…" : "Run enrichment"}
+          </button>
+        </div>
+      </section>
     </div>
+
   );
 }

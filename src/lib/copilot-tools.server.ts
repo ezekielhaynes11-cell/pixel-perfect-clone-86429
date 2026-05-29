@@ -140,7 +140,23 @@ export const COPILOT_TOOLS = [
       },
     },
   },
+  {
+    type: "function" as const,
+    function: {
+      name: "apollo_bulk_enrich",
+      description:
+        "Bulk-enrich physician contacts that have no Apollo data yet. Defaults to 25, max 100. Confirm with the user before running with limit > 25 because it consumes Apollo quota.",
+      parameters: {
+        type: "object",
+        properties: {
+          limit: { type: "number", minimum: 1, maximum: 100 },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
 ];
+
 
 interface ToolArgs {
   query_leads: {
@@ -162,6 +178,8 @@ interface ToolArgs {
   apollo_enrich_physician: { npi: string };
   apollo_enrich_account: { account_id: string };
   apollo_prospect: { account_id?: string; state?: string; titles?: string[]; keywords?: string; limit?: number };
+  apollo_bulk_enrich: { limit?: number };
+
 }
 
 export async function runCopilotTool(name: string, args: Record<string, unknown>): Promise<unknown> {
@@ -302,6 +320,33 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
       const a = args as ToolArgs["apollo_prospect"];
       return apolloProspectContacts(a);
     }
+    case "apollo_bulk_enrich": {
+      const a = args as ToolArgs["apollo_bulk_enrich"];
+      const limit = Math.min(Math.max(a.limit ?? 25, 1), 100);
+      const { data: rows, error } = await supabaseAdmin
+        .from("physician_contacts")
+        .select("npi")
+        .is("apollo_id", null)
+        .is("apollo_enriched_at", null)
+        .order("last_verified_at", { ascending: false })
+        .limit(limit);
+      if (error) return { error: error.message };
+      const targets = rows ?? [];
+      let matched = 0;
+      let errors = 0;
+      for (const row of targets) {
+        try {
+          const r = await apolloEnrichPhysician({ npi: row.npi });
+          if (r && (r as { exists?: boolean }).exists) matched++;
+        } catch (e) {
+          console.error("apollo_bulk_enrich failed for", row.npi, e instanceof Error ? e.message : e);
+          errors++;
+        }
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      return { attempted: targets.length, matched, errors };
+    }
+
     default:
       return { error: `Unknown tool: ${name}` };
   }

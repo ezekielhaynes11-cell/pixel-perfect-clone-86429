@@ -26,6 +26,21 @@ const STATE_TO_CODE: Record<string, string> = {
   wyoming: "WY",
 };
 
+// Heuristic: filter out Reddit usernames (junk names that won't match NPPES).
+function looksLikeRedditUsername(name: string): boolean {
+  const n = name.trim();
+  if (n.length < 4) return true;
+  if (n.startsWith("u/") || n.startsWith("/u/")) return true;
+  if (n.includes("_") || n.includes("-")) return true;
+  if (!n.includes(" ")) {
+    // Single token: very likely a handle, especially if it has digits
+    if (/\d/.test(n)) return true;
+    return true;
+  }
+  return false;
+}
+
+
 export interface IngestionSummary {
   source: string;
   fetched: number;
@@ -260,6 +275,7 @@ async function enrichPending(source: string): Promise<string[]> {
           }
         }
         for (const phys of enriched.entities.physicians) {
+          if (source === "reddit" && looksLikeRedditUsername(phys.name)) continue;
           refs.push({
             rawName: phys.name,
             state: stateCode,
@@ -268,6 +284,7 @@ async function enrichPending(source: string): Promise<string[]> {
           });
         }
         if (refs.length > 0) await attachPhysiciansToLead(row.id, refs);
+
       } catch (e) {
         console.error("physician enrichment failed:", e instanceof Error ? e.message : e);
       }

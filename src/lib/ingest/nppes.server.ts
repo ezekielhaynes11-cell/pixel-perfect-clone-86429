@@ -124,12 +124,12 @@ async function fetchByName(
   const res = await fetch(url);
   if (!res.ok) return null;
   const json = (await res.json().catch(() => ({}))) as { results?: NppesResult[] };
-  // If multiple matches and we have no state filter, we can't confidently pick one.
+  // If multiple matches and no state filter, take the top result but mark low confidence upstream.
   const results = json.results ?? [];
   if (results.length === 0) return null;
-  if (results.length > 1 && !state) return null; // ambiguous, skip
   return mapNppesToContact(results[0]);
 }
+
 
 /**
  * Resolve a list of physician references for a single lead, upsert the contacts,
