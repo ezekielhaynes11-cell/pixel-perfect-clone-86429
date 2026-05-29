@@ -8,9 +8,12 @@ import {
   Stethoscope,
   UserRound,
   Phone,
+  Mail,
+  Linkedin,
   ChevronDown,
   RotateCcw,
 } from "lucide-react";
+
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { type Lead, timeAgo } from "@/data/leads";
