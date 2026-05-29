@@ -1,8 +1,11 @@
+import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { ArrowLeft, Building2, MapPin, Shield, ExternalLink, Phone, FileText, Zap } from "lucide-react";
+import { ArrowLeft, Building2, MapPin, Shield, ExternalLink, Phone, FileText, Zap, Sparkles, Loader2, Mail } from "lucide-react";
+import { toast } from "sonner";
 import { getAccountDetail } from "@/lib/accounts.functions";
+import { enrichPhysicianApollo, prospectContactsApollo } from "@/lib/apollo.functions";
 import { AccountBrief } from "@/components/dashboard/AccountBrief";
 import { timeAgo, formatUsd } from "@/data/leads";
 
@@ -16,9 +19,55 @@ export const Route = createFileRoute("/accounts/$id")({
 function AccountPage() {
   const { id } = Route.useParams();
   const fetchDetail = useServerFn(getAccountDetail);
+  const qc = useQueryClient();
+  const enrichPhys = useServerFn(enrichPhysicianApollo);
+  const prospect = useServerFn(prospectContactsApollo);
+  const [showProspect, setShowProspect] = useState(false);
+  const [titles, setTitles] = useState("POCUS Director, Ultrasound Director, Chief of Radiology");
+  const [keywords, setKeywords] = useState("");
+  const [limit, setLimit] = useState(15);
   const q = useQuery({
     queryKey: ["account", id],
     queryFn: () => fetchDetail({ data: { id } }),
+  });
+
+  const enrichMut = useMutation({
+    mutationFn: (npi: string) => enrichPhys({ data: { npi } }),
+    onMutate: () => toast.loading("Enriching…", { id: "apollo-phys" }),
+    onSuccess: (res) => {
+      if ("error" in res && res.error) return toast.error(res.error, { id: "apollo-phys" });
+      if ("exists" in res && !res.exists)
+        return toast.message(res.message ?? "No Apollo match.", { id: "apollo-phys" });
+      const r = res as { email?: string | null; title?: string | null };
+      toast.success(`${r.title ?? "Match"} · ${r.email ?? "no email"}`, { id: "apollo-phys" });
+      qc.invalidateQueries({ queryKey: ["account", id] });
+    },
+    onError: (e: unknown) =>
+      toast.error(e instanceof Error ? e.message : "Enrich failed", { id: "apollo-phys" }),
+  });
+
+  const prospectMut = useMutation({
+    mutationFn: () =>
+      prospect({
+        data: {
+          account_id: id,
+          titles: titles.split(",").map((s) => s.trim()).filter(Boolean),
+          keywords: keywords || undefined,
+          limit,
+        },
+      }),
+    onMutate: () => toast.loading("Prospecting via Apollo…", { id: "apollo-prospect" }),
+    onSuccess: (res) => {
+      if ("error" in res && res.error) return toast.error(res.error, { id: "apollo-prospect" });
+      const r = res as { count: number };
+      toast.success(`Added ${r.count} contact${r.count === 1 ? "" : "s"}`, {
+        id: "apollo-prospect",
+      });
+      setShowProspect(false);
+      qc.invalidateQueries({ queryKey: ["account", id] });
+    },
+    onError: (e: unknown) =>
+      toast.error(e instanceof Error ? e.message : "Prospect failed", { id: "apollo-prospect" }),
   });
 
   if (q.isLoading) {
@@ -148,9 +197,57 @@ function AccountPage() {
 
             {/* Physicians */}
             <section>
-              <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                Physicians ({physicians.length})
-              </h2>
+              <div className="mb-3 flex items-center gap-2">
+                <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                  Physicians ({physicians.length})
+                </h2>
+                <button
+                  onClick={() => setShowProspect((v) => !v)}
+                  className="ml-auto flex h-7 items-center gap-1 rounded-md border border-border bg-surface-2 px-2 text-xs font-medium text-foreground/80 hover:bg-surface-3"
+                >
+                  <Sparkles className="h-3 w-3" /> Prospect (Apollo)
+                </button>
+              </div>
+              {showProspect && (
+                <div className="mb-3 space-y-2 rounded-md border border-primary/30 bg-surface-2 p-3 text-xs">
+                  <label className="block">
+                    <span className="text-muted-foreground">Titles (comma-separated)</span>
+                    <input
+                      value={titles}
+                      onChange={(e) => setTitles(e.target.value)}
+                      className="mt-1 w-full rounded-md border border-border bg-surface px-2 py-1 text-foreground"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-muted-foreground">Keywords (optional)</span>
+                    <input
+                      value={keywords}
+                      onChange={(e) => setKeywords(e.target.value)}
+                      placeholder="e.g. ultrasound POCUS"
+                      className="mt-1 w-full rounded-md border border-border bg-surface px-2 py-1 text-foreground"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-muted-foreground">Limit: {limit}</span>
+                    <input
+                      type="range"
+                      min={5}
+                      max={50}
+                      value={limit}
+                      onChange={(e) => setLimit(Number(e.target.value))}
+                      className="mt-1 w-full"
+                    />
+                  </label>
+                  <button
+                    onClick={() => prospectMut.mutate()}
+                    disabled={prospectMut.isPending}
+                    className="flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                  >
+                    {prospectMut.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                    Find contacts
+                  </button>
+                </div>
+              )}
               {physicians.length === 0 ? (
                 <div className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
                   No physicians linked yet.
@@ -182,11 +279,19 @@ function AccountPage() {
                       {p.practice_phone && (
                         <a
                           href={`tel:${p.practice_phone}`}
-                          className="ml-auto flex items-center gap-1 text-xs text-primary hover:underline"
+                          className="flex items-center gap-1 text-xs text-primary hover:underline"
                         >
                           <Phone className="h-3 w-3" /> {p.practice_phone}
                         </a>
                       )}
+                      <button
+                        onClick={() => enrichMut.mutate(p.npi)}
+                        disabled={enrichMut.isPending}
+                        className="ml-auto flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-0.5 text-[11px] text-foreground/80 hover:bg-surface-3 disabled:opacity-50"
+                        title="Enrich with Apollo (email, title, LinkedIn)"
+                      >
+                        <Mail className="h-3 w-3" /> Enrich
+                      </button>
                     </li>
                   ))}
                 </ul>

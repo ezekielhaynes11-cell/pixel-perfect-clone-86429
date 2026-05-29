@@ -2,9 +2,10 @@ import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Sparkles, ChevronDown, ChevronUp, ExternalLink, Loader2 } from "lucide-react";
+import { Sparkles, ChevronDown, ChevronUp, ExternalLink, Loader2, Building2 } from "lucide-react";
 import { toast } from "sonner";
 import { listAccountBriefs, researchAccount } from "@/lib/accounts.functions";
+import { enrichAccountApollo } from "@/lib/apollo.functions";
 
 function timeAgo(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -20,6 +21,7 @@ export function AccountBrief({ accountId }: { accountId: string }) {
   const qc = useQueryClient();
   const list = useServerFn(listAccountBriefs);
   const research = useServerFn(researchAccount);
+  const enrichApollo = useServerFn(enrichAccountApollo);
   const [open, setOpen] = useState(true);
   const [steps, setSteps] = useState<Array<{ tool: string; note: string }>>([]);
 
@@ -45,6 +47,29 @@ export function AccountBrief({ accountId }: { accountId: string }) {
       toast.error(e instanceof Error ? e.message : "Research failed", { id: "research" }),
   });
 
+  const apollo = useMutation({
+    mutationFn: () => enrichApollo({ data: { account_id: accountId } }),
+    onMutate: () => toast.loading("Enriching with Apollo…", { id: "apollo-acct" }),
+    onSuccess: (res) => {
+      if ("error" in res && res.error) {
+        toast.error(res.error, { id: "apollo-acct" });
+        return;
+      }
+      if ("exists" in res && !res.exists) {
+        toast.message(res.message ?? "No Apollo match found.", { id: "apollo-acct" });
+        return;
+      }
+      const r = res as { domain?: string | null; employee_count?: number | null };
+      toast.success(
+        `Apollo: ${r.domain ?? "no domain"} · ${r.employee_count ?? "?"} employees`,
+        { id: "apollo-acct" },
+      );
+      qc.invalidateQueries({ queryKey: ["account", accountId] });
+    },
+    onError: (e: unknown) =>
+      toast.error(e instanceof Error ? e.message : "Apollo enrich failed", { id: "apollo-acct" }),
+  });
+
   return (
     <section className="mb-6 rounded-md border border-primary/30 bg-gradient-to-br from-primary/5 to-surface-2 p-5">
       <div className="mb-3 flex flex-wrap items-center gap-3">
@@ -58,6 +83,19 @@ export function AccountBrief({ accountId }: { accountId: string }) {
           </span>
         )}
         <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => apollo.mutate()}
+            disabled={apollo.isPending}
+            className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-xs font-semibold text-foreground/80 transition-colors hover:bg-surface-3 disabled:opacity-50"
+            title="Enrich account with Apollo.io (domain, employees, industry)"
+          >
+            {apollo.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Building2 className="h-3.5 w-3.5" />
+            )}
+            Enrich (Apollo)
+          </button>
           <button
             onClick={() => run.mutate()}
             disabled={run.isPending}

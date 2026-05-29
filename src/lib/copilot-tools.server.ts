@@ -1,6 +1,11 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { OWNER_ID } from "./owner.server";
 import { draftOutreachEmail } from "./outreach.server";
+import {
+  apolloEnrichPhysician,
+  apolloEnrichAccount,
+  apolloProspectContacts,
+} from "./apollo/service.server";
 
 export const COPILOT_TOOLS = [
   {
@@ -8,18 +13,20 @@ export const COPILOT_TOOLS = [
     function: {
       name: "query_leads",
       description:
-        "Search enriched leads. All filters optional. Returns up to 50 rows sorted by confidence desc.",
+        "Search leads (enriched and raw). All filters optional. Returns up to 100 rows sorted by confidence desc. Use text_search to fuzzy-match across title/summary/hospital.",
       parameters: {
         type: "object",
         properties: {
-          state: { type: "string", description: "Two-letter US state code, e.g. TX" },
+          state: { type: "string", description: "Two-letter US state code, e.g. TX. Matches territory case-insensitively, including multi-state rows." },
           signal_type: { type: "string", enum: ["recall", "rfp", "funding", "expansion", "sentiment", "m_and_a", "incumbency", "other"] },
           source: { type: "string" },
           account_type: { type: "string", enum: ["va", "non_va", "unknown"] },
           vendor: { type: "string", description: "Substring of a vendor / model mention" },
+          text_search: { type: "string", description: "Free-text substring matched across title, summary, and hospital." },
           min_confidence: { type: "number", minimum: 0, maximum: 100 },
           days_back: { type: "number", description: "Limit to leads discovered within this many days" },
-          limit: { type: "number", minimum: 1, maximum: 50 },
+          enriched_only: { type: "boolean", description: "If true, only return AI-enriched leads. Defaults to false." },
+          limit: { type: "number", minimum: 1, maximum: 100 },
         },
         additionalProperties: false,
       },
@@ -88,6 +95,51 @@ export const COPILOT_TOOLS = [
       },
     },
   },
+  {
+    type: "function" as const,
+    function: {
+      name: "apollo_enrich_physician",
+      description: "Use Apollo.io to enrich an existing physician contact (email, title, LinkedIn, phone) by NPI.",
+      parameters: {
+        type: "object",
+        properties: { npi: { type: "string" } },
+        required: ["npi"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "apollo_enrich_account",
+      description: "Use Apollo.io to enrich an account with domain, employee count, and industry.",
+      parameters: {
+        type: "object",
+        properties: { account_id: { type: "string" } },
+        required: ["account_id"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "apollo_prospect",
+      description:
+        "Find NEW contacts in Apollo.io and add them to the physician_contacts table. Use for net-new prospecting. Confirm with the user before requesting more than 25 contacts.",
+      parameters: {
+        type: "object",
+        properties: {
+          account_id: { type: "string", description: "Optional. If set, restricts search to this account's organisation." },
+          state: { type: "string", description: "Two-letter US state code. Inherited from account if omitted." },
+          titles: { type: "array", items: { type: "string" }, description: "Job titles to target, e.g. ['POCUS Director','Chief of Radiology']" },
+          keywords: { type: "string", description: "Free-text keywords (e.g. 'ultrasound POCUS')" },
+          limit: { type: "number", minimum: 1, maximum: 50 },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
 ];
 
 interface ToolArgs {
@@ -97,14 +149,19 @@ interface ToolArgs {
     source?: string;
     account_type?: string;
     vendor?: string;
+    text_search?: string;
     min_confidence?: number;
     days_back?: number;
+    enriched_only?: boolean;
     limit?: number;
   };
   query_accounts: { name_contains?: string; state?: string; is_va?: boolean; limit?: number };
   query_physicians: { specialty_contains?: string; state?: string; role_hint_contains?: string; limit?: number };
   get_account_brief: { account_id: string };
   draft_outreach: { lead_id: string; tone?: "discovery" | "follow_up" | "executive_intro" | "switch_pitch" };
+  apollo_enrich_physician: { npi: string };
+  apollo_enrich_account: { account_id: string };
+  apollo_prospect: { account_id?: string; state?: string; titles?: string[]; keywords?: string; limit?: number };
 }
 
 export async function runCopilotTool(name: string, args: Record<string, unknown>): Promise<unknown> {
@@ -113,10 +170,10 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
       const a = args as ToolArgs["query_leads"];
       let q = supabaseAdmin
         .from("leads")
-        .select("id, title, summary, hospital, specialty, territory, source, signal_type, account_type, vendor_mentions, confidence, estimated_value_usd, win_probability, date_discovered, source_url, account_id")
-        .eq("enriched", true)
+        .select("id, title, summary, hospital, specialty, territory, source, signal_type, account_type, vendor_mentions, confidence, estimated_value_usd, win_probability, date_discovered, source_url, account_id, enriched")
         .order("confidence", { ascending: false })
-        .limit(Math.min(a.limit ?? 25, 50));
+        .limit(Math.min(a.limit ?? 50, 100));
+      if (a.enriched_only) q = q.eq("enriched", true);
       if (a.signal_type) q = q.eq("signal_type", a.signal_type);
       if (a.source) q = q.eq("source", a.source);
       if (a.account_type) q = q.eq("account_type", a.account_type);
@@ -128,7 +185,19 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
       if (a.state) {
         const code = a.state.toUpperCase();
         const stateMap: Record<string, string> = { TX: "texas", OK: "oklahoma", AR: "arkansas", LA: "louisiana" };
-        q = q.eq("territory", stateMap[code] ?? a.state.toLowerCase());
+        const name = stateMap[code] ?? a.state.toLowerCase();
+        // Match either the full state name or the 2-letter code, anywhere in the
+        // dirty territory string (handles "Texas", "minnesota,north carolina,texas",
+        // "(Multiple states: AL, AZ, FL, HI, LA, MD, OH, VA)", etc.).
+        q = q.or(`territory.ilike.%${name}%,territory.ilike.%${code}%`);
+      }
+      if (a.text_search) {
+        const needle = a.text_search.replace(/[%,]/g, " ").trim();
+        if (needle) {
+          q = q.or(
+            `title.ilike.%${needle}%,summary.ilike.%${needle}%,hospital.ilike.%${needle}%`,
+          );
+        }
       }
       const { data, error } = await q;
       if (error) return { error: error.message };
@@ -220,6 +289,18 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
         .select()
         .single();
       return { draft_id: saved?.id, subject: draft.subject, body: draft.body };
+    }
+    case "apollo_enrich_physician": {
+      const a = args as ToolArgs["apollo_enrich_physician"];
+      return apolloEnrichPhysician({ npi: a.npi });
+    }
+    case "apollo_enrich_account": {
+      const a = args as ToolArgs["apollo_enrich_account"];
+      return apolloEnrichAccount({ account_id: a.account_id });
+    }
+    case "apollo_prospect": {
+      const a = args as ToolArgs["apollo_prospect"];
+      return apolloProspectContacts(a);
     }
     default:
       return { error: `Unknown tool: ${name}` };
