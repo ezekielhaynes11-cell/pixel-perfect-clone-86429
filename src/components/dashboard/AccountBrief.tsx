@@ -2,9 +2,10 @@ import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Sparkles, ChevronDown, ChevronUp, ExternalLink, Loader2 } from "lucide-react";
+import { Sparkles, ChevronDown, ChevronUp, ExternalLink, Loader2, Building2 } from "lucide-react";
 import { toast } from "sonner";
 import { listAccountBriefs, researchAccount } from "@/lib/accounts.functions";
+import { enrichAccountApollo } from "@/lib/apollo.functions";
 
 function timeAgo(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
