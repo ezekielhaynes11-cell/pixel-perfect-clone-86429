@@ -13,18 +13,20 @@ export const COPILOT_TOOLS = [
     function: {
       name: "query_leads",
       description:
-        "Search enriched leads. All filters optional. Returns up to 50 rows sorted by confidence desc.",
+        "Search leads (enriched and raw). All filters optional. Returns up to 100 rows sorted by confidence desc. Use text_search to fuzzy-match across title/summary/hospital.",
       parameters: {
         type: "object",
         properties: {
-          state: { type: "string", description: "Two-letter US state code, e.g. TX" },
+          state: { type: "string", description: "Two-letter US state code, e.g. TX. Matches territory case-insensitively, including multi-state rows." },
           signal_type: { type: "string", enum: ["recall", "rfp", "funding", "expansion", "sentiment", "m_and_a", "incumbency", "other"] },
           source: { type: "string" },
           account_type: { type: "string", enum: ["va", "non_va", "unknown"] },
           vendor: { type: "string", description: "Substring of a vendor / model mention" },
+          text_search: { type: "string", description: "Free-text substring matched across title, summary, and hospital." },
           min_confidence: { type: "number", minimum: 0, maximum: 100 },
           days_back: { type: "number", description: "Limit to leads discovered within this many days" },
-          limit: { type: "number", minimum: 1, maximum: 50 },
+          enriched_only: { type: "boolean", description: "If true, only return AI-enriched leads. Defaults to false." },
+          limit: { type: "number", minimum: 1, maximum: 100 },
         },
         additionalProperties: false,
       },
