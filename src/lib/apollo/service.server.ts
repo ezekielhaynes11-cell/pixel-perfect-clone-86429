@@ -3,12 +3,63 @@
 // apollo.functions.ts (for direct UI button calls).
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { tryConsumeApolloCall } from "./quota.server";
 import {
   apolloOrgSearch,
   apolloPeopleSearch,
   apolloPersonMatch,
   type ApolloPerson,
 } from "./client.server";
+
+// ── Backfill Apollo enrichment for already-linked physicians ─────────────────
+export async function backfillApolloForLinkedPhysicians(args: { limit?: number } = {}) {
+  const limit = Math.min(args.limit ?? 25, 100);
+  const { data: linkRows, error: linkErr } = await supabaseAdmin
+    .from("lead_physicians")
+    .select("npi")
+    .limit(2000);
+  if (linkErr) return { error: linkErr.message, attempted: 0, matched: 0, skippedCap: 0 };
+  const linkedNpis = Array.from(
+    new Set((linkRows ?? []).map((r) => r.npi).filter((n) => !n.startsWith("APL-"))),
+  );
+  if (linkedNpis.length === 0) return { attempted: 0, matched: 0, skippedCap: 0 };
+
+  const { data: candidates, error: cErr } = await supabaseAdmin
+    .from("physician_contacts")
+    .select("npi")
+    .in("npi", linkedNpis)
+    .is("apollo_enriched_at", null)
+    .is("apollo_id", null)
+    .limit(limit);
+  if (cErr) return { error: cErr.message, attempted: 0, matched: 0, skippedCap: 0 };
+
+  let attempted = 0;
+  let matched = 0;
+  let skippedCap = 0;
+  let capLogged = false;
+  for (const row of candidates ?? []) {
+    if (!tryConsumeApolloCall()) {
+      skippedCap++;
+      if (!capLogged) {
+        console.warn("apollo daily cap reached during backfill, stopping");
+        capLogged = true;
+      }
+      break;
+    }
+    attempted++;
+    try {
+      const res = await apolloEnrichPhysician({ npi: row.npi });
+      if (res && (res as { email?: string | null }).email) matched++;
+    } catch (e) {
+      console.error("backfill apollo failed for", row.npi, e instanceof Error ? e.message : e);
+    }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  console.log(
+    `apollo backfill: attempted=${attempted} matched=${matched} skippedCap=${skippedCap}`,
+  );
+  return { attempted, matched, skippedCap };
+}
 
 const STATE_NAMES: Record<string, string> = {
   TX: "Texas",
