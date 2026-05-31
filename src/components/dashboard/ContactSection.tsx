@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useServerFn } from "@tanstack/react-start";
 import {
   UserRound,
   Mail,
@@ -15,7 +14,8 @@ import {
   Loader2,
 } from "lucide-react";
 import type { LeadContact } from "@/data/leads";
-import { enrichLeadContact, type LeadPhysician } from "@/lib/leads.functions";
+import type { LeadPhysician, ContactEnrichmentRow } from "@/lib/leads.functions";
+import { supabase } from "@/integrations/supabase/client";
 
 interface UnifiedContact {
   key: string;
@@ -115,10 +115,16 @@ export function ContactSection({
   const [expanded, setExpanded] = useState(0);
 
   const qc = useQueryClient();
-  const enrichFn = useServerFn(enrichLeadContact);
   const enrichQ = useQuery({
     queryKey: ["contact_enrichment", leadId],
-    queryFn: () => enrichFn({ data: { lead_id: leadId! } }),
+    queryFn: async () => {
+      const { data, error } = await supabase.functions.invoke<ContactEnrichmentRow>(
+        "enrich-contact",
+        { body: { lead_id: leadId! } },
+      );
+      if (error) throw error;
+      return data!;
+    },
     enabled: !!leadId,
     staleTime: 1000 * 60 * 60,
     retry: false,
