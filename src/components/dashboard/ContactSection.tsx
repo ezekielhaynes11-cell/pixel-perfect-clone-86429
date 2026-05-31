@@ -132,7 +132,9 @@ export function ContactSection({
 
   const enrich = enrichQ.data;
   const enrichLoading = leadId && enrichQ.isLoading;
-  const enrichFound = enrich?.status === "found";
+  // Badge is green if Apollo found a decision-maker OR we already have
+  // NPPES/source contacts in the unified list.
+  const enrichFound = enrich?.status === "found" || unified.length > 0;
 
   useEffect(() => {
     if (enrichFound) {

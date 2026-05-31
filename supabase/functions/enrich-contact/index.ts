@@ -1,6 +1,5 @@
 // Supabase Edge Function: enrich-contact
-// Looks up a decision-maker contact via Apollo for a given lead_id.
-// Results are cached in the contact_enrichment table.
+// Waterfall: NPPES (lead_physicians cache) → Apollo → none
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -14,6 +13,9 @@ const DECISION_MAKER_TITLES = [
   "Materials Manager",
   "Director of Surgery",
   "CNO",
+  "Chief Nursing Officer",
+  "Director of Purchasing",
+  "Supply Chain Manager",
 ];
 
 const corsHeaders = {
@@ -52,18 +54,20 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    // Cache hit — skip Apollo if we already have a positive result.
+    const respond = (data: unknown) =>
+      new Response(JSON.stringify(data), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+
+    // Step 1: Cache hit
     const { data: cached } = await supabase
       .from("contact_enrichment")
       .select("*")
       .eq("lead_id", lead_id)
       .maybeSingle();
-    if (cached?.status === "found") {
-      return new Response(JSON.stringify(cached), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    if (cached?.status === "found") return respond(cached);
 
+    // Step 2: Load lead
     const { data: lead, error: leadErr } = await supabase
       .from("leads")
       .select("hospital, entities")
@@ -76,13 +80,7 @@ serve(async (req) => {
       });
     }
 
-    const ents = (lead.entities as { hospitals?: string[] }) ?? {};
-    const org =
-      ((lead.hospital as string | null) && (lead.hospital as string).trim()) ||
-      (ents.hospitals?.[0] && ents.hospitals[0].trim()) ||
-      null;
-
-    const upsertAndReturn = async (row: ContactEnrichmentRow) => {
+    const upsert = async (row: ContactEnrichmentRow) => {
       const { data: saved, error: insErr } = await supabase
         .from("contact_enrichment")
         .upsert(row, { onConflict: "lead_id" })
@@ -92,22 +90,70 @@ serve(async (req) => {
       return saved;
     };
 
-    if (!org) {
-      const result = await upsertAndReturn({
+    // Step 3: NPPES — check lead_physicians table
+    type PhysRow = {
+      physician_contacts: {
+        full_name: string;
+        credentials: string | null;
+        primary_specialty: string | null;
+        practice_phone: string | null;
+        practice_city: string | null;
+        practice_state: string | null;
+        email: string | null;
+        title: string | null;
+        linkedin_url: string | null;
+      } | null;
+    };
+
+    const { data: physRows } = await supabase
+      .from("lead_physicians")
+      .select(
+        "physician_contacts(full_name, credentials, primary_specialty, practice_phone, practice_city, practice_state, email, title, linkedin_url)",
+      )
+      .eq("lead_id", lead_id)
+      .limit(1);
+
+    const phys = (physRows as PhysRow[] | null)?.[0]?.physician_contacts;
+    if (phys) {
+      const name =
+        [phys.full_name, phys.credentials].filter(Boolean).join(", ") ||
+        phys.full_name;
+      const org =
+        [phys.practice_city, phys.practice_state].filter(Boolean).join(", ") ||
+        null;
+      const result = await upsert({
         lead_id,
-        status: "none",
-        name: null,
-        title: null,
-        organization: null,
-        phone: null,
-        email: null,
-        linkedin_url: null,
+        status: "found",
+        name,
+        title: phys.title ?? phys.primary_specialty,
+        organization: org,
+        phone: phys.practice_phone,
+        email: phys.email,
+        linkedin_url: phys.linkedin_url,
       });
-      return new Response(JSON.stringify(result), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return respond(result);
     }
 
+    // Step 4: Resolve org name from lead fields
+    const ents = (lead.entities as {
+      hospitals?: string[];
+      physicians?: string[];
+    }) ?? {};
+    const org =
+      ((lead.hospital as string | null)?.trim() || null) ??
+      (ents.hospitals?.[0]?.trim() || null) ??
+      (ents.physicians?.[0]?.trim() || null);
+
+    if (!org) {
+      const result = await upsert({
+        lead_id, status: "none",
+        name: null, title: null, organization: null,
+        phone: null, email: null, linkedin_url: null,
+      });
+      return respond(result);
+    }
+
+    // Step 5: Apollo fallback
     const apolloKey = Deno.env.get("APOLLO_API_KEY");
     if (!apolloKey) throw new Error("APOLLO_API_KEY is not configured");
 
@@ -150,19 +196,12 @@ serve(async (req) => {
     const person = people?.[0];
 
     if (!person) {
-      const result = await upsertAndReturn({
-        lead_id,
-        status: "none",
-        name: null,
-        title: null,
-        organization: org,
-        phone: null,
-        email: null,
-        linkedin_url: null,
+      const result = await upsert({
+        lead_id, status: "none",
+        name: null, title: null, organization: org,
+        phone: null, email: null, linkedin_url: null,
       });
-      return new Response(JSON.stringify(result), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return respond(result);
     }
 
     const name =
@@ -174,7 +213,7 @@ serve(async (req) => {
       person.phone_numbers?.[0]?.raw_number ??
       null;
 
-    const result = await upsertAndReturn({
+    const result = await upsert({
       lead_id,
       status: "found",
       name,
@@ -184,20 +223,13 @@ serve(async (req) => {
       email: person.email ?? null,
       linkedin_url: person.linkedin_url ?? null,
     });
+    return respond(result);
 
-    return new Response(JSON.stringify(result), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
   } catch (err) {
     console.error("[enrich-contact]", err);
     return new Response(
-      JSON.stringify({
-        error: err instanceof Error ? err.message : String(err),
-      }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      },
+      JSON.stringify({ error: err instanceof Error ? err.message : String(err) }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
 });

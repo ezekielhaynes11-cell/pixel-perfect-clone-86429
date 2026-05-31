@@ -19,7 +19,7 @@ const sourceMeta: Record<string, { label: string; cls: string }> = {
   openfda: { label: "FDA Recall", cls: "bg-red-500/15 text-red-300 border-red-500/30" },
   gdelt: { label: "News", cls: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
   gdelt_m_and_a: { label: "Vendor M&A", cls: "bg-pink-500/15 text-pink-300 border-pink-500/30" },
-  gdelt_va_funding: { label: "VA Funding", cls: "bg-cyan-500/15 text-cyan-300 border-cyan-300/30" },
+  gdelt_va_funding: { label: "VA Funding", cls: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30" },
   reddit: { label: "Reddit", cls: "bg-orange-500/15 text-orange-300 border-orange-500/30" },
   bluesky: { label: "Bluesky", cls: "bg-sky-500/15 text-sky-300 border-sky-500/30" },
   news: { label: "News", cls: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
@@ -66,7 +66,6 @@ export function LeadCard({
   const meta = sourceMeta[lead.source] ?? { label: lead.source, cls: "bg-surface-3 text-foreground border-border" };
   const conf = confidenceColor(lead.confidence);
 
-
   return (
     <article
       className={`fade-up group rounded-md border bg-surface-2 p-4 transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:bg-surface-3 hover:shadow-card-hover ${
@@ -74,7 +73,6 @@ export function LeadCard({
       } ${dismissed ? "opacity-60" : ""}`}
       style={{ animationDelay: `${Math.min(index * 40, 400)}ms` }}
     >
-      {/* Top row: Source + Confidence + Date */}
       <div className="mb-2 flex items-center gap-3">
         {selectable && (
           <input
@@ -86,9 +84,7 @@ export function LeadCard({
             className="h-4 w-4 cursor-pointer accent-primary"
           />
         )}
-        <span
-          className={`rounded-sm border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${meta.cls}`}
-        >
+        <span className={`rounded-sm border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${meta.cls}`}>
           {meta.label}
         </span>
         <div className="flex items-center gap-1.5">
@@ -100,15 +96,12 @@ export function LeadCard({
         </span>
       </div>
 
-      {/* Title */}
       <h3 className="mb-1.5 font-display text-base font-semibold leading-snug text-foreground transition-colors group-hover:text-primary">
         {lead.title}
       </h3>
 
-      {/* Summary */}
       <p className="mb-3 line-clamp-2 text-sm text-muted-foreground">{lead.summary}</p>
 
-      {/* Entity chips */}
       <div className="mb-3 flex flex-wrap gap-1.5">
         {lead.hospital && (
           <span className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[11px] text-foreground/80">
@@ -132,20 +125,14 @@ export function LeadCard({
           </span>
         )}
         {lead.entities.keywords.slice(0, 2).map((k) => (
-          <span
-            key={k}
-            className="rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[11px] text-primary"
-          >
+          <span key={k} className="rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[11px] text-primary">
             {k}
           </span>
         ))}
       </div>
 
-      {/* Contact — enrichment is handled by the enrich-contact edge function */}
       <ContactSection sourceContacts={lead.sourceContacts ?? []} physicians={physicians} leadId={lead.id} />
 
-
-      {/* Actions */}
       <div className="flex flex-wrap items-center gap-2">
         <button
           onClick={() => onView(lead)}

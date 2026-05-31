@@ -14,7 +14,6 @@ export function LeadDetailModal({
   physicians?: LeadPhysician[];
   onClose: () => void;
 }) {
-
   const qc = useQueryClient();
 
   useEffect(() => {
@@ -25,9 +24,8 @@ export function LeadDetailModal({
 
   if (!lead) return null;
 
-  const handleRefreshContact = () => {
+  const handleRefreshContact = () =>
     qc.invalidateQueries({ queryKey: ["contact_enrichment", lead.id] });
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm md:p-8">
@@ -70,7 +68,6 @@ export function LeadDetailModal({
             <ContactSection sourceContacts={lead.sourceContacts ?? []} physicians={physicians} leadId={lead.id} />
           </div>
 
-
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <EntityBlock icon={<Building2 />} title="Hospitals" items={lead.entities.hospitals} />
             <EntityBlock icon={<User2 />} title="Physicians / Teams" items={lead.entities.physicians} />
@@ -79,9 +76,7 @@ export function LeadDetailModal({
           </div>
 
           <div className="rounded-md bg-surface-2 p-4">
-            <div className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">
-              Notes
-            </div>
+            <div className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">Notes</div>
             <textarea
               placeholder="Add internal notes about this opportunity..."
               className="h-20 w-full resize-none rounded border border-border bg-surface p-2 text-sm outline-none focus:border-primary"
@@ -138,10 +133,7 @@ function EntityBlock({
       ) : (
         <div className="flex flex-wrap gap-1.5">
           {items.map((it) => (
-            <span
-              key={it}
-              className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-foreground/90"
-            >
+            <span key={it} className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-foreground/90">
               {it}
             </span>
           ))}

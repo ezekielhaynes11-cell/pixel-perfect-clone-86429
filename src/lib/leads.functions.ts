@@ -19,8 +19,6 @@ const LEAD_LIST_COLUMNS =
   "id, source, source_external_id, source_url, title, summary, confidence, priority, hospital, specialty, territory, entities, estimated_value_usd, win_probability, competitor_incumbent, date_discovered, date_ingested, enriched, vendor_mentions, account_type, signal_type, account_id, source_contacts";
 
 export const listLeads = createServerFn({ method: "GET" }).handler(async () => {
-  // Exclude leads the user has already dismissed so a growing dismiss pile
-  // doesn't drain the fixed-size feed window.
   const { data: dismissed, error: dismissedErr } = await supabaseAdmin
     .from("lead_actions")
     .select("lead_id")
@@ -43,7 +41,6 @@ export const listLeads = createServerFn({ method: "GET" }).handler(async () => {
   if (error) throw new Error(error.message);
   return data ?? [];
 });
-
 
 export const triggerIngestion = createServerFn({ method: "POST" }).handler(async () => {
   return await runIngestion(OWNER_ID);
@@ -554,7 +551,6 @@ const DECISION_MAKER_TITLES = [
 export const enrichLeadContact = createServerFn({ method: "POST" })
   .inputValidator((input) => z.object({ lead_id: z.string().uuid() }).parse(input))
   .handler(async ({ data }): Promise<ContactEnrichmentRow> => {
-    // 1. Cache hit?
     const { data: cached } = await supabaseAdmin
       .from("contact_enrichment")
       .select("*")
@@ -562,7 +558,6 @@ export const enrichLeadContact = createServerFn({ method: "POST" })
       .maybeSingle();
     if (cached && cached.status === "found") return cached as ContactEnrichmentRow;
 
-    // 2. Load lead to get org name.
     const { data: lead, error: leadErr } = await supabaseAdmin
       .from("leads")
       .select("hospital, entities")
@@ -595,7 +590,6 @@ export const enrichLeadContact = createServerFn({ method: "POST" })
       });
     }
 
-    // 3. Apollo search.
     try {
       const { apolloPeopleSearch } = await import("./apollo/client.server");
       const res = await apolloPeopleSearch({
@@ -631,7 +625,6 @@ export const enrichLeadContact = createServerFn({ method: "POST" })
       });
     } catch (e) {
       console.error("enrichLeadContact apollo failed:", e instanceof Error ? e.message : e);
-      // Do NOT cache failures — return ephemeral none so a retry can fire later.
       return {
         lead_id: data.lead_id, status: "none",
         name: null, title: null, organization: org,
@@ -642,12 +635,15 @@ export const enrichLeadContact = createServerFn({ method: "POST" })
   });
 
 export const getEnrichedContactCount = createServerFn({ method: "GET" }).handler(async () => {
-  const { count, error } = await supabaseAdmin
-    .from("contact_enrichment")
-    .select("lead_id", { count: "exact", head: true })
-    .eq("status", "found");
-  if (error) throw new Error(error.message);
-  return { count: count ?? 0 };
+  // Count distinct leads with any contact data: Apollo/NPPES via edge function
+  // OR physician contacts already loaded from NPPES ingestion.
+  const [enrichRes, physRes] = await Promise.all([
+    supabaseAdmin.from("contact_enrichment").select("lead_id").eq("status", "found"),
+    supabaseAdmin.from("lead_physicians").select("lead_id"),
+  ]);
+  const ids = new Set([
+    ...(enrichRes.data ?? []).map((r) => r.lead_id),
+    ...(physRes.data ?? []).map((r) => r.lead_id),
+  ]);
+  return { count: ids.size };
 });
-
-
