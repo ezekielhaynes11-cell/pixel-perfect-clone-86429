@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import { X, ExternalLink, Building2, User2, Wrench, Tag } from "lucide-react";
+import { X, ExternalLink, Building2, User2, Wrench, Tag, RefreshCw } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { type Lead, timeAgo } from "@/data/leads";
 import type { LeadPhysician } from "@/lib/leads.functions";
 import { ContactSection } from "./ContactSection";
@@ -14,6 +15,8 @@ export function LeadDetailModal({
   onClose: () => void;
 }) {
 
+  const qc = useQueryClient();
+
   useEffect(() => {
     const fn = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", fn);
@@ -21,6 +24,10 @@ export function LeadDetailModal({
   }, [onClose]);
 
   if (!lead) return null;
+
+  const handleRefreshContact = () => {
+    qc.invalidateQueries({ queryKey: ["contact_enrichment", lead.id] });
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm md:p-8">
@@ -51,7 +58,17 @@ export function LeadDetailModal({
         <div className="space-y-5 p-5">
           <p className="text-sm leading-relaxed text-foreground/90">{lead.summary}</p>
 
-          <ContactSection sourceContacts={lead.sourceContacts ?? []} physicians={physicians} leadId={lead.id} />
+          <div className="relative">
+            <button
+              type="button"
+              onClick={handleRefreshContact}
+              title="Re-run contact enrichment"
+              className="absolute right-2 top-2 z-10 rounded p-1 text-muted-foreground opacity-60 transition-opacity hover:opacity-100 hover:text-foreground"
+            >
+              <RefreshCw className="h-3 w-3" />
+            </button>
+            <ContactSection sourceContacts={lead.sourceContacts ?? []} physicians={physicians} leadId={lead.id} />
+          </div>
 
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
