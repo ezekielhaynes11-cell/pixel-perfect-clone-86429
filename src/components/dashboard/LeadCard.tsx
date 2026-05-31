@@ -1,4 +1,3 @@
-import { useState } from "react";
 import {
   ExternalLink,
   Eye,
@@ -8,7 +7,6 @@ import {
   Building2,
   Stethoscope,
   RotateCcw,
-  UserRound,
 } from "lucide-react";
 
 import { Link } from "@tanstack/react-router";
@@ -21,7 +19,7 @@ const sourceMeta: Record<string, { label: string; cls: string }> = {
   openfda: { label: "FDA Recall", cls: "bg-red-500/15 text-red-300 border-red-500/30" },
   gdelt: { label: "News", cls: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
   gdelt_m_and_a: { label: "Vendor M&A", cls: "bg-pink-500/15 text-pink-300 border-pink-500/30" },
-  gdelt_va_funding: { label: "VA Funding", cls: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30" },
+  gdelt_va_funding: { label: "VA Funding", cls: "bg-cyan-500/15 text-cyan-300 border-cyan-300/30" },
   reddit: { label: "Reddit", cls: "bg-orange-500/15 text-orange-300 border-orange-500/30" },
   bluesky: { label: "Bluesky", cls: "bg-sky-500/15 text-sky-300 border-sky-500/30" },
   news: { label: "News", cls: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
@@ -67,7 +65,6 @@ export function LeadCard({
 }) {
   const meta = sourceMeta[lead.source] ?? { label: lead.source, cls: "bg-surface-3 text-foreground border-border" };
   const conf = confidenceColor(lead.confidence);
-  const [contactOpen, setContactOpen] = useState(false);
 
 
   return (
@@ -144,19 +141,8 @@ export function LeadCard({
         ))}
       </div>
 
-      {/* Contact (lazy: only enrich when user clicks) */}
-      {contactOpen ? (
-        <ContactSection sourceContacts={lead.sourceContacts ?? []} physicians={physicians} leadId={lead.id} />
-      ) : (
-        <button
-          type="button"
-          onClick={() => setContactOpen(true)}
-          className="mb-3 flex w-full items-center gap-2 rounded-md border border-dashed border-border bg-surface/40 px-3 py-2 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-surface-3 hover:text-foreground"
-        >
-          <UserRound className="h-3.5 w-3.5" />
-          Show contact &amp; enrich decision-maker
-        </button>
-      )}
+      {/* Contact — enrichment is handled by the enrich-contact edge function */}
+      <ContactSection sourceContacts={lead.sourceContacts ?? []} physicians={physicians} leadId={lead.id} />
 
 
       {/* Actions */}
