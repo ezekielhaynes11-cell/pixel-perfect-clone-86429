@@ -635,6 +635,18 @@ export const enrichLeadContact = createServerFn({ method: "POST" })
     }
   });
 
+// Called from ContactSection on card expand — proxies through supabaseAdmin so
+// the browser never needs VITE_SUPABASE_URL/VITE_SUPABASE_PUBLISHABLE_KEY.
+export const fetchContactEnrichment = createServerFn({ method: "POST" })
+  .inputValidator((input) => z.object({ lead_id: z.string().uuid() }).parse(input))
+  .handler(async ({ data }): Promise<ContactEnrichmentRow> => {
+    const { data: result, error } = await supabaseAdmin.functions.invoke("enrich-contact", {
+      body: { lead_id: data.lead_id },
+    });
+    if (error) throw new Error(String(error));
+    return result as ContactEnrichmentRow;
+  });
+
 // Batch enrichment: process highest-confidence freshest leads first via the
 // enrich-contact edge function (NPPES → Apollo waterfall). Only skips leads
 // already marked status='found' — 'none' leads are retried so they get a

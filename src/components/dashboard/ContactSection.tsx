@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import type { LeadContact } from "@/data/leads";
 import type { LeadPhysician, ContactEnrichmentRow } from "@/lib/leads.functions";
-import { supabase } from "@/integrations/supabase/client";
+import { fetchContactEnrichment } from "@/lib/leads.functions";
 
 interface UnifiedContact {
   key: string;
@@ -107,31 +107,14 @@ export function ContactSection({
   const enrichQ = useQuery({
     queryKey: ["contact_enrichment", leadId],
     queryFn: async () => {
-      // ── DIAGNOSTIC LOG 1: confirm queryFn is firing ──────────────────────
-      console.log("[ContactSection] invoking enrich-contact for lead:", leadId);
-
-      const { data, error } = await supabase.functions.invoke<ContactEnrichmentRow>(
-        "enrich-contact",
-        { body: { lead_id: leadId! } },
-      );
-
-      // ── DIAGNOSTIC LOG 2: log raw result ────────────────────────────────
-      if (error) {
-        console.error(
-          "[ContactSection] edge fn error — FAILURE MODE:",
-          // FunctionsHttpError carries .message and .context (status code etc.)
-          (error as { message?: string; context?: unknown }).message ?? String(error),
-          "full error:", error,
-        );
-        throw error;
-      }
-
+      console.log("[ContactSection] fetching enrich-contact via server fn for lead:", leadId);
+      const result = await fetchContactEnrichment({ data: { lead_id: leadId! } });
       console.log(
-        "[ContactSection] edge fn returned status:", data?.status,
-        "name:", data?.name ?? "(none)",
-        "org:", data?.organization ?? "(none)",
+        "[ContactSection] result status:", result?.status,
+        "name:", result?.name ?? "(none)",
+        "org:", result?.organization ?? "(none)",
       );
-      return data!;
+      return result;
     },
     enabled: !!leadId,
     staleTime: 0,
@@ -149,7 +132,6 @@ export function ContactSection({
     }
   }, [enrichFound, qc]);
 
-  // Human-readable error string for the UI badge
   const errorMessage = enrichQ.error
     ? ((enrichQ.error as { message?: string }).message ?? "Unknown error")
     : "";
@@ -169,9 +151,6 @@ export function ContactSection({
               Enriching…
             </span>
           ) : enrichError ? (
-            // ── Distinct red badge for edge-function call failures ──────────
-            // Failure mode A: "Edge Function not found" → fn not deployed
-            // Failure mode B/C: network / auth error
             <span
               title={errorMessage}
               className="inline-flex items-center gap-1 rounded-full border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive"
@@ -206,7 +185,6 @@ export function ContactSection({
         )}
       </header>
 
-      {/* Error detail block — visible under the header when fn call fails */}
       {enrichError && errorMessage && (
         <div className="mb-2 rounded border border-destructive/30 bg-destructive/5 px-2 py-2 text-[11px] text-destructive">
           <span className="font-semibold">Edge function error: </span>{errorMessage}
