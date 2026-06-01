@@ -115,6 +115,9 @@ export function ContactSection({
   const [expanded, setExpanded] = useState(0);
 
   const qc = useQueryClient();
+  // staleTime: 0 so every fresh mount of ContactSection (triggered by the
+  // "Show contact" button) fires the edge function immediately. The edge
+  // function itself deduplicates via the contact_enrichment DB cache.
   const enrichQ = useQuery({
     queryKey: ["contact_enrichment", leadId],
     queryFn: async () => {
@@ -126,7 +129,7 @@ export function ContactSection({
       return data!;
     },
     enabled: !!leadId,
-    staleTime: 1000 * 60 * 60,
+    staleTime: 0,
     retry: false,
   });
 
@@ -181,7 +184,7 @@ export function ContactSection({
         )}
       </header>
 
-      {enrichFound && enrich && (
+      {enrichFound && enrich && enrich.status === "found" && (
         <div className="mb-2 rounded border border-success/30 bg-success/5 px-2 py-2">
           <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-success">
             Decision-maker

@@ -59,7 +59,17 @@ serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
 
-    // Step 1: Cache hit
+    const upsert = async (row: ContactEnrichmentRow) => {
+      const { data: saved, error: insErr } = await supabase
+        .from("contact_enrichment")
+        .upsert(row, { onConflict: "lead_id" })
+        .select()
+        .single();
+      if (insErr) throw new Error(insErr.message);
+      return saved;
+    };
+
+    // Step 1: Cache hit — only skip if previously found (none = always retry)
     const { data: cached } = await supabase
       .from("contact_enrichment")
       .select("*")
@@ -79,16 +89,6 @@ serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-
-    const upsert = async (row: ContactEnrichmentRow) => {
-      const { data: saved, error: insErr } = await supabase
-        .from("contact_enrichment")
-        .upsert(row, { onConflict: "lead_id" })
-        .select()
-        .single();
-      if (insErr) throw new Error(insErr.message);
-      return saved;
-    };
 
     // Step 3: NPPES — check lead_physicians table
     type PhysRow = {
@@ -154,6 +154,7 @@ serve(async (req) => {
     );
 
     if (!org) {
+      // No org to search — store none and return
       const result = await upsert({
         lead_id, status: "none",
         name: null, title: null, organization: null,
@@ -162,7 +163,20 @@ serve(async (req) => {
       return respond(result);
     }
 
-    if (!apolloKey) throw new Error("APOLLO_API_KEY is not configured");
+    if (!apolloKey) {
+      // Key not yet configured — soft fail so we don’t 500 the client.
+      // Status written as none so the card shows graceful state.
+      // Re-enrichment will retry (none status is not cached as a skip).
+      console.warn(
+        "[enrich-contact] APOLLO_API_KEY not set — set it in Supabase Dashboard → Edge Functions → enrich-contact → Secrets",
+      );
+      const result = await upsert({
+        lead_id, status: "none",
+        name: null, title: null, organization: org,
+        phone: null, email: null, linkedin_url: null,
+      });
+      return respond(result);
+    }
 
     console.log("[enrich-contact]", lead_id, "calling Apollo org:", org);
     const apolloRes = await fetch(`${APOLLO_BASE}/mixed_people/search`, {
@@ -190,9 +204,16 @@ serve(async (req) => {
       const text = await apolloRes.text();
       console.error(
         "[enrich-contact]", lead_id,
-        "Apollo error:", apolloRes.status, text.slice(0, 200),
+        "Apollo error body:", text.slice(0, 300),
       );
-      throw new Error(`Apollo ${apolloRes.status}: ${text.slice(0, 300)}`);
+      // Don’t throw — write none so the client gets a clean response.
+      // The rate-limit / auth error is visible in Supabase Edge Function logs.
+      const result = await upsert({
+        lead_id, status: "none",
+        name: null, title: null, organization: org,
+        phone: null, email: null, linkedin_url: null,
+      });
+      return respond(result);
     }
 
     type ApolloPerson = {
@@ -249,7 +270,7 @@ serve(async (req) => {
     return respond(result);
 
   } catch (err) {
-    console.error("[enrich-contact]", err);
+    console.error("[enrich-contact] unhandled error:", err);
     return new Response(
       JSON.stringify({ error: err instanceof Error ? err.message : String(err) }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
