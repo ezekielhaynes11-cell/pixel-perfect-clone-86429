@@ -1,1 +1,4 @@
 project_id = "apaelmfluoqonmskcxjr"
+
+[functions.enrich-contact]
+verify_jwt = false
