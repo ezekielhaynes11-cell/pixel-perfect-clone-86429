@@ -549,108 +549,160 @@ const DECISION_MAKER_TITLES = [
   "CNO",
 ];
 
+// Shared waterfall: NPPES (lead_physicians cache) → Apollo (org search) → none.
+// Runs fully in-process with supabaseAdmin + the server-side Apollo client, so
+// it does NOT depend on the enrich-contact edge function being deployed or its
+// secrets being configured. Used by both fetchContactEnrichment (on-demand,
+// card expand) and batchEnrichContacts (bulk).
+async function runContactWaterfall(leadId: string): Promise<ContactEnrichmentRow> {
+  const writeAndReturn = async (
+    row: Omit<ContactEnrichmentRow, "created_at">,
+  ): Promise<ContactEnrichmentRow> => {
+    const { data: saved, error: insErr } = await supabaseAdmin
+      .from("contact_enrichment")
+      .upsert(row, { onConflict: "lead_id" })
+      .select()
+      .single();
+    if (insErr) throw new Error(insErr.message);
+    return saved as ContactEnrichmentRow;
+  };
+
+  // Step 1: cache — only short-circuit on a confirmed contact; 'none' retries.
+  const { data: cached } = await supabaseAdmin
+    .from("contact_enrichment")
+    .select("*")
+    .eq("lead_id", leadId)
+    .maybeSingle();
+  if (cached && cached.status === "found") return cached as ContactEnrichmentRow;
+
+  // Step 2: load lead
+  const { data: lead, error: leadErr } = await supabaseAdmin
+    .from("leads")
+    .select("hospital, entities")
+    .eq("id", leadId)
+    .single();
+  if (leadErr || !lead) throw new Error("Lead not found");
+
+  // Step 3: NPPES — check lead_physicians cache first
+  type PhysJoin = {
+    physician_contacts: {
+      full_name: string;
+      credentials: string | null;
+      primary_specialty: string | null;
+      practice_phone: string | null;
+      practice_city: string | null;
+      practice_state: string | null;
+      email: string | null;
+      title: string | null;
+      linkedin_url: string | null;
+    } | null;
+  };
+  const { data: physRows } = await supabaseAdmin
+    .from("lead_physicians")
+    .select(
+      "physician_contacts(full_name, credentials, primary_specialty, practice_phone, practice_city, practice_state, email, title, linkedin_url)",
+    )
+    .eq("lead_id", leadId)
+    .limit(1);
+  const phys = (physRows as unknown as PhysJoin[] | null)?.[0]?.physician_contacts;
+  if (phys) {
+    const name =
+      [phys.full_name, phys.credentials].filter(Boolean).join(", ") || phys.full_name;
+    const physOrg =
+      [phys.practice_city, phys.practice_state].filter(Boolean).join(", ") || null;
+    return writeAndReturn({
+      lead_id: leadId,
+      status: "found",
+      name,
+      title: phys.title ?? phys.primary_specialty,
+      organization: physOrg,
+      phone: phys.practice_phone,
+      email: phys.email,
+      linkedin_url: phys.linkedin_url,
+    });
+  }
+
+  // Step 4: resolve org name from lead fields
+  const ents = (lead.entities as { hospitals?: string[]; physicians?: string[] }) ?? {};
+  const org =
+    ((lead.hospital as string | null)?.trim() || null) ??
+    (ents.hospitals?.[0]?.trim() || null) ??
+    (ents.physicians?.[0]?.trim() || null);
+
+  if (!org) {
+    return writeAndReturn({
+      lead_id: leadId, status: "none",
+      name: null, title: null, organization: null,
+      phone: null, email: null, linkedin_url: null,
+    });
+  }
+
+  // Step 5: Apollo fallback (server-side client reads APOLLO_API_KEY from env)
+  try {
+    const { apolloPeopleSearch } = await import("./apollo/client.server");
+    const res = await apolloPeopleSearch({
+      organization_name: org,
+      person_titles: DECISION_MAKER_TITLES,
+      per_page: 10,
+    });
+    const person = (res.people ?? [])[0];
+    if (!person) {
+      return writeAndReturn({
+        lead_id: leadId, status: "none",
+        name: null, title: null, organization: org,
+        phone: null, email: null, linkedin_url: null,
+      });
+    }
+    const name =
+      person.name ||
+      [person.first_name, person.last_name].filter(Boolean).join(" ") ||
+      null;
+    const phone =
+      person.phone_numbers?.[0]?.sanitized_number ??
+      person.phone_numbers?.[0]?.raw_number ??
+      null;
+    return writeAndReturn({
+      lead_id: leadId,
+      status: "found",
+      name,
+      title: person.title ?? null,
+      organization: person.organization?.name ?? org,
+      phone,
+      email: person.email ?? null,
+      linkedin_url: person.linkedin_url ?? null,
+    });
+  } catch (e) {
+    // Soft-fail: write 'none' so the UI gets a clean response and the lead is
+    // retried on the next run. The real Apollo error is in the server logs.
+    console.error("[runContactWaterfall]", leadId, "apollo failed:", e instanceof Error ? e.message : e);
+    return writeAndReturn({
+      lead_id: leadId, status: "none",
+      name: null, title: null, organization: org,
+      phone: null, email: null, linkedin_url: null,
+    });
+  }
+}
+
 export const enrichLeadContact = createServerFn({ method: "POST" })
   .inputValidator((input) => z.object({ lead_id: z.string().uuid() }).parse(input))
   .handler(async ({ data }): Promise<ContactEnrichmentRow> => {
-    const { data: cached } = await supabaseAdmin
-      .from("contact_enrichment")
-      .select("*")
-      .eq("lead_id", data.lead_id)
-      .maybeSingle();
-    if (cached && cached.status === "found") return cached as ContactEnrichmentRow;
-
-    const { data: lead, error: leadErr } = await supabaseAdmin
-      .from("leads")
-      .select("hospital, entities")
-      .eq("id", data.lead_id)
-      .single();
-    if (leadErr || !lead) throw new Error("Lead not found");
-
-    const ents = (lead.entities as { hospitals?: string[] }) ?? {};
-    const org =
-      (lead.hospital && lead.hospital.trim()) ||
-      (ents.hospitals?.[0] && ents.hospitals[0].trim()) ||
-      null;
-
-    const writeAndReturn = async (row: Omit<ContactEnrichmentRow, "created_at">) => {
-      const { data: saved, error: insErr } = await supabaseAdmin
-        .from("contact_enrichment")
-        .upsert(row, { onConflict: "lead_id" })
-        .select()
-        .single();
-      if (insErr) throw new Error(insErr.message);
-      return saved as ContactEnrichmentRow;
-    };
-
-    if (!org) {
-      return writeAndReturn({
-        lead_id: data.lead_id,
-        status: "none",
-        name: null, title: null, organization: null,
-        phone: null, email: null, linkedin_url: null,
-      });
-    }
-
-    try {
-      const { apolloPeopleSearch } = await import("./apollo/client.server");
-      const res = await apolloPeopleSearch({
-        organization_name: org,
-        person_titles: DECISION_MAKER_TITLES,
-        per_page: 10,
-      });
-      const person = (res.people ?? [])[0];
-      if (!person) {
-        return writeAndReturn({
-          lead_id: data.lead_id, status: "none",
-          name: null, title: null, organization: org,
-          phone: null, email: null, linkedin_url: null,
-        });
-      }
-      const name =
-        person.name ||
-        [person.first_name, person.last_name].filter(Boolean).join(" ") ||
-        null;
-      const phone =
-        person.phone_numbers?.[0]?.sanitized_number ??
-        person.phone_numbers?.[0]?.raw_number ??
-        null;
-      return writeAndReturn({
-        lead_id: data.lead_id,
-        status: "found",
-        name,
-        title: person.title ?? null,
-        organization: person.organization?.name ?? org,
-        phone,
-        email: person.email ?? null,
-        linkedin_url: person.linkedin_url ?? null,
-      });
-    } catch (e) {
-      console.error("enrichLeadContact apollo failed:", e instanceof Error ? e.message : e);
-      return {
-        lead_id: data.lead_id, status: "none",
-        name: null, title: null, organization: org,
-        phone: null, email: null, linkedin_url: null,
-        created_at: new Date().toISOString(),
-      };
-    }
+    return runContactWaterfall(data.lead_id);
   });
 
-// Called from ContactSection on card expand — proxies through supabaseAdmin so
-// the browser never needs VITE_SUPABASE_URL/VITE_SUPABASE_PUBLISHABLE_KEY.
+// Called from ContactSection on card expand. Runs the NPPES → Apollo waterfall
+// in-process via supabaseAdmin so the browser never needs
+// VITE_SUPABASE_URL/VITE_SUPABASE_PUBLISHABLE_KEY, and we don't depend on the
+// enrich-contact edge function being deployed with its own secrets.
 export const fetchContactEnrichment = createServerFn({ method: "POST" })
   .inputValidator((input) => z.object({ lead_id: z.string().uuid() }).parse(input))
   .handler(async ({ data }): Promise<ContactEnrichmentRow> => {
-    const { data: result, error } = await supabaseAdmin.functions.invoke("enrich-contact", {
-      body: { lead_id: data.lead_id },
-    });
-    if (error) throw new Error(String(error));
-    return result as ContactEnrichmentRow;
+    return runContactWaterfall(data.lead_id);
   });
 
 // Batch enrichment: process highest-confidence freshest leads first via the
-// enrich-contact edge function (NPPES → Apollo waterfall). Only skips leads
-// already marked status='found' — 'none' leads are retried so they get a
-// second chance after APOLLO_API_KEY is configured.
+// in-process waterfall. Only skips leads already marked status='found' —
+// 'none' leads are retried so they get a second chance after APOLLO_API_KEY
+// is configured.
 export const batchEnrichContacts = createServerFn({ method: "POST" })
   .inputValidator((input) =>
     z.object({ limit: z.number().int().min(1).max(50).optional() }).parse(input),
@@ -685,11 +737,8 @@ export const batchEnrichContacts = createServerFn({ method: "POST" })
     let errors = 0;
     for (const lead of toProcess) {
       try {
-        const { error: fnError } = await supabaseAdmin.functions.invoke("enrich-contact", {
-          body: { lead_id: lead.id },
-        });
-        if (fnError) throw new Error(String(fnError));
-        enriched++;
+        const result = await runContactWaterfall(lead.id);
+        if (result.status === "found") enriched++;
       } catch (e) {
         errors++;
         console.error("[batchEnrichContacts]", lead.id, e instanceof Error ? e.message : e);
