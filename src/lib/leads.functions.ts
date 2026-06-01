@@ -635,8 +635,10 @@ export const enrichLeadContact = createServerFn({ method: "POST" })
     }
   });
 
-// Batch enrichment: process highest-value unenriched leads first via the
-// enrich-contact edge function (NPPES → Apollo waterfall).
+// Batch enrichment: process highest-confidence freshest leads first via the
+// enrich-contact edge function (NPPES → Apollo waterfall). Only skips leads
+// already marked status='found' — 'none' leads are retried so they get a
+// second chance after APOLLO_API_KEY is configured.
 export const batchEnrichContacts = createServerFn({ method: "POST" })
   .inputValidator((input) =>
     z.object({ limit: z.number().int().min(1).max(50).optional() }).parse(input),
@@ -644,14 +646,16 @@ export const batchEnrichContacts = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const limit = data.limit ?? 20;
 
-    // Skip leads already attempted to avoid re-burning Apollo quota on known none results.
-    const { data: attempted } = await supabaseAdmin
+    // Only exclude leads that already have a confirmed contact — 'none' leads
+    // are re-attempted so they get another chance after the API key was set.
+    const { data: alreadyFound } = await supabaseAdmin
       .from("contact_enrichment")
-      .select("lead_id");
-    const attemptedSet = new Set((attempted ?? []).map((r) => r.lead_id as string));
+      .select("lead_id")
+      .eq("status", "found");
+    const foundSet = new Set((alreadyFound ?? []).map((r) => r.lead_id as string));
 
-    // Over-fetch to account for already-attempted leads filtered out below.
-    const fetchLimit = Math.min(limit + Math.min(attemptedSet.size, 100), 200);
+    // Over-fetch to account for already-found leads filtered out below.
+    const fetchLimit = Math.min(limit + Math.min(foundSet.size, 100), 200);
     const { data: leads, error } = await supabaseAdmin
       .from("leads")
       .select("id")
@@ -662,7 +666,7 @@ export const batchEnrichContacts = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
 
     const toProcess = (leads ?? [])
-      .filter((l) => !attemptedSet.has(l.id))
+      .filter((l) => !foundSet.has(l.id))
       .slice(0, limit);
 
     let enriched = 0;
