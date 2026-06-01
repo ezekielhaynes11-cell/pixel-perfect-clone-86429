@@ -12,6 +12,7 @@ import {
   ChevronDown,
   CheckCircle2,
   Loader2,
+  XCircle,
 } from "lucide-react";
 import type { LeadContact } from "@/data/leads";
 import type { LeadPhysician, ContactEnrichmentRow } from "@/lib/leads.functions";
@@ -61,21 +62,13 @@ function sourceToContact(c: LeadContact, idx: number): UnifiedContact {
 }
 
 function NotAvailable() {
-  return (
-    <span className="italic text-muted-foreground/70">Not available</span>
-  );
+  return <span className="italic text-muted-foreground/70">Not available</span>;
 }
 
 function Row({
-  icon,
-  label,
-  value,
-  href,
+  icon, label, value, href,
 }: {
-  icon: React.ReactNode;
-  label: string;
-  value: string | null | undefined;
-  href?: string;
+  icon: React.ReactNode; label: string; value: string | null | undefined; href?: string;
 }) {
   return (
     <div className="flex items-start gap-2 text-xs">
@@ -84,24 +77,19 @@ function Row({
       <span className="min-w-0 flex-1 break-words text-foreground/90">
         {value ? (
           href ? (
-            <a href={href} className="text-primary hover:underline" target={href.startsWith("http") ? "_blank" : undefined} rel="noreferrer">
+            <a href={href} className="text-primary hover:underline"
+              target={href.startsWith("http") ? "_blank" : undefined} rel="noreferrer">
               {value}
             </a>
-          ) : (
-            value
-          )
-        ) : (
-          <NotAvailable />
-        )}
+          ) : value
+        ) : <NotAvailable />}
       </span>
     </div>
   );
 }
 
 export function ContactSection({
-  sourceContacts,
-  physicians,
-  leadId,
+  sourceContacts, physicians, leadId,
 }: {
   sourceContacts: LeadContact[];
   physicians: LeadPhysician[];
@@ -115,17 +103,34 @@ export function ContactSection({
   const [expanded, setExpanded] = useState(0);
 
   const qc = useQueryClient();
-  // staleTime: 0 so every fresh mount of ContactSection (triggered by the
-  // "Show contact" button) fires the edge function immediately. The edge
-  // function itself deduplicates via the contact_enrichment DB cache.
+
   const enrichQ = useQuery({
     queryKey: ["contact_enrichment", leadId],
     queryFn: async () => {
+      // ── DIAGNOSTIC LOG 1: confirm queryFn is firing ──────────────────────
+      console.log("[ContactSection] invoking enrich-contact for lead:", leadId);
+
       const { data, error } = await supabase.functions.invoke<ContactEnrichmentRow>(
         "enrich-contact",
         { body: { lead_id: leadId! } },
       );
-      if (error) throw error;
+
+      // ── DIAGNOSTIC LOG 2: log raw result ────────────────────────────────
+      if (error) {
+        console.error(
+          "[ContactSection] edge fn error — FAILURE MODE:",
+          // FunctionsHttpError carries .message and .context (status code etc.)
+          (error as { message?: string; context?: unknown }).message ?? String(error),
+          "full error:", error,
+        );
+        throw error;
+      }
+
+      console.log(
+        "[ContactSection] edge fn returned status:", data?.status,
+        "name:", data?.name ?? "(none)",
+        "org:", data?.organization ?? "(none)",
+      );
       return data!;
     },
     enabled: !!leadId,
@@ -134,16 +139,20 @@ export function ContactSection({
   });
 
   const enrich = enrichQ.data;
-  const enrichLoading = leadId && enrichQ.isLoading;
-  // Badge is green if Apollo found a decision-maker OR we already have
-  // NPPES/source contacts in the unified list.
-  const enrichFound = enrich?.status === "found" || unified.length > 0;
+  const enrichLoading = !!(leadId && enrichQ.isLoading);
+  const enrichError  = !!(leadId && enrichQ.isError);
+  const enrichFound  = enrich?.status === "found" || unified.length > 0;
 
   useEffect(() => {
     if (enrichFound) {
       qc.invalidateQueries({ queryKey: ["contact_enrichment_count"] });
     }
   }, [enrichFound, qc]);
+
+  // Human-readable error string for the UI badge
+  const errorMessage = enrichQ.error
+    ? ((enrichQ.error as { message?: string }).message ?? "Unknown error")
+    : "";
 
   return (
     <section className="mb-3 rounded-md border border-border/60 bg-surface/60 p-3">
@@ -152,11 +161,23 @@ export function ContactSection({
         <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           Contact
         </h4>
+
         {leadId && (
           enrichLoading ? (
             <span className="inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">
               <Loader2 className="h-3 w-3 animate-spin" />
               Enriching…
+            </span>
+          ) : enrichError ? (
+            // ── Distinct red badge for edge-function call failures ──────────
+            // Failure mode A: "Edge Function not found" → fn not deployed
+            // Failure mode B/C: network / auth error
+            <span
+              title={errorMessage}
+              className="inline-flex items-center gap-1 rounded-full border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive"
+            >
+              <XCircle className="h-3 w-3" />
+              Enrich error — see console
             </span>
           ) : enrichFound ? (
             <span className="inline-flex items-center gap-1 rounded-full border border-success/40 bg-success/10 px-2 py-0.5 text-[10px] font-medium text-success">
@@ -170,6 +191,7 @@ export function ContactSection({
             </span>
           )
         )}
+
         {empty ? (
           !leadId && (
             <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">
@@ -183,6 +205,13 @@ export function ContactSection({
           </span>
         )}
       </header>
+
+      {/* Error detail block — visible under the header when fn call fails */}
+      {enrichError && errorMessage && (
+        <div className="mb-2 rounded border border-destructive/30 bg-destructive/5 px-2 py-2 text-[11px] text-destructive">
+          <span className="font-semibold">Edge function error: </span>{errorMessage}
+        </div>
+      )}
 
       {enrichFound && enrich && enrich.status === "found" && (
         <div className="mb-2 rounded border border-success/30 bg-success/5 px-2 py-2">
@@ -254,23 +283,17 @@ function ContactCard({ contact }: { contact: UnifiedContact | null }) {
       <Row icon={<Briefcase />} label="Title" value={contact?.title ?? null} />
       <Row icon={<Building2 />} label="Organization" value={contact?.organization ?? null} />
       <Row
-        icon={<Phone />}
-        label="Phone"
-        value={contact?.phone ?? null}
+        icon={<Phone />} label="Phone" value={contact?.phone ?? null}
         href={contact?.phone ? `tel:${contact.phone}` : undefined}
       />
       <Row
-        icon={<Mail />}
-        label="Email"
-        value={contact?.email ?? null}
+        icon={<Mail />} label="Email" value={contact?.email ?? null}
         href={contact?.email ? `mailto:${contact.email}` : undefined}
       />
       <Row icon={<MapPin />} label="Address" value={contact?.address ?? null} />
       {contact?.linkedin_url && (
         <Row
-          icon={<Linkedin />}
-          label="LinkedIn"
-          value={contact.linkedin_url}
+          icon={<Linkedin />} label="LinkedIn" value={contact.linkedin_url}
           href={contact.linkedin_url}
         />
       )}
