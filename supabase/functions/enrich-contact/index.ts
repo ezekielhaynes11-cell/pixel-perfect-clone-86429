@@ -121,6 +121,7 @@ serve(async (req) => {
       const org =
         [phys.practice_city, phys.practice_state].filter(Boolean).join(", ") ||
         null;
+      console.log("[enrich-contact]", lead_id, "NPPES hit:", name, "org:", org);
       const result = await upsert({
         lead_id,
         status: "found",
@@ -144,6 +145,14 @@ serve(async (req) => {
       (ents.hospitals?.[0]?.trim() || null) ??
       (ents.physicians?.[0]?.trim() || null);
 
+    // Step 5: Apollo fallback
+    const apolloKey = Deno.env.get("APOLLO_API_KEY");
+    console.log(
+      "[enrich-contact]", lead_id,
+      "APOLLO_API_KEY present:", !!apolloKey,
+      "org:", org ?? "none",
+    );
+
     if (!org) {
       const result = await upsert({
         lead_id, status: "none",
@@ -153,10 +162,9 @@ serve(async (req) => {
       return respond(result);
     }
 
-    // Step 5: Apollo fallback
-    const apolloKey = Deno.env.get("APOLLO_API_KEY");
     if (!apolloKey) throw new Error("APOLLO_API_KEY is not configured");
 
+    console.log("[enrich-contact]", lead_id, "calling Apollo org:", org);
     const apolloRes = await fetch(`${APOLLO_BASE}/mixed_people/search`, {
       method: "POST",
       headers: {
@@ -173,8 +181,17 @@ serve(async (req) => {
       signal: AbortSignal.timeout(30_000),
     });
 
+    console.log(
+      "[enrich-contact]", lead_id,
+      "Apollo HTTP:", apolloRes.status, "org:", org,
+    );
+
     if (!apolloRes.ok) {
       const text = await apolloRes.text();
+      console.error(
+        "[enrich-contact]", lead_id,
+        "Apollo error:", apolloRes.status, text.slice(0, 200),
+      );
       throw new Error(`Apollo ${apolloRes.status}: ${text.slice(0, 300)}`);
     }
 
@@ -193,6 +210,12 @@ serve(async (req) => {
     };
 
     const { people } = (await apolloRes.json()) as { people: ApolloPerson[] };
+    console.log(
+      "[enrich-contact]", lead_id,
+      "Apollo people:", (people ?? []).length,
+      "first:", people?.[0]?.name ?? "none",
+      "title:", people?.[0]?.title ?? "none",
+    );
     const person = people?.[0];
 
     if (!person) {

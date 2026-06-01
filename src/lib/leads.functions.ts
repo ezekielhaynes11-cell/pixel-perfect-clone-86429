@@ -42,6 +42,7 @@ export const listLeads = createServerFn({ method: "GET" }).handler(async () => {
   return data ?? [];
 });
 
+
 export const triggerIngestion = createServerFn({ method: "POST" }).handler(async () => {
   return await runIngestion(OWNER_ID);
 });
@@ -524,7 +525,7 @@ export const listLeadPhysicians = createServerFn({ method: "GET" }).handler(asyn
   }));
 });
 
-/* -------------------- Decision-maker contact enrichment (Apollo) -------------------- */
+/* -------------------- Decision-maker contact enrichment -------------------- */
 
 export interface ContactEnrichmentRow {
   lead_id: string;
@@ -634,16 +635,84 @@ export const enrichLeadContact = createServerFn({ method: "POST" })
     }
   });
 
+// Batch enrichment: process highest-value unenriched leads first via the
+// enrich-contact edge function (NPPES → Apollo waterfall).
+export const batchEnrichContacts = createServerFn({ method: "POST" })
+  .inputValidator((input) =>
+    z.object({ limit: z.number().int().min(1).max(50).optional() }).parse(input),
+  )
+  .handler(async ({ data }) => {
+    const limit = data.limit ?? 20;
+
+    // Skip leads already attempted to avoid re-burning Apollo quota on known none results.
+    const { data: attempted } = await supabaseAdmin
+      .from("contact_enrichment")
+      .select("lead_id");
+    const attemptedSet = new Set((attempted ?? []).map((r) => r.lead_id as string));
+
+    // Over-fetch to account for already-attempted leads filtered out below.
+    const fetchLimit = Math.min(limit + Math.min(attemptedSet.size, 100), 200);
+    const { data: leads, error } = await supabaseAdmin
+      .from("leads")
+      .select("id")
+      .eq("enriched", true)
+      .order("confidence", { ascending: false })
+      .order("date_discovered", { ascending: false })
+      .limit(fetchLimit);
+    if (error) throw new Error(error.message);
+
+    const toProcess = (leads ?? [])
+      .filter((l) => !attemptedSet.has(l.id))
+      .slice(0, limit);
+
+    let enriched = 0;
+    let errors = 0;
+    for (const lead of toProcess) {
+      try {
+        const { error: fnError } = await supabaseAdmin.functions.invoke("enrich-contact", {
+          body: { lead_id: lead.id },
+        });
+        if (fnError) throw new Error(String(fnError));
+        enriched++;
+      } catch (e) {
+        errors++;
+        console.error("[batchEnrichContacts]", lead.id, e instanceof Error ? e.message : e);
+      }
+    }
+    return { enriched, errors, total: toProcess.length };
+  });
+
 export const getEnrichedContactCount = createServerFn({ method: "GET" }).handler(async () => {
-  // Count distinct leads with any contact data: Apollo/NPPES via edge function
-  // OR physician contacts already loaded from NPPES ingestion.
+  // Count only leads with a displayable contact: name present + at least phone or email.
   const [enrichRes, physRes] = await Promise.all([
-    supabaseAdmin.from("contact_enrichment").select("lead_id").eq("status", "found"),
-    supabaseAdmin.from("lead_physicians").select("lead_id"),
+    supabaseAdmin
+      .from("contact_enrichment")
+      .select("lead_id")
+      .eq("status", "found")
+      .not("name", "is", null)
+      .or("phone.not.is.null,email.not.is.null"),
+    supabaseAdmin
+      .from("lead_physicians")
+      .select("lead_id, physician_contacts!inner(full_name, practice_phone, email)"),
   ]);
+  type PhysRow = {
+    lead_id: string;
+    physician_contacts: {
+      full_name: string | null;
+      practice_phone: string | null;
+      email: string | null;
+    };
+  };
+  const physIds = ((physRes.data ?? []) as unknown as PhysRow[])
+    .filter(
+      (r) =>
+        r.physician_contacts.full_name &&
+        (r.physician_contacts.practice_phone || r.physician_contacts.email),
+    )
+    .map((r) => r.lead_id);
   const ids = new Set([
     ...(enrichRes.data ?? []).map((r) => r.lead_id),
-    ...(physRes.data ?? []).map((r) => r.lead_id),
+    ...physIds,
   ]);
   return { count: ids.size };
 });

@@ -5,6 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { listKeywords, upsertKeyword, deleteKeyword, scrapePageForAccount, listScrapedPages } from "@/lib/admin.functions";
 import { bulkEnrichApollo, countUnenrichedPhysicians } from "@/lib/apollo.functions";
+import { batchEnrichContacts } from "@/lib/leads.functions";
 
 
 const KINDS = ["vendor", "product_model", "focus_concept", "role_title", "complaint_signal"] as const;
@@ -24,6 +25,7 @@ function KeywordsPage() {
   const pages = useServerFn(listScrapedPages);
   const bulkEnrich = useServerFn(bulkEnrichApollo);
   const countUnenriched = useServerFn(countUnenrichedPhysicians);
+  const batchEnrich = useServerFn(batchEnrichContacts);
 
   const kw = useQuery({ queryKey: ["keywords"], queryFn: () => list() });
   const sp = useQuery({ queryKey: ["scraped_pages"], queryFn: () => pages() });
@@ -33,6 +35,7 @@ function KeywordsPage() {
   const [value, setValue] = useState("");
   const [url, setUrl] = useState("");
   const [enrichLimit, setEnrichLimit] = useState(25);
+  const [contactEnrichLimit, setContactEnrichLimit] = useState(20);
 
 
   const add = useMutation({
@@ -56,6 +59,14 @@ function KeywordsPage() {
       qc.invalidateQueries({ queryKey: ["lead_physicians"] });
       qc.invalidateQueries({ queryKey: ["account_physicians"] });
       toast.success(`Attempted ${r.attempted} · Matched ${r.matched} · ${r.errors} errors`);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const doBatchEnrichContacts = useMutation({
+    mutationFn: () => batchEnrich({ data: { limit: contactEnrichLimit } }),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["contact_enrichment_count"] });
+      toast.success(`Processed ${r.total} leads · ${r.enriched} contacts found · ${r.errors} errors`);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -140,6 +151,31 @@ function KeywordsPage() {
               </div>
             );
           })}
+        </div>
+      </section>
+
+      <section className="rounded-md border border-border bg-surface-2 p-4">
+        <h2 className="mb-1 font-medium">Enrich decision-maker contacts</h2>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Runs NPPES → Apollo waterfall on the highest-confidence, freshest leads that have not yet been attempted.
+          Sorted by confidence DESC then date DESC so the best leads are enriched first.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="number"
+            min={1}
+            max={50}
+            value={contactEnrichLimit}
+            onChange={(e) => setContactEnrichLimit(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
+            className="h-9 w-24 rounded-md border border-border bg-surface-3 px-3 text-sm"
+          />
+          <button
+            onClick={() => doBatchEnrichContacts.mutate()}
+            disabled={doBatchEnrichContacts.isPending}
+            className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
+          >
+            {doBatchEnrichContacts.isPending ? "Enriching…" : "Enrich contacts"}
+          </button>
         </div>
       </section>
 
