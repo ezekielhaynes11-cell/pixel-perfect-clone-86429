@@ -525,7 +525,7 @@ export const listLeadPhysicians = createServerFn({ method: "GET" }).handler(asyn
   }));
 });
 
-/* -------------------- Decision-maker contact enrichment -------------------- */
+/* -------------------- Decision-maker contact enrichment (Apollo) -------------------- */
 
 export interface ContactEnrichmentRow {
   lead_id: string;
@@ -540,13 +540,17 @@ export interface ContactEnrichmentRow {
 }
 
 const DECISION_MAKER_TITLES = [
-  "VP Supply Chain",
-  "Director Procurement",
-  "CMO",
-  "VP Clinical Operations",
-  "Materials Manager",
-  "Director of Surgery",
-  "CNO",
+  "Director of Point of Care Ultrasound",
+  "POCUS Director",
+  "Director of Clinical Ultrasound",
+  "Ultrasound Director",
+  "Ultrasound Program Director",
+  "Director of Imaging",
+  "Imaging Director",
+  "Clinical Engineering Director",
+  "Director of Radiology",
+  "Chief of Radiology",
+  "Ultrasound Fellowship Director",
 ];
 
 // Shared waterfall: NPPES (lead_physicians cache) → Apollo (org search) → none.
@@ -672,8 +676,6 @@ async function runContactWaterfall(leadId: string): Promise<ContactEnrichmentRow
       linkedin_url: person.linkedin_url ?? null,
     });
   } catch (e) {
-    // Soft-fail: write 'none' so the UI gets a clean response and the lead is
-    // retried on the next run. The real Apollo error is in the server logs.
     console.error("[runContactWaterfall]", leadId, "apollo failed:", e instanceof Error ? e.message : e);
     return writeAndReturn({
       lead_id: leadId, status: "none",
@@ -689,20 +691,12 @@ export const enrichLeadContact = createServerFn({ method: "POST" })
     return runContactWaterfall(data.lead_id);
   });
 
-// Called from ContactSection on card expand. Runs the NPPES → Apollo waterfall
-// in-process via supabaseAdmin so the browser never needs
-// VITE_SUPABASE_URL/VITE_SUPABASE_PUBLISHABLE_KEY, and we don't depend on the
-// enrich-contact edge function being deployed with its own secrets.
 export const fetchContactEnrichment = createServerFn({ method: "POST" })
   .inputValidator((input) => z.object({ lead_id: z.string().uuid() }).parse(input))
   .handler(async ({ data }): Promise<ContactEnrichmentRow> => {
     return runContactWaterfall(data.lead_id);
   });
 
-// Batch enrichment: process highest-confidence freshest leads first via the
-// in-process waterfall. Only skips leads already marked status='found' —
-// 'none' leads are retried so they get a second chance after APOLLO_API_KEY
-// is configured.
 export const batchEnrichContacts = createServerFn({ method: "POST" })
   .inputValidator((input) =>
     z.object({ limit: z.number().int().min(1).max(50).optional() }).parse(input),
@@ -710,15 +704,12 @@ export const batchEnrichContacts = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const limit = data.limit ?? 20;
 
-    // Only exclude leads that already have a confirmed contact — 'none' leads
-    // are re-attempted so they get another chance after the API key was set.
     const { data: alreadyFound } = await supabaseAdmin
       .from("contact_enrichment")
       .select("lead_id")
       .eq("status", "found");
     const foundSet = new Set((alreadyFound ?? []).map((r) => r.lead_id as string));
 
-    // Over-fetch to account for already-found leads filtered out below.
     const fetchLimit = Math.min(limit + Math.min(foundSet.size, 100), 200);
     const { data: leads, error } = await supabaseAdmin
       .from("leads")
@@ -748,7 +739,6 @@ export const batchEnrichContacts = createServerFn({ method: "POST" })
   });
 
 export const getEnrichedContactCount = createServerFn({ method: "GET" }).handler(async () => {
-  // Count only leads with a displayable contact: name present + at least phone or email.
   const [enrichRes, physRes] = await Promise.all([
     supabaseAdmin
       .from("contact_enrichment")
