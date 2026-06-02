@@ -19,6 +19,8 @@ const LEAD_LIST_COLUMNS =
   "id, source, source_external_id, source_url, title, summary, confidence, priority, hospital, specialty, territory, entities, estimated_value_usd, win_probability, competitor_incumbent, date_discovered, date_ingested, enriched, vendor_mentions, account_type, signal_type, account_id, source_contacts";
 
 export const listLeads = createServerFn({ method: "GET" }).handler(async () => {
+  // Exclude leads the user has already dismissed so a growing dismiss pile
+  // doesn't drain the fixed-size feed window.
   const { data: dismissed, error: dismissedErr } = await supabaseAdmin
     .from("lead_actions")
     .select("lead_id")
@@ -525,7 +527,7 @@ export const listLeadPhysicians = createServerFn({ method: "GET" }).handler(asyn
   }));
 });
 
-/* -------------------- Decision-maker contact enrichment -------------------- */
+/* -------------------- Decision-maker contact enrichment (Apollo) -------------------- */
 
 export interface ContactEnrichmentRow {
   lead_id: string;
@@ -540,244 +542,116 @@ export interface ContactEnrichmentRow {
 }
 
 const DECISION_MAKER_TITLES = [
-  "VP Supply Chain",
-  "Director Procurement",
-  "CMO",
-  "VP Clinical Operations",
-  "Materials Manager",
-  "Director of Surgery",
-  "CNO",
+  "Director of Point of Care Ultrasound",
+  "POCUS Director",
+  "Director of Clinical Ultrasound",
+  "Ultrasound Director",
+  "Ultrasound Program Director",
+  "Director of Imaging",
+  "Imaging Director",
+  "Clinical Engineering Director",
+  "Director of Radiology",
+  "Chief of Radiology",
+  "Ultrasound Fellowship Director",
 ];
-
-// Shared waterfall: NPPES (lead_physicians cache) → Apollo (org search) → none.
-// Runs fully in-process with supabaseAdmin + the server-side Apollo client, so
-// it does NOT depend on the enrich-contact edge function being deployed or its
-// secrets being configured. Used by both fetchContactEnrichment (on-demand,
-// card expand) and batchEnrichContacts (bulk).
-async function runContactWaterfall(leadId: string): Promise<ContactEnrichmentRow> {
-  const writeAndReturn = async (
-    row: Omit<ContactEnrichmentRow, "created_at">,
-  ): Promise<ContactEnrichmentRow> => {
-    const { data: saved, error: insErr } = await supabaseAdmin
-      .from("contact_enrichment")
-      .upsert(row, { onConflict: "lead_id" })
-      .select()
-      .single();
-    if (insErr) throw new Error(insErr.message);
-    return saved as ContactEnrichmentRow;
-  };
-
-  // Step 1: cache — only short-circuit on a confirmed contact; 'none' retries.
-  const { data: cached } = await supabaseAdmin
-    .from("contact_enrichment")
-    .select("*")
-    .eq("lead_id", leadId)
-    .maybeSingle();
-  if (cached && cached.status === "found") return cached as ContactEnrichmentRow;
-
-  // Step 2: load lead
-  const { data: lead, error: leadErr } = await supabaseAdmin
-    .from("leads")
-    .select("hospital, entities")
-    .eq("id", leadId)
-    .single();
-  if (leadErr || !lead) throw new Error("Lead not found");
-
-  // Step 3: NPPES — check lead_physicians cache first
-  type PhysJoin = {
-    physician_contacts: {
-      full_name: string;
-      credentials: string | null;
-      primary_specialty: string | null;
-      practice_phone: string | null;
-      practice_city: string | null;
-      practice_state: string | null;
-      email: string | null;
-      title: string | null;
-      linkedin_url: string | null;
-    } | null;
-  };
-  const { data: physRows } = await supabaseAdmin
-    .from("lead_physicians")
-    .select(
-      "physician_contacts(full_name, credentials, primary_specialty, practice_phone, practice_city, practice_state, email, title, linkedin_url)",
-    )
-    .eq("lead_id", leadId)
-    .limit(1);
-  const phys = (physRows as unknown as PhysJoin[] | null)?.[0]?.physician_contacts;
-  if (phys) {
-    const name =
-      [phys.full_name, phys.credentials].filter(Boolean).join(", ") || phys.full_name;
-    const physOrg =
-      [phys.practice_city, phys.practice_state].filter(Boolean).join(", ") || null;
-    return writeAndReturn({
-      lead_id: leadId,
-      status: "found",
-      name,
-      title: phys.title ?? phys.primary_specialty,
-      organization: physOrg,
-      phone: phys.practice_phone,
-      email: phys.email,
-      linkedin_url: phys.linkedin_url,
-    });
-  }
-
-  // Step 4: resolve org name from lead fields
-  const ents = (lead.entities as { hospitals?: string[]; physicians?: string[] }) ?? {};
-  const org =
-    ((lead.hospital as string | null)?.trim() || null) ??
-    (ents.hospitals?.[0]?.trim() || null) ??
-    (ents.physicians?.[0]?.trim() || null);
-
-  if (!org) {
-    return writeAndReturn({
-      lead_id: leadId, status: "none",
-      name: null, title: null, organization: null,
-      phone: null, email: null, linkedin_url: null,
-    });
-  }
-
-  // Step 5: Apollo fallback (server-side client reads APOLLO_API_KEY from env)
-  try {
-    const { apolloPeopleSearch } = await import("./apollo/client.server");
-    const res = await apolloPeopleSearch({
-      organization_name: org,
-      person_titles: DECISION_MAKER_TITLES,
-      per_page: 10,
-    });
-    const person = (res.people ?? [])[0];
-    if (!person) {
-      return writeAndReturn({
-        lead_id: leadId, status: "none",
-        name: null, title: null, organization: org,
-        phone: null, email: null, linkedin_url: null,
-      });
-    }
-    const name =
-      person.name ||
-      [person.first_name, person.last_name].filter(Boolean).join(" ") ||
-      null;
-    const phone =
-      person.phone_numbers?.[0]?.sanitized_number ??
-      person.phone_numbers?.[0]?.raw_number ??
-      null;
-    return writeAndReturn({
-      lead_id: leadId,
-      status: "found",
-      name,
-      title: person.title ?? null,
-      organization: person.organization?.name ?? org,
-      phone,
-      email: person.email ?? null,
-      linkedin_url: person.linkedin_url ?? null,
-    });
-  } catch (e) {
-    // Soft-fail: write 'none' so the UI gets a clean response and the lead is
-    // retried on the next run. The real Apollo error is in the server logs.
-    console.error("[runContactWaterfall]", leadId, "apollo failed:", e instanceof Error ? e.message : e);
-    return writeAndReturn({
-      lead_id: leadId, status: "none",
-      name: null, title: null, organization: org,
-      phone: null, email: null, linkedin_url: null,
-    });
-  }
-}
 
 export const enrichLeadContact = createServerFn({ method: "POST" })
   .inputValidator((input) => z.object({ lead_id: z.string().uuid() }).parse(input))
   .handler(async ({ data }): Promise<ContactEnrichmentRow> => {
-    return runContactWaterfall(data.lead_id);
-  });
-
-// Called from ContactSection on card expand. Runs the NPPES → Apollo waterfall
-// in-process via supabaseAdmin so the browser never needs
-// VITE_SUPABASE_URL/VITE_SUPABASE_PUBLISHABLE_KEY, and we don't depend on the
-// enrich-contact edge function being deployed with its own secrets.
-export const fetchContactEnrichment = createServerFn({ method: "POST" })
-  .inputValidator((input) => z.object({ lead_id: z.string().uuid() }).parse(input))
-  .handler(async ({ data }): Promise<ContactEnrichmentRow> => {
-    return runContactWaterfall(data.lead_id);
-  });
-
-// Batch enrichment: process highest-confidence freshest leads first via the
-// in-process waterfall. Only skips leads already marked status='found' —
-// 'none' leads are retried so they get a second chance after APOLLO_API_KEY
-// is configured.
-export const batchEnrichContacts = createServerFn({ method: "POST" })
-  .inputValidator((input) =>
-    z.object({ limit: z.number().int().min(1).max(50).optional() }).parse(input),
-  )
-  .handler(async ({ data }) => {
-    const limit = data.limit ?? 20;
-
-    // Only exclude leads that already have a confirmed contact — 'none' leads
-    // are re-attempted so they get another chance after the API key was set.
-    const { data: alreadyFound } = await supabaseAdmin
+    // 1. Cache hit?
+    const { data: cached } = await supabaseAdmin
       .from("contact_enrichment")
-      .select("lead_id")
-      .eq("status", "found");
-    const foundSet = new Set((alreadyFound ?? []).map((r) => r.lead_id as string));
+      .select("*")
+      .eq("lead_id", data.lead_id)
+      .maybeSingle();
+    if (cached && cached.status === "found") return cached as ContactEnrichmentRow;
 
-    // Over-fetch to account for already-found leads filtered out below.
-    const fetchLimit = Math.min(limit + Math.min(foundSet.size, 100), 200);
-    const { data: leads, error } = await supabaseAdmin
+    // 2. Load lead to get org name.
+    const { data: lead, error: leadErr } = await supabaseAdmin
       .from("leads")
-      .select("id")
-      .eq("enriched", true)
-      .order("confidence", { ascending: false })
-      .order("date_discovered", { ascending: false })
-      .limit(fetchLimit);
-    if (error) throw new Error(error.message);
+      .select("hospital, entities")
+      .eq("id", data.lead_id)
+      .single();
+    if (leadErr || !lead) throw new Error("Lead not found");
 
-    const toProcess = (leads ?? [])
-      .filter((l) => !foundSet.has(l.id))
-      .slice(0, limit);
+    const ents = (lead.entities as { hospitals?: string[] }) ?? {};
+    const org =
+      (lead.hospital && lead.hospital.trim()) ||
+      (ents.hospitals?.[0] && ents.hospitals[0].trim()) ||
+      null;
 
-    let enriched = 0;
-    let errors = 0;
-    for (const lead of toProcess) {
-      try {
-        const result = await runContactWaterfall(lead.id);
-        if (result.status === "found") enriched++;
-      } catch (e) {
-        errors++;
-        console.error("[batchEnrichContacts]", lead.id, e instanceof Error ? e.message : e);
-      }
+    const writeAndReturn = async (row: Omit<ContactEnrichmentRow, "created_at">) => {
+      const { data: saved, error: insErr } = await supabaseAdmin
+        .from("contact_enrichment")
+        .upsert(row, { onConflict: "lead_id" })
+        .select()
+        .single();
+      if (insErr) throw new Error(insErr.message);
+      return saved as ContactEnrichmentRow;
+    };
+
+    if (!org) {
+      return writeAndReturn({
+        lead_id: data.lead_id,
+        status: "none",
+        name: null, title: null, organization: null,
+        phone: null, email: null, linkedin_url: null,
+      });
     }
-    return { enriched, errors, total: toProcess.length };
+
+    // 3. Apollo search.
+    try {
+      const { apolloPeopleSearch } = await import("./apollo/client.server");
+      const res = await apolloPeopleSearch({
+        organization_name: org,
+        person_titles: DECISION_MAKER_TITLES,
+        per_page: 10,
+      });
+      const person = (res.people ?? [])[0];
+      if (!person) {
+        return writeAndReturn({
+          lead_id: data.lead_id, status: "none",
+          name: null, title: null, organization: org,
+          phone: null, email: null, linkedin_url: null,
+        });
+      }
+      const name =
+        person.name ||
+        [person.first_name, person.last_name].filter(Boolean).join(" ") ||
+        null;
+      const phone =
+        person.phone_numbers?.[0]?.sanitized_number ??
+        person.phone_numbers?.[0]?.raw_number ??
+        null;
+      return writeAndReturn({
+        lead_id: data.lead_id,
+        status: "found",
+        name,
+        title: person.title ?? null,
+        organization: person.organization?.name ?? org,
+        phone,
+        email: person.email ?? null,
+        linkedin_url: person.linkedin_url ?? null,
+      });
+    } catch (e) {
+      console.error("enrichLeadContact apollo failed:", e instanceof Error ? e.message : e);
+      // Do NOT cache failures — return ephemeral none so a retry can fire later.
+      return {
+        lead_id: data.lead_id, status: "none",
+        name: null, title: null, organization: org,
+        phone: null, email: null, linkedin_url: null,
+        created_at: new Date().toISOString(),
+      };
+    }
   });
 
 export const getEnrichedContactCount = createServerFn({ method: "GET" }).handler(async () => {
-  // Count only leads with a displayable contact: name present + at least phone or email.
-  const [enrichRes, physRes] = await Promise.all([
-    supabaseAdmin
-      .from("contact_enrichment")
-      .select("lead_id")
-      .eq("status", "found")
-      .not("name", "is", null)
-      .or("phone.not.is.null,email.not.is.null"),
-    supabaseAdmin
-      .from("lead_physicians")
-      .select("lead_id, physician_contacts!inner(full_name, practice_phone, email)"),
-  ]);
-  type PhysRow = {
-    lead_id: string;
-    physician_contacts: {
-      full_name: string | null;
-      practice_phone: string | null;
-      email: string | null;
-    };
-  };
-  const physIds = ((physRes.data ?? []) as unknown as PhysRow[])
-    .filter(
-      (r) =>
-        r.physician_contacts.full_name &&
-        (r.physician_contacts.practice_phone || r.physician_contacts.email),
-    )
-    .map((r) => r.lead_id);
-  const ids = new Set([
-    ...(enrichRes.data ?? []).map((r) => r.lead_id),
-    ...physIds,
-  ]);
-  return { count: ids.size };
+  const { count, error } = await supabaseAdmin
+    .from("contact_enrichment")
+    .select("lead_id", { count: "exact", head: true })
+    .eq("status", "found");
+  if (error) throw new Error(error.message);
+  return { count: count ?? 0 };
 });
+
+export { fetchContactEnrichment, batchEnrichContacts } from "./contact-enrichment.server";

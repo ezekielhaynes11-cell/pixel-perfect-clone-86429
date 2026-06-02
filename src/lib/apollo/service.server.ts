@@ -207,7 +207,15 @@ export async function apolloProspectContacts(args: {
     person_titles:
       args.titles && args.titles.length > 0
         ? args.titles
-        : ["POCUS Director", "Ultrasound Director", "Medical Director", "Chief of Radiology"],
+        : [
+            "Director of Point of Care Ultrasound",
+            "POCUS Director",
+            "Director of Clinical Ultrasound",
+            "Ultrasound Director",
+            "Director of Imaging",
+            "Clinical Engineering Director",
+            "Director of Radiology",
+          ],
     q_keywords: args.keywords,
     person_locations: loc ? [loc] : undefined,
     organization_name: accountName,
