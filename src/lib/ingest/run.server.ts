@@ -171,10 +171,55 @@ export async function runIngestion(forUserId?: string): Promise<IngestionSummary
   return summaries;
 }
 
+// Sources that are domain-pure (medical/healthcare by construction) bypass the gate.
+const GATE_BYPASS_SOURCES = new Set<string>([
+  "openfda",
+  "clinicaltrials",
+  "cms_open_payments",
+]);
+
+// Hard pre-enrichment gate: only let through items with explicit
+// medical / healthcare / hospital terminology. Prevents pop-culture and
+// general-news noise (esp. from GDELT/Reddit/Bluesky/SAM.gov) from being
+// inserted into leads or sent to the LLM for enrichment.
+const MEDICAL_GATE_TERMS = [
+  "ultrasound", "pocus", "echocard", "sonograph", "doppler",
+  "cath lab", "catheterization", "radiolog", "cardiolog", "oncolog",
+  "emergency medicine", "anesthesi", "surgical", "surgery",
+  "hospital", "health system", "healthcare", "health care",
+  "medical center", "clinic", "physician", "nurse", "patient",
+  "va medical", "va healthcare", "veterans health",
+  "imaging", "mri", "ct scan", "x-ray", "biomed",
+  "medtech", "medical device", "fda", "clinical trial",
+  "icu", "ed ", "ehr", "emr",
+];
+
+function passesMedicalGate(r: RawLead, extraTerms: string[]): boolean {
+  if (GATE_BYPASS_SOURCES.has(r.source)) return true;
+  const hay = `${r.title} ${r.raw_text} ${r.source_url ?? ""}`.toLowerCase();
+  if (MEDICAL_GATE_TERMS.some((t) => hay.includes(t))) return true;
+  return extraTerms.some((t) => t && hay.includes(t.toLowerCase()));
+}
+
 async function persistRaws(raws: RawLead[]): Promise<number> {
   if (raws.length === 0) return 0;
+  // Load active vendor/product/focus terms to extend the gate with project-specific signals.
+  let extraTerms: string[] = [];
+  try {
+    const { loadKeywords } = await import("./keywords.server");
+    const kw = await loadKeywords();
+    extraTerms = kw.all;
+  } catch (e) {
+    console.error("medical gate: keyword load failed, using built-in terms only:", e instanceof Error ? e.message : e);
+  }
+
   let inserted = 0;
+  let gated = 0;
   for (const r of raws) {
+    if (!passesMedicalGate(r, extraTerms)) {
+      gated++;
+      continue;
+    }
     const { error } = await supabaseAdmin.from("leads").insert({
       source: r.source,
       source_external_id: r.source_external_id,
@@ -190,6 +235,7 @@ async function persistRaws(raws: RawLead[]): Promise<number> {
     if (!error) inserted++;
     else if (!error.message?.includes("duplicate")) console.error("insert lead:", error.message);
   }
+  if (gated > 0) console.log(`[ingest] medical gate dropped ${gated}/${raws.length} non-medical items`);
   return inserted;
 }
 
