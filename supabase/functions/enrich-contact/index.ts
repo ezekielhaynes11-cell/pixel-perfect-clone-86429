@@ -6,16 +6,10 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 const APOLLO_BASE = "https://api.apollo.io/api/v1";
 
 const DECISION_MAKER_TITLES = [
-  "VP Supply Chain",
-  "Director Procurement",
-  "CMO",
-  "VP Clinical Operations",
-  "Materials Manager",
-  "Director of Surgery",
-  "CNO",
-  "Chief Nursing Officer",
-  "Director of Purchasing",
-  "Supply Chain Manager",
+  "Director of Point of Care Ultrasound",
+  "Director of Clinical Ultrasound",
+  "Director of Imaging",
+  "Clinical Engineering Director",
 ];
 
 const corsHeaders = {
