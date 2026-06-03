@@ -325,6 +325,9 @@ function Dashboard() {
             <FilterBar filters={filters} onChange={setFilters} hospitals={hospitals} specialties={specialties} />
 
 
+            <div className="mb-1 text-[10px] text-yellow-500 font-mono">
+              DEBUG: server={leadsQ.data?.length ?? (leadsQ.isLoading ? "loading" : "err")} | dedup={leads.length} | filtered={filtered.length} | state={leadsQ.status}
+            </div>
             <div className="mb-3 flex flex-wrap items-center gap-3">
               <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-muted-foreground">
                 {showDismissed ? "Dismissed" : "Lead Feed"}
