@@ -398,7 +398,17 @@ function Dashboard() {
               )}
             </div>
 
-            {leadsQ.isLoading ? (
+            {leadsQ.isError ? (
+              <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <div>
+                  <div className="font-semibold">Failed to load leads</div>
+                  <div className="text-destructive/80">
+                    {leadsQ.error instanceof Error ? leadsQ.error.message : "Unknown error"}
+                  </div>
+                </div>
+              </div>
+            ) : leadsQ.isLoading ? (
               <div className="space-y-3" aria-busy="true" aria-label="Loading leads">
                 {Array.from({ length: 4 }).map((_, i) => (
                   <div
