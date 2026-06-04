@@ -1,41 +1,46 @@
-## Task 1 — Production Supabase keys
 
-Current state:
-- `.env` now contains `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` (the publishable key — Supabase's modern equivalent of the anon key; safe to ship).
-- `.gitignore` no longer excludes `.env`, so the file ships to the build.
-- `vite.config.ts` uses `@lovable.dev/vite-tanstack-config`, which already injects `VITE_*` into the client bundle. No vite.config changes needed (adding plugins/define manually would break it).
-- `src/integrations/supabase/client.ts` is auto-generated and cannot be edited.
+## Plan: Insert Philips Ultrasound research accounts + Apollo sync
 
-Changes:
-1. Add `src/integrations/supabase/env-check.ts` — a tiny module that reads `import.meta.env.VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY` at module load and, if either is missing, logs a loud `console.error` banner (`[FATAL] Supabase env missing in production bundle — published site will be empty`). Import it once from `src/router.tsx` so it runs on every client boot.
-2. Verify the published bundle by `curl`ing the live JS chunk and grepping for the project ref `apaelmfluoqonmskcxjr` after the next publish.
+The uploaded PDF contains **12 priority accounts** across TX/OK/AR/LA. I'll insert all 12 as new lead rows (separate from the 8 already in the DB — these are different opportunities/contacts, e.g. *Washington Regional* is distinct from the existing *UAMS* row, *Ochsner Medical Center / Fellowship Director search* is distinct from the *Ochsner Health System* fleet row, *OU Health Tulsa / Lori Whelan* is distinct from the existing OU Health row).
 
-Note on naming: the user asked for `VITE_SUPABASE_ANON_KEY`. This project's generated client reads `VITE_SUPABASE_PUBLISHABLE_KEY` (same JWT, new Supabase naming). I will keep the publishable key as the canonical var and also mirror the value into `VITE_SUPABASE_ANON_KEY` in `.env` so both names work for any third-party code that expects the legacy name.
+### 1. Build the 12 lead inserts
 
-## Task 2 — Medical-only ingestion gate
+For each account: `source=news`, `enriched=true`, `priority` derived from score (≥8.5 high, ≥7.5 medium‑high → still `high`, otherwise `medium`), confidence = score × 10, plus `hospital`, `territory`, `signal_type`, `estimated_value_usd`, `summary`, `source_url`, `source_contacts[]`, and `entities` (hospitals/physicians/equipment/keywords).
 
-Current state:
-- All sources funnel through `persistRaws()` in `src/lib/ingest/run.server.ts`, which inserts every fetched item with `confidence: 0, enriched: false`. Enrichment (LLM) then runs over those rows.
-- `loadKeywords()` in `src/lib/ingest/keywords.server.ts` already returns a curated vendor/product/focus list (POCUS, ultrasound, cath lab, etc.) but it is only consulted during enrichment scoring — never as a hard gate.
+| # | Account | State | Score → Conf | Signal | Est. Value |
+|---|---|---|---|---|---|
+| 1 | Washington Regional Medical Center (Fayetteville) | AR | 9.5 → 95 | rfp | $450k |
+| 2 | Ben Taub Hospital (Harris Health) | TX | 9.0 → 90 | expansion | $750k |
+| 3 | Medical City Heart Hospital (Dallas, HCA) | TX | 8.5 → 85 | expansion | $600k |
+| 4 | JPS Health Network (Fort Worth) | TX | 8.5 → 85 | expansion | $700k |
+| 5 | Our Lady of the Lake Regional MC (Baton Rouge) | LA | 8.0 → 80 | expansion | $400k |
+| 6 | UT Health San Antonio / University Hospital | TX | 8.0 → 80 | rfp | $500k |
+| 7 | Texas Health Plano | TX | 7.5 → 75 | expansion | $450k |
+| 8 | Lyndon B. Johnson Hospital / O'Quinn build (Houston) | TX | 7.5 → 75 | expansion | $900k |
+| 9 | OU Health (Tulsa / OKC) — Lori Whelan POCUS | OK | 7.5 → 75 | expansion | $350k |
+| 10 | Ochsner Medical Center (New Orleans) — Fellowship Dir search | LA | 7.0 → 70 | rfp | $300k |
+| 11 | Texas Health Harris Methodist Fort Worth | TX | 7.0 → 70 | expansion | $250k |
+| 12 | Baylor Scott & White Emergency Hospital – Alliance | TX | 6.5 → 65 | expansion | $200k |
 
-Changes in `src/lib/ingest/run.server.ts`:
-1. Add a `MEDICAL_GATE` term list at module scope: `ultrasound`, `pocus`, `echocard`, `sonograph`, `cath lab`, `radiolog`, `cardiolog`, `emergency medicine`, `hospital`, `health system`, `medical center`, `clinic`, `physician`, `nurse`, `va medical`, `va healthcare`, `imaging`, `mri`, `ct scan`, `biomed`, `medtech`, plus the active vendor/product/focus terms from `loadKeywords()`.
-2. New helper `passesMedicalGate(raw: RawLead): boolean` that lowercases `title + raw_text + source_url` and returns true iff at least one term hits. Sources already known to be domain-pure (`openfda`, `clinicaltrials`, `cms_open_payments`, `nppes`) bypass the gate; the noisy sources (`gdelt*`, `reddit`, `bluesky`, `funding_rss`, `sam_gov`) are gated.
-3. In `persistRaws()`, drop any raw that fails the gate **before** the `insert` call and log a single counter per run (`gated_out: N`). This prevents both the DB write and the downstream LLM enrichment (which only fires for inserted rows).
-4. Surface the count on the returned `IngestionSummary` as an optional `gated` field so the ingest UI can show it (no schema change required).
+Named contacts on `source_contacts` (full name + title + org) include: Jennifer Carnell MD & Esmaeil Porsa MD (Ben Taub); Bruce Bowers MD, Jack Schwade MD, Andrea Daniels RN (Medical City Heart); Nicholas Saltarelli MD, Lynn Roppolo MD, Jennifer Byrd DO (JPS); Mark Laperouse MD, E.J. Kuiper (OLOL); Nilam Soni MD & Jessica Solis-McCarthy MD (UT Health SA); Lori Whelan MD (OU); Claire Harryman MD & Elizabeth Leidinger (Ochsner); Isha Puri MD & Sreenivas Gudimetla MD (THHM Fort Worth); plus the Washington Regional / UAMS EM residency stakeholders.
 
-## Task 3 — UI default confidence 50 → 75
+### 2. Execute via supabase--insert
 
-Change in `src/components/dashboard/FilterBar.tsx`:
-- `emptyFilters.minConfidence: 50` → `75`. This is the single source of truth; `src/routes/index.tsx` consumes it via `useState<Filters>(emptyFilters)`.
+One `INSERT INTO leads (...) VALUES (...), (...), ...` statement with all 12 rows. After it lands I'll run a `SELECT` to confirm `count = 12` and show the new rows.
 
-## Verification
+### 3. Apollo "sync"
 
-- Build: rely on the harness's auto build.
-- Manual: publish → curl the live HTML/JS for the project ref; open `/` and confirm the slider shows 75% by default; trigger an ingestion run from the admin UI and check `ingestion_runs.fetched_count` vs `new_count` to confirm gating drops are visible.
+The codebase already wires Apollo via `backfillApolloForLinkedPhysicians` (see `src/lib/apollo/service.server.ts`, daily‑cap‑guarded by `tryConsumeApolloCall`) and runs it automatically at the end of every ingestion run. For these manually‑inserted leads it does NOT auto‑trigger, so I will:
 
-## Out of scope
+- Insert each named contact into `lead_physicians` (rawName/state/role_hint) using `attachPhysiciansToLead` semantics, then call `backfillApolloForLinkedPhysicians({ limit: 50 })` via a one‑off server invocation against the existing `APOLLO_API_KEY` secret (already in Lovable Cloud secrets).
+- Report Apollo usage (`getApolloUsage`) and per‑contact enrichment result counts.
 
-- No deletion of existing low-confidence rows (the UI filter hides them at 75%; user can purge later if desired).
-- No changes to enrichment prompts or Apollo logic.
-- No schema migrations.
+### Verification (what I'll show you at the end)
+- `SELECT count(*)` of new rows = 12.
+- Table of the 12 new leads: hospital / confidence / signal_type / estimated_value_usd / contact count.
+- Apollo backfill summary: contacts attempted, enriched, skipped, daily‑cap remaining.
+
+### Out of scope
+- No schema changes, no edits to the ingestion gate or UI defaults (those changes from the previous turn remain).
+- No deletion of older low‑confidence rows.
+- No re‑run of the public news ingestion pipeline.
