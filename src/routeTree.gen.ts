@@ -14,6 +14,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as SettingsKeywordsRouteImport } from './routes/settings.keywords'
 import { Route as AccountsIdRouteImport } from './routes/accounts.$id'
 import { Route as ApiPublicIngestRouteImport } from './routes/api/public/ingest'
+import { Route as ApiPublicApolloSyncAccountsRouteImport } from './routes/api/public/apollo-sync-accounts'
 
 const PipelineRoute = PipelineRouteImport.update({
   id: '/pipeline',
@@ -40,12 +41,19 @@ const ApiPublicIngestRoute = ApiPublicIngestRouteImport.update({
   path: '/api/public/ingest',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicApolloSyncAccountsRoute =
+  ApiPublicApolloSyncAccountsRouteImport.update({
+    id: '/api/public/apollo-sync-accounts',
+    path: '/api/public/apollo-sync-accounts',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/pipeline': typeof PipelineRoute
   '/accounts/$id': typeof AccountsIdRoute
   '/settings/keywords': typeof SettingsKeywordsRoute
+  '/api/public/apollo-sync-accounts': typeof ApiPublicApolloSyncAccountsRoute
   '/api/public/ingest': typeof ApiPublicIngestRoute
 }
 export interface FileRoutesByTo {
@@ -53,6 +61,7 @@ export interface FileRoutesByTo {
   '/pipeline': typeof PipelineRoute
   '/accounts/$id': typeof AccountsIdRoute
   '/settings/keywords': typeof SettingsKeywordsRoute
+  '/api/public/apollo-sync-accounts': typeof ApiPublicApolloSyncAccountsRoute
   '/api/public/ingest': typeof ApiPublicIngestRoute
 }
 export interface FileRoutesById {
@@ -61,6 +70,7 @@ export interface FileRoutesById {
   '/pipeline': typeof PipelineRoute
   '/accounts/$id': typeof AccountsIdRoute
   '/settings/keywords': typeof SettingsKeywordsRoute
+  '/api/public/apollo-sync-accounts': typeof ApiPublicApolloSyncAccountsRoute
   '/api/public/ingest': typeof ApiPublicIngestRoute
 }
 export interface FileRouteTypes {
@@ -70,6 +80,7 @@ export interface FileRouteTypes {
     | '/pipeline'
     | '/accounts/$id'
     | '/settings/keywords'
+    | '/api/public/apollo-sync-accounts'
     | '/api/public/ingest'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -77,6 +88,7 @@ export interface FileRouteTypes {
     | '/pipeline'
     | '/accounts/$id'
     | '/settings/keywords'
+    | '/api/public/apollo-sync-accounts'
     | '/api/public/ingest'
   id:
     | '__root__'
@@ -84,6 +96,7 @@ export interface FileRouteTypes {
     | '/pipeline'
     | '/accounts/$id'
     | '/settings/keywords'
+    | '/api/public/apollo-sync-accounts'
     | '/api/public/ingest'
   fileRoutesById: FileRoutesById
 }
@@ -92,6 +105,7 @@ export interface RootRouteChildren {
   PipelineRoute: typeof PipelineRoute
   AccountsIdRoute: typeof AccountsIdRoute
   SettingsKeywordsRoute: typeof SettingsKeywordsRoute
+  ApiPublicApolloSyncAccountsRoute: typeof ApiPublicApolloSyncAccountsRoute
   ApiPublicIngestRoute: typeof ApiPublicIngestRoute
 }
 
@@ -132,6 +146,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicIngestRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/apollo-sync-accounts': {
+      id: '/api/public/apollo-sync-accounts'
+      path: '/api/public/apollo-sync-accounts'
+      fullPath: '/api/public/apollo-sync-accounts'
+      preLoaderRoute: typeof ApiPublicApolloSyncAccountsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -140,18 +161,9 @@ const rootRouteChildren: RootRouteChildren = {
   PipelineRoute: PipelineRoute,
   AccountsIdRoute: AccountsIdRoute,
   SettingsKeywordsRoute: SettingsKeywordsRoute,
+  ApiPublicApolloSyncAccountsRoute: ApiPublicApolloSyncAccountsRoute,
   ApiPublicIngestRoute: ApiPublicIngestRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
