@@ -82,11 +82,13 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
         }
       }
     } catch (e) {
+      // Log the real error; show the user a safe, friendly fallback.
+      console.error("[copilot] request failed:", e);
       setMessages((prev) => {
         const next = [...prev];
         const last = next[next.length - 1];
         if (last?.role === "assistant") {
-          last.content = `⚠️ ${e instanceof Error ? e.message : "Copilot failed"}`;
+          last.content = "⚠️ Something went wrong reaching the Copilot. Please try again.";
         }
         return next;
       });

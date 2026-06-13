@@ -186,6 +186,30 @@ interface ToolArgs {
 
 }
 
+// The `confidence` column is an integer on a 0–100 scale, but the model often
+// passes a 0–1 fraction (e.g. 0.7 for "high confidence"). Coerce to an integer
+// on the 0–100 scale, rounding and clamping, so we never send a float to the
+// SQL integer parameter (which throws "invalid input syntax for type integer").
+function coerceConfidence(v: unknown): number | null {
+  if (v == null) return null;
+  let n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) return null;
+  if (n > 0 && n <= 1) n = n * 100; // 0.7 -> 70
+  n = Math.round(n);
+  return Math.min(100, Math.max(0, n));
+}
+
+// Map raw DB/SQL errors to a friendly, user-safe message while logging the real
+// one server-side. Never surface raw database errors to the user.
+function friendlyToolError(name: string, err: unknown): { error: string } {
+  const raw = err instanceof Error ? err.message : String(err);
+  console.error(`[copilot tool ${name}] failed:`, raw);
+  return {
+    error:
+      "I couldn't complete that lookup just now. Try rephrasing or narrowing your request.",
+  };
+}
+
 export async function runCopilotTool(name: string, args: Record<string, unknown>): Promise<unknown> {
   switch (name) {
     case "query_leads": {
@@ -199,7 +223,8 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
       if (a.signal_type) q = q.eq("signal_type", a.signal_type);
       if (a.source) q = q.eq("source", a.source);
       if (a.account_type) q = q.eq("account_type", a.account_type);
-      if (a.min_confidence != null) q = q.gte("confidence", a.min_confidence);
+      const minConf = coerceConfidence(a.min_confidence);
+      if (minConf != null) q = q.gte("confidence", minConf);
       if (a.days_back != null) {
         const since = new Date(Date.now() - a.days_back * 86400000).toISOString();
         q = q.gte("date_discovered", since);
@@ -222,7 +247,7 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
         }
       }
       const { data, error } = await q;
-      if (error) return { error: error.message };
+      if (error) return friendlyToolError(name, error);
       let rows = data ?? [];
       if (a.vendor) {
         const needle = a.vendor.toLowerCase();
@@ -243,7 +268,7 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
       if (a.is_va != null) q = q.eq("is_va", a.is_va);
       if (a.name_contains) q = q.ilike("name", `%${a.name_contains}%`);
       const { data, error } = await q;
-      if (error) return { error: error.message };
+      if (error) return friendlyToolError(name, error);
       return { count: data?.length ?? 0, accounts: data ?? [] };
     }
     case "query_physicians": {
@@ -262,7 +287,7 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
           .select("id, title")
           .or(`territory.ilike.%${name}%,territory.ilike.%${code}%`)
           .limit(500);
-        if (leadErr) return { error: leadErr.message };
+        if (leadErr) return friendlyToolError(name, leadErr);
         const leadIds = (leadRows ?? []).map((r) => r.id);
         const leadTitleById = new Map((leadRows ?? []).map((r) => [r.id, r.title as string]));
         if (leadIds.length === 0) return { count: 0, physicians: [] };
@@ -271,7 +296,7 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
           .select("npi, lead_id")
           .in("lead_id", leadIds)
           .limit(2000);
-        if (lpErr) return { error: lpErr.message };
+        if (lpErr) return friendlyToolError(name, lpErr);
         leadNpiSet = new Set<string>();
         for (const r of lp ?? []) {
           leadNpiSet.add(r.npi);
@@ -293,7 +318,7 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
       if (a.has_email) q = q.not("email", "is", null);
       if (leadNpiSet) q = q.in("npi", Array.from(leadNpiSet).slice(0, 1000));
       const { data, error } = await q;
-      if (error) return { error: error.message };
+      if (error) return friendlyToolError(name, error);
       let rows = data ?? [];
       if (a.role_hint_contains) {
         const { data: lp } = await supabaseAdmin
@@ -319,7 +344,7 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      if (error) return { error: error.message };
+      if (error) return friendlyToolError(name, error);
       if (!data) return { exists: false };
       return { exists: true, brief: data };
     }
@@ -376,7 +401,7 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
         .is("apollo_enriched_at", null)
         .order("last_verified_at", { ascending: false })
         .limit(limit);
-      if (error) return { error: error.message };
+      if (error) return friendlyToolError(name, error);
       const targets = rows ?? [];
       let matched = 0;
       let errors = 0;

@@ -336,8 +336,10 @@ export const getPipelineForecast = createServerFn({ method: "GET" }).handler(asy
       .select(
         "id, title, hospital, specialty, confidence, estimated_value_usd, win_probability, date_discovered, source",
       )
+      // Same base set as the dashboard feed (listLeads): enriched leads minus
+      // dismissed ones. This keeps "Open qualified leads" reconciled with the
+      // feed count rather than diverging via a separate confidence cut.
       .eq("enriched", true)
-      .gte("confidence", 60)
       .limit(500),
     supabaseAdmin.from("lead_actions").select("lead_id, action").eq("user_id", OWNER_ID),
   ]);
@@ -348,8 +350,19 @@ export const getPipelineForecast = createServerFn({ method: "GET" }).handler(asy
   );
   const open = (leadsRes.data ?? []).filter((l) => !dismissed.has(l.id));
 
+  // Effective win probability (0–1). win_probability is frequently NULL in the
+  // data, which previously zeroed out the entire weighted pipeline (so the
+  // "Weighted Pipeline by Specialty" chart rendered axes but no bars). Fall back
+  // to a confidence-derived estimate so the weighting is always populated.
+  const winProb = (l: (typeof open)[number]) => {
+    const wp = Number(l.win_probability);
+    if (Number.isFinite(wp) && wp > 0) return Math.min(1, wp);
+    const conf = Number(l.confidence);
+    return Number.isFinite(conf) && conf > 0 ? Math.min(1, conf / 100) : 0;
+  };
+
   const weighted = (l: (typeof open)[number]) =>
-    (Number(l.estimated_value_usd) || 0) * (Number(l.win_probability) || 0);
+    (Number(l.estimated_value_usd) || 0) * winProb(l);
 
   const totalWeighted = open.reduce((s, l) => s + weighted(l), 0);
   const avgConfidence =
@@ -363,7 +376,7 @@ export const getPipelineForecast = createServerFn({ method: "GET" }).handler(asy
   for (const l of open) {
     const sp = l.specialty ?? "Unspecified";
     bySpecialty[sp] = (bySpecialty[sp] ?? 0) + weighted(l);
-    const h = l.hospital ?? "Unknown";
+    const h = l.hospital?.trim() || "Hospital not identified";
     byHospital[h] = (byHospital[h] ?? 0) + weighted(l);
     const wk = new Date(l.date_discovered);
     wk.setUTCDate(wk.getUTCDate() - wk.getUTCDay());
@@ -372,7 +385,7 @@ export const getPipelineForecast = createServerFn({ method: "GET" }).handler(asy
   }
 
   const topLeads = open
-    .map((l) => ({ ...l, weighted: weighted(l) }))
+    .map((l) => ({ ...l, win_probability: winProb(l), weighted: weighted(l) }))
     .sort((a, b) => b.weighted - a.weighted)
     .slice(0, 12);
 

@@ -5,7 +5,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { RefreshCw, Bookmark, BarChart3, AlertCircle, EyeOff, Eye, XCircle, RotateCcw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { listLeads, triggerIngestionForSource, setLeadAction, listLeadActions, getRecentIngestionRuns, listLeadPhysicians, bulkSetLeadAction, getEnrichedContactCount, INGESTION_SOURCES, type LeadPhysician } from "@/lib/leads.functions";
-import { rowToLead, leadStateCode, leadIsHighPriority, type Lead, type LeadRow } from "@/data/leads";
+import { rowToLead, leadStateCode, leadIsHighPriority, isDiscoveredToday, type Lead, type LeadRow } from "@/data/leads";
+import { isLikelyNonEnglish, leadDedupeKey } from "@/lib/lead-clean";
 import { SummaryCard } from "@/components/dashboard/SummaryCard";
 import { FilterBar, emptyFilters, type Filters } from "@/components/dashboard/FilterBar";
 import { LeadCard } from "@/components/dashboard/LeadCard";
@@ -144,17 +145,21 @@ function Dashboard() {
 
   const leads: Lead[] = useMemo(
     () => {
-      const mapped = (leadsQ.data ?? []).map((r) => rowToLead(r as LeadRow));
+      const mapped = (leadsQ.data ?? [])
+        .map((r) => rowToLead(r as LeadRow))
+        // Hide non-English items (e.g. the German Siemens Healthineers listing).
+        .filter((l) => !isLikelyNonEnglish(`${l.title} ${l.summary}`));
       // Dedupe by normalized headline AND by source_url, keep highest confidence (tiebreak newest).
       const better = (a: Lead, b: Lead) =>
         a.confidence !== b.confidence
           ? a.confidence > b.confidence
           : new Date(a.dateDiscovered).getTime() > new Date(b.dateDiscovered).getTime();
       const byKey = new Map<string, Lead>();
-      const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
       for (const l of mapped) {
-        const keys = [`t:${norm(l.title)}`];
-        if (l.sourceUrl) keys.push(`u:${l.sourceUrl}`);
+        // Signature key collapses near-duplicate recall listings that differ
+        // only by recall number/class; URL key collapses exact re-ingests.
+        const keys = [`t:${leadDedupeKey(l.title)}`];
+        if (l.sourceUrl && l.sourceUrl !== "#") keys.push(`u:${l.sourceUrl}`);
         const existing = keys.map((k) => byKey.get(k)).find(Boolean);
         if (!existing || better(l, existing)) {
           for (const k of keys) byKey.set(k, l);
@@ -215,11 +220,15 @@ function Dashboard() {
     [visibleLeads, filters, showOld, showAllTerritories, AGE_FILTER_MS],
   );
 
+  const discoveredToday = activeLeads.filter((l) => isDiscoveredToday(l.dateDiscovered)).length;
   const highPriority = activeLeads.filter(leadIsHighPriority).length;
-  const pipelineUsd = activeLeads.reduce(
-    (s, l) => s + (l.estimatedValueUsd ?? 0) * (l.winProbability ?? 0),
-    0,
-  );
+
+  // Honest label for the feed section: only call it "Discovered today" when
+  // every shown lead is actually dated today, otherwise describe the real range.
+  const feedLabel =
+    filtered.length > 0 && filtered.every((l) => isDiscoveredToday(l.dateDiscovered))
+      ? "Discovered today"
+      : "Recent leads";
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -285,7 +294,7 @@ function Dashboard() {
       </header>
 
       <main className="mx-auto max-w-[1600px] px-6 py-6">
-        <SummaryCard total={activeLeads.length} highPriority={highPriority} />
+        <SummaryCard total={discoveredToday} highPriority={highPriority} />
 
         {(() => {
           const last = (runsQ.data ?? [])[0];
@@ -327,7 +336,7 @@ function Dashboard() {
 
             <div className="mb-3 flex flex-wrap items-center gap-3">
               <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                {showDismissed ? "Dismissed" : "Lead Feed"}
+                {showDismissed ? "Dismissed" : feedLabel}
                 <span className="ml-2 rounded-full bg-surface-2 px-2 py-0.5 text-xs text-foreground">
                   {filtered.length}
                 </span>

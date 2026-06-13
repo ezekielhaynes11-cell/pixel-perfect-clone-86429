@@ -203,7 +203,7 @@ export function LeadCard({
             Dismiss
           </button>
         )}
-        {lead.accountId && (
+        {lead.accountId ? (
           <Link
             to="/accounts/$id"
             params={{ id: lead.accountId }}
@@ -212,6 +212,16 @@ export function LeadCard({
             <Building2 className="h-3.5 w-3.5" />
             View account
           </Link>
+        ) : (
+          <button
+            type="button"
+            disabled
+            title="No linked account for this lead"
+            className="flex h-8 cursor-not-allowed items-center gap-1.5 rounded-sm border border-border px-3 text-xs text-muted-foreground opacity-50"
+          >
+            <Building2 className="h-3.5 w-3.5" />
+            View account
+          </button>
         )}
         <a
           href={lead.sourceUrl}

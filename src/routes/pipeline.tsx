@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import { getPipelineForecast } from "@/lib/leads.functions";
 import { formatUsd } from "@/data/leads";
+import { cleanLeadTitle, cleanHospital } from "@/lib/lead-clean";
 
 export const Route = createFileRoute("/pipeline")({
   head: () => ({ meta: [{ title: "Pipeline forecast — Yield Architect" }] }),
@@ -52,9 +53,19 @@ function PipelinePage() {
             </div>
 
             <Panel title="Weighted pipeline by specialty">
+              {(() => {
+                const chartData = (d.bySpecialty ?? []).filter((s) => s.value > 0).slice(0, 8);
+                if (chartData.length === 0) {
+                  return (
+                    <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+                      No weighted pipeline to chart yet. Refresh the feed to pull qualified leads.
+                    </div>
+                  );
+                }
+                return (
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={d.bySpecialty.slice(0, 8)}>
+                  <BarChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
                     <XAxis dataKey="name" stroke="var(--color-muted-foreground)" fontSize={11} />
                     <YAxis stroke="var(--color-muted-foreground)" fontSize={11} tickFormatter={(v) => formatUsd(v)} />
@@ -71,6 +82,8 @@ function PipelinePage() {
                   </BarChart>
                 </ResponsiveContainer>
               </div>
+                );
+              })()}
             </Panel>
 
             <Panel title="Top weighted opportunities">
@@ -89,8 +102,8 @@ function PipelinePage() {
                   <tbody>
                     {d.topLeads.map((l) => (
                       <tr key={l.id} className="border-b border-border/50 hover:bg-surface-2">
-                        <td className="py-2 pr-3 font-medium">{l.title}</td>
-                        <td className="py-2 pr-3 text-foreground/80">{l.hospital ?? "—"}</td>
+                        <td className="py-2 pr-3 font-medium">{cleanLeadTitle(l.title)}</td>
+                        <td className="py-2 pr-3 text-foreground/80">{l.hospital ? cleanHospital(l.hospital) : "—"}</td>
                         <td className="py-2 pr-3 text-foreground/80">{l.specialty ?? "—"}</td>
                         <td className="py-2 pr-3 text-right tabular-nums">{formatUsd(l.estimated_value_usd)}</td>
                         <td className="py-2 pr-3 text-right tabular-nums">
