@@ -2,6 +2,8 @@
 // Real lead rows now come from Lovable Cloud (see useLeads); this file no
 // longer ships mock data.
 
+import { cleanLeadTitle, cleanHospital } from "@/lib/lead-clean";
+
 export type LeadSource =
   | "sam_gov"
   | "openfda"
@@ -87,13 +89,13 @@ export function rowToLead(r: LeadRow): Lead {
     : [];
   return {
     id: r.id,
-    title: r.title,
+    title: cleanLeadTitle(r.title),
     summary: r.summary ?? "",
     source: (r.source as LeadSource) ?? "news",
     sourceUrl: r.source_url ?? "#",
     confidence: r.confidence,
     dateDiscovered: r.date_discovered,
-    hospital: r.hospital,
+    hospital: cleanHospital(r.hospital),
     specialty: r.specialty,
     territory: r.territory,
     estimatedValueUsd: r.estimated_value_usd,
@@ -138,12 +140,26 @@ export function leadStateCode(lead: Lead): "TX" | "OK" | "AR" | "LA" | null {
   return null;
 }
 
+// High priority is a deliberately tight subset: high-confidence leads that also
+// carry a concrete buying signal (recall/RFP) or material estimated value. This
+// keeps the "High Priority" headline meaningful instead of flagging ~all leads.
 export function leadIsHighPriority(l: Lead): boolean {
-  if (l.confidence >= 75) return true;
-  if ((l.estimatedValueUsd ?? 0) >= 50_000) return true;
-  if (l.source === "openfda" || l.source === "sam_gov") return true;
-  if (l.accountId) return true;
+  if (l.confidence < 85) return false;
+  if (l.signalType === "recall" || l.signalType === "rfp") return true;
+  if ((l.estimatedValueUsd ?? 0) >= 250_000) return true;
   return false;
+}
+
+// True when a lead was discovered on the current local calendar day.
+export function isDiscoveredToday(iso: string): boolean {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return false;
+  const now = new Date();
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
 }
 
 export function leadHospital(l: Lead): string | null {

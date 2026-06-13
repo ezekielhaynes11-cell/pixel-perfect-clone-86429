@@ -68,7 +68,10 @@ export const copilotChat = createServerFn({ method: "POST" })
           yield { type: "error", message: "AI credits exhausted. Top up in Settings → Workspace → Usage." } as const;
           return;
         }
-        throw new Error(`AI gateway ${res.status}: ${body}`);
+        // Log the raw gateway response server-side; show the user a safe message.
+        console.error(`[copilot] AI gateway ${res.status}:`, body);
+        yield { type: "error", message: "The Copilot is temporarily unavailable. Please try again in a moment." } as const;
+        return;
       }
       const json = (await res.json()) as {
         choices?: { message?: { content?: string | null; tool_calls?: ChatMsg["tool_calls"] } }[];
