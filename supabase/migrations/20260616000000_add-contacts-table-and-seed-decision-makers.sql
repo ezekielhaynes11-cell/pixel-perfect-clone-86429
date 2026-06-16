@@ -95,7 +95,12 @@ select
   (select ln.id from lead_norm ln
      where length(ln.nh) > 3
        and (position(ln.nh in vn.na) > 0 or position(vn.na in ln.nh) > 0)
-     order by length(ln.nh) desc
+     -- Prefer an exact normalized match, then the closest-length (tightest)
+     -- containment, so a short account name like "University Hospital" can't
+     -- mis-link to a longer unrelated lead that merely contains the phrase.
+     order by (ln.nh = vn.na) desc,
+              abs(length(ln.nh) - length(vn.na)) asc,
+              length(ln.nh) asc
      limit 1) as lead_id,
   'manual_seed'
 from v_norm vn
