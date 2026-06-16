@@ -538,6 +538,42 @@ export const listLeadPhysicians = createServerFn({ method: "GET" }).handler(asyn
   }));
 });
 
+/* -------------------- Manually-sourced contacts (contacts table) -------------------- */
+
+export interface ManualContact {
+  id: string;
+  account_name: string;
+  contact_name: string | null;
+  title: string | null;
+  alt_contact: string | null;
+  direct_phone: string | null;
+  department_phone: string | null;
+  email: string | null;
+  alt_email: string | null;
+  email_domain_standard: string | null;
+  facility_address: string | null;
+  needs_manual_sourcing: boolean;
+  source: string;
+}
+
+const MANUAL_CONTACT_COLUMNS =
+  "id, account_name, contact_name, title, alt_contact, direct_phone, department_phone, email, alt_email, email_domain_standard, facility_address, needs_manual_sourcing, source";
+
+// Decision-maker contacts seeded into the `contacts` table and linked to a lead.
+// Surfaced in the lead's contact panel alongside source_contacts and physicians.
+export const listLeadContacts = createServerFn({ method: "POST" })
+  .inputValidator((input) => z.object({ lead_id: z.string().uuid() }).parse(input))
+  .handler(async ({ data }): Promise<ManualContact[]> => {
+    const { data: rows, error } = await supabaseAdmin
+      .from("contacts")
+      .select(MANUAL_CONTACT_COLUMNS)
+      .eq("lead_id", data.lead_id)
+      .order("needs_manual_sourcing", { ascending: true })
+      .order("contact_name", { ascending: true, nullsFirst: false });
+    if (error) throw new Error(error.message);
+    return (rows ?? []) as ManualContact[];
+  });
+
 /* -------------------- Decision-maker contact enrichment (Apollo) -------------------- */
 
 export interface ContactEnrichmentRow {

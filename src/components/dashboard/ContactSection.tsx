@@ -13,10 +13,11 @@ import {
   CheckCircle2,
   Loader2,
   XCircle,
+  Sparkles,
 } from "lucide-react";
 import type { LeadContact } from "@/data/leads";
-import type { LeadPhysician, ContactEnrichmentRow } from "@/lib/leads.functions";
-import { fetchContactEnrichment } from "@/lib/leads.functions";
+import type { LeadPhysician, ManualContact } from "@/lib/leads.functions";
+import { fetchContactEnrichment, listLeadContacts } from "@/lib/leads.functions";
 
 interface UnifiedContact {
   key: string;
@@ -28,6 +29,13 @@ interface UnifiedContact {
   address: string | null;
   linkedin_url?: string | null;
   origin: string;
+  // True when this record should surface an "Enrich with Apollo" CTA:
+  // it was flagged for manual sourcing, or it has no institutional email yet.
+  needsApollo?: boolean;
+  // True when `email` actually holds a standardized domain (e.g. "@ochsner.org")
+  // used as a fallback because no concrete email is on file. Rendered as plain
+  // text rather than a mailto: link.
+  emailIsFallback?: boolean;
 }
 
 function physicianToContact(p: LeadPhysician): UnifiedContact {
@@ -61,30 +69,60 @@ function sourceToContact(c: LeadContact, idx: number): UnifiedContact {
   };
 }
 
-function NotAvailable() {
-  return <span className="italic text-muted-foreground/70">Not available</span>;
+function manualToContact(c: ManualContact): UnifiedContact {
+  const hasEmail = !!(c.email && c.email.trim().length > 0);
+  // Guardrail: institutional emails are preferred; the personal/alt email is
+  // intentionally NOT surfaced for outreach here — it is backup-only.
+  const emailValue = hasEmail ? c.email : (c.email_domain_standard ?? null);
+  return {
+    key: `manual:${c.id}`,
+    name: c.contact_name,
+    title: c.title,
+    organization: c.account_name,
+    phone: c.direct_phone ?? c.department_phone,
+    email: emailValue,
+    address: c.facility_address,
+    origin: "Manual seed",
+    needsApollo: c.needs_manual_sourcing || !hasEmail,
+    emailIsFallback: !hasEmail && !!c.email_domain_standard,
+  };
 }
 
 function Row({
   icon, label, value, href,
 }: {
-  icon: React.ReactNode; label: string; value: string | null | undefined; href?: string;
+  icon: React.ReactNode; label: string; value: string; href?: string;
 }) {
   return (
     <div className="flex items-start gap-2 text-xs">
       <span className="mt-0.5 text-muted-foreground [&_svg]:h-3.5 [&_svg]:w-3.5">{icon}</span>
       <span className="w-20 shrink-0 text-muted-foreground">{label}</span>
       <span className="min-w-0 flex-1 break-words text-foreground/90">
-        {value ? (
-          href ? (
-            <a href={href} className="text-primary hover:underline"
-              target={href.startsWith("http") ? "_blank" : undefined} rel="noreferrer">
-              {value}
-            </a>
-          ) : value
-        ) : <NotAvailable />}
+        {href ? (
+          <a href={href} className="text-primary hover:underline"
+            target={href.startsWith("http") ? "_blank" : undefined} rel="noreferrer">
+            {value}
+          </a>
+        ) : value}
       </span>
     </div>
+  );
+}
+
+function ApolloCTA({ onClick, loading }: { onClick: () => void; loading?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      disabled={loading}
+      className="mt-1 inline-flex items-center gap-1.5 rounded-md border border-primary/40 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-60"
+    >
+      {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+      Enrich with Apollo
+    </button>
   );
 }
 
@@ -95,14 +133,22 @@ export function ContactSection({
   physicians: LeadPhysician[];
   leadId?: string;
 }) {
+  const qc = useQueryClient();
+
+  const manualQ = useQuery({
+    queryKey: ["lead_contacts", leadId],
+    queryFn: () => listLeadContacts({ data: { lead_id: leadId! } }),
+    enabled: !!leadId,
+    staleTime: 60_000,
+  });
+
   const unified: UnifiedContact[] = [
+    ...(manualQ.data ?? []).map(manualToContact),
     ...sourceContacts.map(sourceToContact),
     ...physicians.map(physicianToContact),
   ];
   const empty = unified.length === 0;
   const [expanded, setExpanded] = useState(0);
-
-  const qc = useQueryClient();
 
   const enrichQ = useQuery({
     queryKey: ["contact_enrichment", leadId],
@@ -122,9 +168,15 @@ export function ContactSection({
   });
 
   const enrich = enrichQ.data;
-  const enrichLoading = !!(leadId && enrichQ.isLoading);
+  const enrichLoading = !!(leadId && (enrichQ.isLoading || enrichQ.isFetching));
   const enrichError  = !!(leadId && enrichQ.isError);
   const enrichFound  = enrich?.status === "found" || unified.length > 0;
+
+  // Trigger the Apollo decision-maker waterfall on demand (user-initiated only).
+  const runApollo = () => {
+    if (!leadId) return;
+    enrichQ.refetch();
+  };
 
   useEffect(() => {
     if (enrichFound) {
@@ -213,11 +265,17 @@ export function ContactSection({
       )}
 
       {empty && !enrichFound ? (
-        <ContactCard contact={null} />
+        <div className="space-y-2 px-1 py-1">
+          <p className="text-xs text-muted-foreground">
+            No decision-maker on file yet for this account.
+          </p>
+          {leadId && <ApolloCTA onClick={runApollo} loading={enrichLoading} />}
+        </div>
       ) : !empty ? (
         <ul className="space-y-2">
           {unified.map((c, i) => {
             const isOpen = i === expanded;
+            const label = c.name ?? c.title ?? "Decision-maker";
             return (
               <li key={c.key} className="rounded border border-border/40 bg-surface/40">
                 <button
@@ -225,13 +283,16 @@ export function ContactSection({
                   onClick={() => setExpanded(isOpen ? -1 : i)}
                   className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-surface-3/40"
                 >
-                  <span className="font-medium text-foreground">
-                    {c.name ?? <NotAvailable />}
-                  </span>
-                  {c.title && (
+                  <span className="font-medium text-foreground">{label}</span>
+                  {c.name && c.title && (
                     <span className="text-muted-foreground">· {c.title}</span>
                   )}
                   <span className="ml-auto flex items-center gap-2">
+                    {c.needsApollo && (
+                      <span className="rounded-full border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-warning">
+                        {c.name ? "Enrich" : "Needs sourcing"}
+                      </span>
+                    )}
                     <span className="rounded-full border border-border/50 bg-surface px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-muted-foreground">
                       {c.origin}
                     </span>
@@ -242,7 +303,11 @@ export function ContactSection({
                 </button>
                 {isOpen && (
                   <div className="border-t border-border/40 px-2 py-2">
-                    <ContactCard contact={c} />
+                    <ContactCard
+                      contact={c}
+                      onEnrich={c.needsApollo && leadId ? runApollo : undefined}
+                      enriching={enrichLoading}
+                    />
                   </div>
                 )}
               </li>
@@ -254,26 +319,42 @@ export function ContactSection({
   );
 }
 
-function ContactCard({ contact }: { contact: UnifiedContact | null }) {
+function ContactCard({
+  contact,
+  onEnrich,
+  enriching,
+}: {
+  contact: UnifiedContact | null;
+  onEnrich?: () => void;
+  enriching?: boolean;
+}) {
+  // Only render rows that actually have a value — never a stack of
+  // "Not available" placeholders. Missing details are surfaced via the
+  // "Enrich with Apollo" CTA instead.
   return (
     <div className="space-y-1.5">
-      <Row icon={<UserRound />} label="Name" value={contact?.name ?? null} />
-      <Row icon={<Briefcase />} label="Title" value={contact?.title ?? null} />
-      <Row icon={<Building2 />} label="Organization" value={contact?.organization ?? null} />
-      <Row
-        icon={<Phone />} label="Phone" value={contact?.phone ?? null}
-        href={contact?.phone ? `tel:${contact.phone}` : undefined}
-      />
-      <Row
-        icon={<Mail />} label="Email" value={contact?.email ?? null}
-        href={contact?.email ? `mailto:${contact.email}` : undefined}
-      />
-      <Row icon={<MapPin />} label="Address" value={contact?.address ?? null} />
-      {contact?.linkedin_url && (
+      {contact?.name && <Row icon={<UserRound />} label="Name" value={contact.name} />}
+      {contact?.title && <Row icon={<Briefcase />} label="Title" value={contact.title} />}
+      {contact?.organization && (
+        <Row icon={<Building2 />} label="Organization" value={contact.organization} />
+      )}
+      {contact?.phone && (
+        <Row icon={<Phone />} label="Phone" value={contact.phone} href={`tel:${contact.phone}`} />
+      )}
+      {contact?.email && (
         <Row
-          icon={<Linkedin />} label="LinkedIn" value={contact.linkedin_url}
-          href={contact.linkedin_url}
+          icon={<Mail />}
+          label={contact.emailIsFallback ? "Email domain" : "Email"}
+          value={contact.email}
+          href={contact.emailIsFallback ? undefined : `mailto:${contact.email}`}
         />
+      )}
+      {contact?.address && <Row icon={<MapPin />} label="Address" value={contact.address} />}
+      {contact?.linkedin_url && (
+        <Row icon={<Linkedin />} label="LinkedIn" value={contact.linkedin_url} href={contact.linkedin_url} />
+      )}
+      {onEnrich && (contact?.needsApollo || !contact) && (
+        <ApolloCTA onClick={onEnrich} loading={enriching} />
       )}
     </div>
   );

@@ -208,6 +208,68 @@ export type Database = {
         }
         Relationships: []
       }
+      contacts: {
+        Row: {
+          account_name: string
+          alt_contact: string | null
+          alt_email: string | null
+          contact_name: string | null
+          created_at: string
+          department_phone: string | null
+          direct_phone: string | null
+          email: string | null
+          email_domain_standard: string | null
+          facility_address: string | null
+          id: string
+          lead_id: string | null
+          needs_manual_sourcing: boolean
+          source: string
+          title: string | null
+        }
+        Insert: {
+          account_name: string
+          alt_contact?: string | null
+          alt_email?: string | null
+          contact_name?: string | null
+          created_at?: string
+          department_phone?: string | null
+          direct_phone?: string | null
+          email?: string | null
+          email_domain_standard?: string | null
+          facility_address?: string | null
+          id?: string
+          lead_id?: string | null
+          needs_manual_sourcing?: boolean
+          source?: string
+          title?: string | null
+        }
+        Update: {
+          account_name?: string
+          alt_contact?: string | null
+          alt_email?: string | null
+          contact_name?: string | null
+          created_at?: string
+          department_phone?: string | null
+          direct_phone?: string | null
+          email?: string | null
+          email_domain_standard?: string | null
+          facility_address?: string | null
+          id?: string
+          lead_id?: string | null
+          needs_manual_sourcing?: boolean
+          source?: string
+          title?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contacts_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ingestion_runs: {
         Row: {
           enriched_count: number
