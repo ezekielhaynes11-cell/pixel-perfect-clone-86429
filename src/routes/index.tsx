@@ -7,11 +7,11 @@ import {
   Bookmark,
   BarChart3,
   AlertCircle,
-  EyeOff,
-  Eye,
   XCircle,
   RotateCcw,
   Sparkles,
+  SlidersHorizontal,
+  MoreHorizontal,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -45,6 +45,15 @@ import { OutreachDraftDialog } from "@/components/dashboard/OutreachDraftDialog"
 import { SavedSearchesDrawer } from "@/components/dashboard/SavedSearchesDrawer";
 import { AlertsBell } from "@/components/dashboard/AlertsBell";
 import { CopilotPanel } from "@/components/dashboard/CopilotPanel";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -70,6 +79,8 @@ function Dashboard() {
   const [showDismissed, setShowDismissed] = useState(false);
   const [showOld, setShowOld] = useState(false);
   const [showAllTerritories, setShowAllTerritories] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [showInsights, setShowInsights] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const qc = useQueryClient();
   const fetchLeads = useServerFn(listLeads);
@@ -348,18 +359,6 @@ function Dashboard() {
               </div>
             );
           })()}
-          <Link
-            to="/pipeline"
-            className="hidden items-center gap-1.5 rounded-md border border-border bg-surface-2 px-3 py-1.5 text-xs font-medium text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground md:flex"
-          >
-            <BarChart3 className="h-3.5 w-3.5" /> Pipeline
-          </Link>
-          <button
-            onClick={() => setSearchesOpen(true)}
-            className="hidden items-center gap-1.5 rounded-md border border-border bg-surface-2 px-3 py-1.5 text-xs font-medium text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground md:flex"
-          >
-            <Bookmark className="h-3.5 w-3.5" /> Saved
-          </button>
           <button
             onClick={() => setCopilotOpen(true)}
             className="flex items-center gap-1.5 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20"
@@ -371,11 +370,36 @@ function Dashboard() {
           <button
             onClick={() => ingest.mutate()}
             disabled={ingest.isPending}
-            className="flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+            aria-label="Refresh feed"
+            title={ingest.isPending ? "Scanning…" : "Refresh feed"}
+            className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${ingest.isPending ? "animate-spin" : ""}`} />
-            {ingest.isPending ? "Scanning…" : "Refresh feed"}
+            <RefreshCw className={`h-4 w-4 ${ingest.isPending ? "animate-spin" : ""}`} />
           </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label="More"
+                title="More"
+                className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-surface-2 text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44 border-border bg-surface">
+              <DropdownMenuItem asChild>
+                <Link to="/pipeline">
+                  <BarChart3 className="h-4 w-4" />
+                  Pipeline
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setSearchesOpen(true)}>
+                <Bookmark className="h-4 w-4" />
+                Saved
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 
@@ -427,42 +451,71 @@ function Dashboard() {
             />
 
             <div className="mb-3 flex flex-wrap items-center gap-3">
-              <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+              <h2 className="flex shrink-0 items-center font-display text-sm font-semibold uppercase tracking-wider text-muted-foreground">
                 {showDismissed ? "Dismissed" : feedLabel}
                 <span className="ml-2 rounded-full bg-surface-2 px-2 py-0.5 text-xs text-foreground">
                   {filtered.length}
                 </span>
               </h2>
-              <button
-                onClick={() => {
-                  setShowDismissed((v) => !v);
-                  setSelected(new Set());
-                }}
-                className="flex h-7 items-center gap-1.5 rounded-sm border border-border bg-surface-2 px-2.5 text-[11px] font-medium text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground"
-                title={showDismissed ? "Back to active feed" : "View dismissed leads"}
-              >
-                {showDismissed ? (
-                  <Eye className="h-3.5 w-3.5" />
-                ) : (
-                  <EyeOff className="h-3.5 w-3.5" />
-                )}
-                {showDismissed ? "Show active" : `Show dismissed (${dismissedLeads.length})`}
-              </button>
-              <button
-                onClick={() => setShowOld((v) => !v)}
-                className={`flex h-7 items-center gap-1.5 rounded-sm border px-2.5 text-[11px] font-medium transition-colors ${showOld ? "border-primary/50 bg-primary/10 text-primary" : "border-border bg-surface-2 text-foreground/80 hover:bg-surface-3"}`}
-                title="Include leads older than 365 days"
-              >
-                {showOld ? "Hide older leads" : "Show older leads"}
-              </button>
-              <button
-                onClick={() => setShowAllTerritories((v) => !v)}
-                className={`flex h-7 items-center gap-1.5 rounded-sm border px-2.5 text-[11px] font-medium transition-colors ${showAllTerritories ? "border-primary/50 bg-primary/10 text-primary" : "border-border bg-surface-2 text-foreground/80 hover:bg-surface-3"}`}
-                title="Include leads outside OK · AR · LA · TX"
-              >
-                {showAllTerritories ? "Territory: TX/OK/AR/LA" : "Show all territories"}
-              </button>
-              {filtered.length > 0 && (
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="View options"
+                    title="View options"
+                    className="flex h-7 shrink-0 items-center gap-1.5 rounded-sm border border-border bg-surface-2 px-2.5 text-[11px] font-medium text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground"
+                  >
+                    <SlidersHorizontal className="h-3.5 w-3.5" />
+                    View options
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-60 border-border bg-surface">
+                  <DropdownMenuLabel className="text-muted-foreground">
+                    View options
+                  </DropdownMenuLabel>
+                  <DropdownMenuCheckboxItem
+                    checked={showDismissed}
+                    onCheckedChange={() => {
+                      setShowDismissed((v) => !v);
+                      setSelected(new Set());
+                    }}
+                    onSelect={(e) => e.preventDefault()}
+                  >
+                    Show dismissed ({dismissedLeads.length})
+                  </DropdownMenuCheckboxItem>
+                  <DropdownMenuCheckboxItem
+                    checked={showOld}
+                    onCheckedChange={() => setShowOld((v) => !v)}
+                    onSelect={(e) => e.preventDefault()}
+                  >
+                    Show older leads
+                  </DropdownMenuCheckboxItem>
+                  <DropdownMenuCheckboxItem
+                    checked={showAllTerritories}
+                    onCheckedChange={() => setShowAllTerritories((v) => !v)}
+                    onSelect={(e) => e.preventDefault()}
+                  >
+                    Show all territories
+                  </DropdownMenuCheckboxItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuCheckboxItem
+                    checked={selectMode}
+                    onCheckedChange={() =>
+                      setSelectMode((v) => {
+                        const next = !v;
+                        if (!next) setSelected(new Set());
+                        return next;
+                      })
+                    }
+                    onSelect={(e) => e.preventDefault()}
+                  >
+                    Select leads
+                  </DropdownMenuCheckboxItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              {selectMode && filtered.length > 0 && (
                 <button
                   onClick={() => {
                     const all = filtered.map((l) => l.id);
@@ -473,7 +526,7 @@ function Dashboard() {
                   {selected.size === filtered.length ? "Clear selection" : "Select all"}
                 </button>
               )}
-              {selected.size > 0 && (
+              {selectMode && selected.size > 0 && (
                 <div className="ml-auto flex items-center gap-2">
                   <span className="text-xs text-muted-foreground">{selected.size} selected</span>
                   {showDismissed ? (
@@ -504,9 +557,6 @@ function Dashboard() {
                     </button>
                   )}
                 </div>
-              )}
-              {selected.size === 0 && (
-                <div className="ml-auto text-xs text-muted-foreground">Sorted by confidence</div>
               )}
             </div>
 
@@ -561,7 +611,7 @@ function Dashboard() {
                       }
                       onDismiss={() => act.mutate({ lead_id: lead.id, action: "dismissed" })}
                       onDraft={() => setDraftFor(lead)}
-                      selectable
+                      selectMode={selectMode}
                       selected={selected.has(lead.id)}
                       onToggleSelect={() =>
                         setSelected((prev) => {
@@ -581,7 +631,21 @@ function Dashboard() {
             )}
           </div>
 
-          <Sidebar leads={filtered.length ? filtered : visibleLeads} />
+          {/* Insights: always visible on desktop; collapsed behind a toggle on
+              phones so the rep sees leads first, not four analytics panels. */}
+          <div>
+            <button
+              onClick={() => setShowInsights((v) => !v)}
+              className="mb-3 flex w-full items-center justify-between rounded-md border border-border bg-surface-2 px-4 py-2 text-xs font-medium text-foreground/80 transition-colors hover:bg-surface-3 lg:hidden"
+              aria-expanded={showInsights}
+            >
+              {showInsights ? "Hide insights" : "Show insights"}
+              <BarChart3 className="h-3.5 w-3.5" />
+            </button>
+            <div className={showInsights ? "block" : "hidden lg:block"}>
+              <Sidebar leads={filtered.length ? filtered : visibleLeads} />
+            </div>
+          </div>
         </div>
 
         <footer className="mt-12 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4 text-xs text-muted-foreground">
@@ -612,13 +676,8 @@ function Dashboard() {
       <LeadDetailModal
         lead={active}
         physicians={active ? (physiciansByLead.get(active.id) ?? []) : []}
-        saved={active ? savedIds.has(active.id) : false}
         contacted={active ? contactedIds.has(active.id) : false}
         pushed={active ? pushedIds.has(active.id) : false}
-        onSave={() =>
-          active &&
-          act.mutate({ lead_id: active.id, action: "saved", remove: savedIds.has(active.id) })
-        }
         onMarkContacted={() =>
           active &&
           act.mutate({

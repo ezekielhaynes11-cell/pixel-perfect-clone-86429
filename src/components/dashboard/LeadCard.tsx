@@ -1,7 +1,6 @@
 import { useState } from "react";
 import {
   ExternalLink,
-  Eye,
   Bookmark,
   Sparkles,
   XCircle,
@@ -9,9 +8,17 @@ import {
   Stethoscope,
   RotateCcw,
   UserRound,
+  MoreHorizontal,
 } from "lucide-react";
 
 import { Link } from "@tanstack/react-router";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { type Lead, timeAgo } from "@/data/leads";
 import type { LeadPhysician } from "@/lib/leads.functions";
 import { ContactSection } from "./ContactSection";
@@ -51,7 +58,7 @@ export function LeadCard({
   saved = false,
   onDismiss,
   onDraft,
-  selectable = false,
+  selectMode = false,
   selected = false,
   onToggleSelect,
   dismissed = false,
@@ -65,7 +72,7 @@ export function LeadCard({
   saved?: boolean;
   onDismiss?: () => void;
   onDraft?: () => void;
-  selectable?: boolean;
+  selectMode?: boolean;
   selected?: boolean;
   onToggleSelect?: () => void;
   dismissed?: boolean;
@@ -87,7 +94,7 @@ export function LeadCard({
     >
       {/* Top row: Source + Confidence + Date */}
       <div className="mb-2 flex items-center gap-3">
-        {selectable && (
+        {selectMode && (
           <input
             type="checkbox"
             checked={selected}
@@ -111,16 +118,31 @@ export function LeadCard({
         </span>
       </div>
 
-      {/* Title */}
-      <h3 className="mb-1.5 font-display text-base font-semibold leading-snug text-foreground transition-colors group-hover:text-primary">
-        {lead.title}
-      </h3>
+      {/* Clickable body — opens the detail modal */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => onView(lead)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onView(lead);
+          }
+        }}
+        aria-label={`View details for ${lead.title}`}
+        className="-mx-1 cursor-pointer rounded-sm px-1 outline-none focus-visible:ring-1 focus-visible:ring-primary"
+      >
+        {/* Title */}
+        <h3 className="mb-1.5 font-display text-base font-semibold leading-snug text-foreground transition-colors group-hover:text-primary">
+          {lead.title}
+        </h3>
 
-      {/* Summary */}
-      <p className="mb-3 line-clamp-2 text-sm text-muted-foreground">{lead.summary}</p>
+        {/* Summary */}
+        <p className="line-clamp-2 text-sm text-muted-foreground">{lead.summary}</p>
+      </div>
 
       {/* Entity chips */}
-      <div className="mb-3 flex flex-wrap gap-1.5">
+      <div className="mb-3 mt-3 flex flex-wrap gap-1.5">
         {lead.hospital && (
           <span className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[11px] text-foreground/80">
             <Building2 className="h-3 w-3 text-muted-foreground" />
@@ -173,15 +195,12 @@ export function LeadCard({
         </button>
       )}
 
-      {/* Actions */}
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          onClick={() => onView(lead)}
-          className="flex h-8 items-center gap-1.5 rounded-sm border border-border px-3 text-xs text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground"
-        >
-          <Eye className="h-3.5 w-3.5" />
-          View Details
-        </button>
+      {/* Actions — clicks here must not bubble up to the card body */}
+      <div
+        className="flex flex-wrap items-center gap-2"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
         <button
           onClick={onDraft}
           className="flex h-8 items-center gap-1.5 rounded-sm border border-primary/40 bg-primary/10 px-3 text-xs text-primary transition-colors hover:bg-primary/20"
@@ -189,63 +208,59 @@ export function LeadCard({
           <Sparkles className="h-3.5 w-3.5" />
           Draft outreach
         </button>
-        <button
-          onClick={onSave}
-          className={
-            saved
-              ? "flex h-8 items-center gap-1.5 rounded-sm border border-primary/40 bg-primary/10 px-3 text-xs text-primary transition-colors hover:bg-primary/20"
-              : "flex h-8 items-center gap-1.5 rounded-sm border border-border px-3 text-xs text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground"
-          }
-        >
-          <Bookmark className="h-3.5 w-3.5" fill={saved ? "currentColor" : "none"} />
-          {saved ? "Saved" : "Save"}
-        </button>
-        {dismissed ? (
-          <button
-            onClick={onRestore}
-            className="flex h-8 items-center gap-1.5 rounded-sm border border-border px-3 text-xs text-foreground/80 transition-colors hover:bg-success/10 hover:text-success"
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-            Restore
-          </button>
-        ) : (
-          <button
-            onClick={onDismiss}
-            className="flex h-8 items-center gap-1.5 rounded-sm border border-border px-3 text-xs text-foreground/80 transition-colors hover:bg-destructive/10 hover:text-destructive"
-          >
-            <XCircle className="h-3.5 w-3.5" />
-            Dismiss
-          </button>
-        )}
-        {lead.accountId ? (
-          <Link
-            to="/accounts/$id"
-            params={{ id: lead.accountId }}
-            className="flex h-8 items-center gap-1.5 rounded-sm border border-border px-3 text-xs text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground"
-          >
-            <Building2 className="h-3.5 w-3.5" />
-            View account
-          </Link>
-        ) : (
-          <button
-            type="button"
-            disabled
-            title="No linked account for this lead"
-            className="flex h-8 cursor-not-allowed items-center gap-1.5 rounded-sm border border-border px-3 text-xs text-muted-foreground opacity-50"
-          >
-            <Building2 className="h-3.5 w-3.5" />
-            View account
-          </button>
-        )}
-        <a
-          href={lead.sourceUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="ml-auto flex h-8 items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-primary"
-        >
-          Source
-          <ExternalLink className="h-3 w-3" />
-        </a>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label="More actions"
+              title="More actions"
+              className="ml-auto flex h-8 w-8 items-center justify-center rounded-sm border border-border text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48 border-border bg-surface">
+            <DropdownMenuItem onSelect={() => onSave?.()}>
+              <Bookmark className="h-4 w-4" fill={saved ? "currentColor" : "none"} />
+              {saved ? "Unsave" : "Save"}
+            </DropdownMenuItem>
+            {dismissed ? (
+              <DropdownMenuItem onSelect={() => onRestore?.()}>
+                <RotateCcw className="h-4 w-4" />
+                Restore
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem
+                onSelect={() => onDismiss?.()}
+                className="text-destructive focus:text-destructive"
+              >
+                <XCircle className="h-4 w-4" />
+                Dismiss
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuSeparator />
+            {lead.accountId ? (
+              <DropdownMenuItem asChild>
+                <Link to="/accounts/$id" params={{ id: lead.accountId }}>
+                  <Building2 className="h-4 w-4" />
+                  View account
+                </Link>
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem disabled title="No linked account for this lead">
+                <Building2 className="h-4 w-4" />
+                View account
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem asChild>
+              <a href={lead.sourceUrl} target="_blank" rel="noreferrer">
+                <ExternalLink className="h-4 w-4" />
+                Source
+              </a>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </article>
   );
