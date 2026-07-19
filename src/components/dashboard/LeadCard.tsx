@@ -25,8 +25,14 @@ const sourceMeta: Record<string, { label: string; cls: string }> = {
   reddit: { label: "Reddit", cls: "bg-orange-500/15 text-orange-300 border-orange-500/30" },
   bluesky: { label: "Bluesky", cls: "bg-sky-500/15 text-sky-300 border-sky-500/30" },
   news: { label: "News", cls: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
-  clinicaltrials: { label: "ClinicalTrials", cls: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" },
-  cms_open_payments: { label: "CMS Payments", cls: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
+  clinicaltrials: {
+    label: "ClinicalTrials",
+    cls: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+  },
+  cms_open_payments: {
+    label: "CMS Payments",
+    cls: "bg-amber-500/15 text-amber-300 border-amber-500/30",
+  },
   funding_rss: { label: "Gov Funding RSS", cls: "bg-teal-500/15 text-teal-300 border-teal-500/30" },
 };
 
@@ -65,7 +71,10 @@ export function LeadCard({
   dismissed?: boolean;
   onRestore?: () => void;
 }) {
-  const meta = sourceMeta[lead.source] ?? { label: lead.source, cls: "bg-surface-3 text-foreground border-border" };
+  const meta = sourceMeta[lead.source] ?? {
+    label: lead.source,
+    cls: "bg-surface-3 text-foreground border-border",
+  };
   const conf = confidenceColor(lead.confidence);
   const [contactOpen, setContactOpen] = useState(false);
 
@@ -88,7 +97,9 @@ export function LeadCard({
             className="h-4 w-4 cursor-pointer accent-primary"
           />
         )}
-        <span className={`rounded-sm border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${meta.cls}`}>
+        <span
+          className={`rounded-sm border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${meta.cls}`}
+        >
           {meta.label}
         </span>
         <div className="flex items-center gap-1.5">
@@ -124,7 +135,10 @@ export function LeadCard({
         )}
         {lead.estimatedValueUsd != null && lead.estimatedValueUsd > 0 ? (
           <span className="rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[11px] text-success">
-            Est. {lead.estimatedValueUsd >= 1e6 ? `$${(lead.estimatedValueUsd / 1e6).toFixed(1)}M` : `$${Math.round(lead.estimatedValueUsd / 1000)}k`}
+            Est.{" "}
+            {lead.estimatedValueUsd >= 1e6
+              ? `$${(lead.estimatedValueUsd / 1e6).toFixed(1)}M`
+              : `$${Math.round(lead.estimatedValueUsd / 1000)}k`}
           </span>
         ) : (
           <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] text-muted-foreground">

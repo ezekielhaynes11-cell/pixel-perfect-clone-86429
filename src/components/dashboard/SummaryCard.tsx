@@ -19,13 +19,7 @@ function CountUp({ value, className }: { value: number; className?: string }) {
   return <span className={className}>{n}</span>;
 }
 
-export function SummaryCard({
-  total,
-  highPriority,
-}: {
-  total: number;
-  highPriority: number;
-}) {
+export function SummaryCard({ total, highPriority }: { total: number; highPriority: number }) {
   return (
     <div
       className="fade-up grid grid-cols-1 gap-6 rounded-md border-l-4 border-primary bg-gradient-to-r from-surface-2 to-surface px-6 py-6 md:grid-cols-3"
@@ -59,9 +53,7 @@ export function SummaryCard({
           <span className="pulse-dot inline-block h-2 w-2 rounded-full bg-success" />
           <span className="text-sm font-medium">Live monitoring</span>
         </div>
-        <div className="mt-2 text-[11px] text-muted-foreground">
-          Sync status shown in header
-        </div>
+        <div className="mt-2 text-[11px] text-muted-foreground">Sync status shown in header</div>
         <div className="mt-1 text-[11px] uppercase tracking-wider text-muted-foreground">
           Territory: OK · AR · LA · TX
         </div>

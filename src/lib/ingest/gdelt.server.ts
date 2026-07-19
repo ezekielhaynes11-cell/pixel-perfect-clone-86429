@@ -29,7 +29,9 @@ const QUERIES: Array<{ source: LeadSource; query: string }> = [
   },
 ];
 
-export async function fetchGdelt(opts: { hoursBack?: number; limit?: number } = {}): Promise<RawLead[]> {
+export async function fetchGdelt(
+  opts: { hoursBack?: number; limit?: number } = {},
+): Promise<RawLead[]> {
   const { hoursBack = 24 * 7, limit = 30 } = opts;
   const all: RawLead[] = [];
   for (const { source, query } of QUERIES) {
@@ -46,7 +48,11 @@ export async function fetchGdelt(opts: { hoursBack?: number; limit?: number } = 
       if (!res.ok) continue;
       const text = await res.text();
       let json: { articles?: GdeltArticle[] } = {};
-      try { json = JSON.parse(text); } catch { continue; }
+      try {
+        json = JSON.parse(text);
+      } catch {
+        continue;
+      }
       const rows = json.articles ?? [];
       for (const a of rows) {
         all.push({

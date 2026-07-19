@@ -2,7 +2,20 @@ import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { ArrowLeft, Building2, MapPin, Shield, ExternalLink, Phone, FileText, Zap, Sparkles, Loader2, Mail, Linkedin } from "lucide-react";
+import {
+  ArrowLeft,
+  Building2,
+  MapPin,
+  Shield,
+  ExternalLink,
+  Phone,
+  FileText,
+  Zap,
+  Sparkles,
+  Loader2,
+  Mail,
+  Linkedin,
+} from "lucide-react";
 import { toast } from "sonner";
 import { getAccountDetail } from "@/lib/accounts.functions";
 import { enrichPhysicianApollo, prospectContactsApollo } from "@/lib/apollo.functions";
@@ -51,7 +64,10 @@ function AccountPage() {
       prospect({
         data: {
           account_id: id,
-          titles: titles.split(",").map((s) => s.trim()).filter(Boolean),
+          titles: titles
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
           keywords: keywords || undefined,
           limit,
         },
@@ -76,7 +92,10 @@ function AccountPage() {
   if (q.isError || !q.data) {
     return (
       <div className="p-10 text-sm text-destructive">
-        Failed to load account. <Link to="/" className="underline">Back to feed</Link>
+        Failed to load account.{" "}
+        <Link to="/" className="underline">
+          Back to feed
+        </Link>
       </div>
     );
   }
@@ -156,13 +175,19 @@ function AccountPage() {
                     >
                       <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
                         <Zap className="h-3 w-3 text-primary" />
-                        <span className="uppercase tracking-wider">{l.signal_type ?? l.source}</span>
+                        <span className="uppercase tracking-wider">
+                          {l.signal_type ?? l.source}
+                        </span>
                         <span>· {timeAgo(l.date_discovered)}</span>
-                        <span className="ml-auto font-semibold text-foreground">{l.confidence}%</span>
+                        <span className="ml-auto font-semibold text-foreground">
+                          {l.confidence}%
+                        </span>
                       </div>
                       <div className="font-medium">{l.title}</div>
                       {l.summary && (
-                        <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{l.summary}</p>
+                        <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+                          {l.summary}
+                        </p>
                       )}
                       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                         {l.vendor_mentions.map((v) => (
@@ -243,7 +268,11 @@ function AccountPage() {
                     disabled={prospectMut.isPending}
                     className="flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50"
                   >
-                    {prospectMut.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                    {prospectMut.isPending ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3 w-3" />
+                    )}
                     Find contacts
                   </button>
                 </div>
@@ -284,9 +313,7 @@ function AccountPage() {
                           <Phone className="h-3 w-3" /> {p.practice_phone}
                         </a>
                       )}
-                      {p.title && (
-                        <span className="text-xs text-muted-foreground">{p.title}</span>
-                      )}
+                      {p.title && <span className="text-xs text-muted-foreground">{p.title}</span>}
                       {p.email && (
                         <a
                           href={`mailto:${p.email}`}
@@ -319,7 +346,6 @@ function AccountPage() {
                       >
                         <Mail className="h-3 w-3" /> Enrich
                       </button>
-
                     </li>
                   ))}
                 </ul>

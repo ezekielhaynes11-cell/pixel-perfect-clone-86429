@@ -114,7 +114,9 @@ export async function scrapeUrlForAccount(args: {
   const extracted = JSON.parse(argsStr) as ExtractedPeople;
 
   // Merge keyword-matched vendors with AI-extracted ones.
-  extracted.vendor_mentions = Array.from(new Set([...(extracted.vendor_mentions ?? []), ...vendorHits]));
+  extracted.vendor_mentions = Array.from(
+    new Set([...(extracted.vendor_mentions ?? []), ...vendorHits]),
+  );
 
   const { data, error } = await supabaseAdmin
     .from("scraped_pages")

@@ -17,15 +17,40 @@ export const COPILOT_TOOLS = [
       parameters: {
         type: "object",
         properties: {
-          state: { type: "string", description: "Two-letter US state code, e.g. TX. Matches territory case-insensitively, including multi-state rows." },
-          signal_type: { type: "string", enum: ["recall", "rfp", "funding", "expansion", "sentiment", "m_and_a", "incumbency", "other"] },
+          state: {
+            type: "string",
+            description:
+              "Two-letter US state code, e.g. TX. Matches territory case-insensitively, including multi-state rows.",
+          },
+          signal_type: {
+            type: "string",
+            enum: [
+              "recall",
+              "rfp",
+              "funding",
+              "expansion",
+              "sentiment",
+              "m_and_a",
+              "incumbency",
+              "other",
+            ],
+          },
           source: { type: "string" },
           account_type: { type: "string", enum: ["va", "non_va", "unknown"] },
           vendor: { type: "string", description: "Substring of a vendor / model mention" },
-          text_search: { type: "string", description: "Free-text substring matched across title, summary, and hospital." },
+          text_search: {
+            type: "string",
+            description: "Free-text substring matched across title, summary, and hospital.",
+          },
           min_confidence: { type: "number", minimum: 0, maximum: 100 },
-          days_back: { type: "number", description: "Limit to leads discovered within this many days" },
-          enriched_only: { type: "boolean", description: "If true, only return AI-enriched leads. Defaults to false." },
+          days_back: {
+            type: "number",
+            description: "Limit to leads discovered within this many days",
+          },
+          enriched_only: {
+            type: "boolean",
+            description: "If true, only return AI-enriched leads. Defaults to false.",
+          },
           limit: { type: "number", minimum: 1, maximum: 100 },
         },
         additionalProperties: false,
@@ -59,11 +84,21 @@ export const COPILOT_TOOLS = [
         type: "object",
         properties: {
           specialty_contains: { type: "string" },
-          state: { type: "string", description: "Two-letter US state code matched on physician practice_state." },
-          lead_state: { type: "string", description: "Two-letter US state code. Restricts to physicians linked to leads whose territory matches this state." },
+          state: {
+            type: "string",
+            description: "Two-letter US state code matched on physician practice_state.",
+          },
+          lead_state: {
+            type: "string",
+            description:
+              "Two-letter US state code. Restricts to physicians linked to leads whose territory matches this state.",
+          },
           name_contains: { type: "string" },
           role_hint_contains: { type: "string" },
-          has_email: { type: "boolean", description: "If true, only return contacts with an email on file." },
+          has_email: {
+            type: "boolean",
+            description: "If true, only return contacts with an email on file.",
+          },
           limit: { type: "number", minimum: 1, maximum: 50 },
         },
         additionalProperties: false,
@@ -92,7 +127,10 @@ export const COPILOT_TOOLS = [
         type: "object",
         properties: {
           lead_id: { type: "string" },
-          tone: { type: "string", enum: ["discovery", "follow_up", "executive_intro", "switch_pitch"] },
+          tone: {
+            type: "string",
+            enum: ["discovery", "follow_up", "executive_intro", "switch_pitch"],
+          },
         },
         required: ["lead_id"],
         additionalProperties: false,
@@ -103,7 +141,8 @@ export const COPILOT_TOOLS = [
     type: "function" as const,
     function: {
       name: "apollo_enrich_physician",
-      description: "Use Apollo.io to enrich an existing physician contact (email, title, LinkedIn, phone) by NPI.",
+      description:
+        "Use Apollo.io to enrich an existing physician contact (email, title, LinkedIn, phone) by NPI.",
       parameters: {
         type: "object",
         properties: { npi: { type: "string" } },
@@ -134,9 +173,19 @@ export const COPILOT_TOOLS = [
       parameters: {
         type: "object",
         properties: {
-          account_id: { type: "string", description: "Optional. If set, restricts search to this account's organisation." },
-          state: { type: "string", description: "Two-letter US state code. Inherited from account if omitted." },
-          titles: { type: "array", items: { type: "string" }, description: "Job titles to target, e.g. ['POCUS Director','Chief of Radiology']" },
+          account_id: {
+            type: "string",
+            description: "Optional. If set, restricts search to this account's organisation.",
+          },
+          state: {
+            type: "string",
+            description: "Two-letter US state code. Inherited from account if omitted.",
+          },
+          titles: {
+            type: "array",
+            items: { type: "string" },
+            description: "Job titles to target, e.g. ['POCUS Director','Chief of Radiology']",
+          },
           keywords: { type: "string", description: "Free-text keywords (e.g. 'ultrasound POCUS')" },
           limit: { type: "number", minimum: 1, maximum: 50 },
         },
@@ -161,7 +210,6 @@ export const COPILOT_TOOLS = [
   },
 ];
 
-
 interface ToolArgs {
   query_leads: {
     state?: string;
@@ -176,14 +224,30 @@ interface ToolArgs {
     limit?: number;
   };
   query_accounts: { name_contains?: string; state?: string; is_va?: boolean; limit?: number };
-  query_physicians: { specialty_contains?: string; state?: string; lead_state?: string; name_contains?: string; role_hint_contains?: string; has_email?: boolean; limit?: number };
+  query_physicians: {
+    specialty_contains?: string;
+    state?: string;
+    lead_state?: string;
+    name_contains?: string;
+    role_hint_contains?: string;
+    has_email?: boolean;
+    limit?: number;
+  };
   get_account_brief: { account_id: string };
-  draft_outreach: { lead_id: string; tone?: "discovery" | "follow_up" | "executive_intro" | "switch_pitch" };
+  draft_outreach: {
+    lead_id: string;
+    tone?: "discovery" | "follow_up" | "executive_intro" | "switch_pitch";
+  };
   apollo_enrich_physician: { npi: string };
   apollo_enrich_account: { account_id: string };
-  apollo_prospect: { account_id?: string; state?: string; titles?: string[]; keywords?: string; limit?: number };
+  apollo_prospect: {
+    account_id?: string;
+    state?: string;
+    titles?: string[];
+    keywords?: string;
+    limit?: number;
+  };
   apollo_bulk_enrich: { limit?: number };
-
 }
 
 // The `confidence` column is an integer on a 0–100 scale, but the model often
@@ -205,18 +269,22 @@ function friendlyToolError(name: string, err: unknown): { error: string } {
   const raw = err instanceof Error ? err.message : String(err);
   console.error(`[copilot tool ${name}] failed:`, raw);
   return {
-    error:
-      "I couldn't complete that lookup just now. Try rephrasing or narrowing your request.",
+    error: "I couldn't complete that lookup just now. Try rephrasing or narrowing your request.",
   };
 }
 
-export async function runCopilotTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+export async function runCopilotTool(
+  name: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
   switch (name) {
     case "query_leads": {
       const a = args as ToolArgs["query_leads"];
       let q = supabaseAdmin
         .from("leads")
-        .select("id, title, summary, hospital, specialty, territory, source, signal_type, account_type, vendor_mentions, confidence, estimated_value_usd, win_probability, date_discovered, source_url, account_id, enriched")
+        .select(
+          "id, title, summary, hospital, specialty, territory, source, signal_type, account_type, vendor_mentions, confidence, estimated_value_usd, win_probability, date_discovered, source_url, account_id, enriched",
+        )
         .order("confidence", { ascending: false })
         .limit(Math.min(a.limit ?? 50, 100));
       if (a.enriched_only) q = q.eq("enriched", true);
@@ -230,20 +298,25 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
         q = q.gte("date_discovered", since);
       }
       if (a.state) {
-        const code = a.state.toUpperCase();
-        const stateMap: Record<string, string> = { TX: "texas", OK: "oklahoma", AR: "arkansas", LA: "louisiana" };
-        const name = stateMap[code] ?? a.state.toLowerCase();
+        // Strip PostgREST filter metacharacters — the value is model-controlled
+        // and goes into an .or() filter string.
+        const code = a.state.toUpperCase().replace(/[%,()]/g, "");
+        const stateMap: Record<string, string> = {
+          TX: "texas",
+          OK: "oklahoma",
+          AR: "arkansas",
+          LA: "louisiana",
+        };
+        const stateName = (stateMap[code] ?? a.state.toLowerCase()).replace(/[%,()]/g, "");
         // Match either the full state name or the 2-letter code, anywhere in the
         // dirty territory string (handles "Texas", "minnesota,north carolina,texas",
         // "(Multiple states: AL, AZ, FL, HI, LA, MD, OH, VA)", etc.).
-        q = q.or(`territory.ilike.%${name}%,territory.ilike.%${code}%`);
+        if (code) q = q.or(`territory.ilike.%${stateName}%,territory.ilike.%${code}%`);
       }
       if (a.text_search) {
         const needle = a.text_search.replace(/[%,]/g, " ").trim();
         if (needle) {
-          q = q.or(
-            `title.ilike.%${needle}%,summary.ilike.%${needle}%,hospital.ilike.%${needle}%`,
-          );
+          q = q.or(`title.ilike.%${needle}%,summary.ilike.%${needle}%,hospital.ilike.%${needle}%`);
         }
       }
       const { data, error } = await q;
@@ -279,13 +352,18 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
       let leadNpiSet: Set<string> | null = null;
       const leadTitleByNpi = new Map<string, { lead_id: string; title: string }>();
       if (a.lead_state) {
-        const code = a.lead_state.toUpperCase();
-        const stateMap: Record<string, string> = { TX: "texas", OK: "oklahoma", AR: "arkansas", LA: "louisiana" };
-        const name = stateMap[code] ?? a.lead_state.toLowerCase();
+        const code = a.lead_state.toUpperCase().replace(/[%,()]/g, "");
+        const stateMap: Record<string, string> = {
+          TX: "texas",
+          OK: "oklahoma",
+          AR: "arkansas",
+          LA: "louisiana",
+        };
+        const stateName = (stateMap[code] ?? a.lead_state.toLowerCase()).replace(/[%,()]/g, "");
         const { data: leadRows, error: leadErr } = await supabaseAdmin
           .from("leads")
           .select("id, title")
-          .or(`territory.ilike.%${name}%,territory.ilike.%${code}%`)
+          .or(`territory.ilike.%${stateName}%,territory.ilike.%${code}%`)
           .limit(500);
         if (leadErr) return friendlyToolError(name, leadErr);
         const leadIds = (leadRows ?? []).map((r) => r.id);
@@ -310,7 +388,9 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
 
       let q = supabaseAdmin
         .from("physician_contacts")
-        .select("npi, full_name, credentials, primary_specialty, practice_city, practice_state, practice_phone, email, title, linkedin_url, apollo_enriched_at")
+        .select(
+          "npi, full_name, credentials, primary_specialty, practice_city, practice_state, practice_phone, email, title, linkedin_url, apollo_enriched_at",
+        )
         .limit(limit);
       if (a.state) q = q.eq("practice_state", a.state.toUpperCase());
       if (a.specialty_contains) q = q.ilike("primary_specialty", `%${a.specialty_contains}%`);
@@ -350,7 +430,11 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
     }
     case "draft_outreach": {
       const a = args as ToolArgs["draft_outreach"];
-      const { data: lead, error } = await supabaseAdmin.from("leads").select("*").eq("id", a.lead_id).single();
+      const { data: lead, error } = await supabaseAdmin
+        .from("leads")
+        .select("*")
+        .eq("id", a.lead_id)
+        .single();
       if (error || !lead) return { error: "Lead not found" };
       const { data: profile } = await supabaseAdmin
         .from("profiles")
@@ -366,8 +450,13 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
           source: lead.source,
           signal_type: (lead as { signal_type?: string | null }).signal_type ?? null,
           competitor_incumbent: lead.competitor_incumbent,
-          vendor_mentions: ((lead as { vendor_mentions?: string[] | null }).vendor_mentions) ?? [],
-          entities: (lead.entities as { physicians?: string[]; equipment?: string[]; keywords?: string[] }) ?? {},
+          vendor_mentions: (lead as { vendor_mentions?: string[] | null }).vendor_mentions ?? [],
+          entities:
+            (lead.entities as {
+              physicians?: string[];
+              equipment?: string[];
+              keywords?: string[];
+            }) ?? {},
         },
         repName: profile?.display_name ?? "Your Philips rep",
         tone: a.tone,
@@ -410,7 +499,11 @@ export async function runCopilotTool(name: string, args: Record<string, unknown>
           const r = await apolloEnrichPhysician({ npi: row.npi });
           if (r && (r as { exists?: boolean }).exists) matched++;
         } catch (e) {
-          console.error("apollo_bulk_enrich failed for", row.npi, e instanceof Error ? e.message : e);
+          console.error(
+            "apollo_bulk_enrich failed for",
+            row.npi,
+            e instanceof Error ? e.message : e,
+          );
           errors++;
         }
         await new Promise((r) => setTimeout(r, 300));

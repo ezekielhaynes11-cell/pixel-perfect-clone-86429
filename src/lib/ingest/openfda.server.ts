@@ -3,7 +3,9 @@ import type { RawLead } from "./types";
 // openFDA Device Enforcement (recall) API
 const BASE = "https://api.fda.gov/device/enforcement.json";
 
-export async function fetchOpenFda(opts: { daysBack?: number; limit?: number } = {}): Promise<RawLead[]> {
+export async function fetchOpenFda(
+  opts: { daysBack?: number; limit?: number } = {},
+): Promise<RawLead[]> {
   const { daysBack = 60, limit = 50 } = opts;
   const since = new Date(Date.now() - daysBack * 86400_000)
     .toISOString()
@@ -27,25 +29,27 @@ export async function fetchOpenFda(opts: { daysBack?: number; limit?: number } =
       const firm = (r.recalling_firm ?? "").toLowerCase();
       return !firm.includes("philips") && !firm.includes("phillips");
     })
-    .map((r): RawLead => ({
-      source: "openfda",
-      source_external_id: r.recall_number ?? `${r.event_id}-${r.product_code ?? ""}`,
-      source_url: `https://www.accessdata.fda.gov/scripts/cdrh/cfdocs/cfres/res.cfm?id=${r.cfres_id ?? ""}`,
-      title: `${r.classification ?? "FDA Recall"} — ${r.recalling_firm ?? "Competitor"}: ${truncate(r.product_description ?? "device", 90)}`,
-      raw_text: [
-        `Recalling firm: ${r.recalling_firm}`,
-        `Classification: ${r.classification}`,
-        `Product: ${r.product_description}`,
-        `Reason: ${r.reason_for_recall}`,
-        `Status: ${r.status}`,
-        `Code info: ${r.code_info}`,
-        `Affected distribution: ${r.distribution_pattern}`,
-        `Quantity in commerce: ${r.product_quantity}`,
-        `Recall initiation date: ${r.recall_initiation_date}`,
-      ].join("\n"),
-      date_discovered: parseFdaDate(r.recall_initiation_date) ?? new Date().toISOString(),
-      raw_payload: r as unknown as Record<string, unknown>,
-    }));
+    .map(
+      (r): RawLead => ({
+        source: "openfda",
+        source_external_id: r.recall_number ?? `${r.event_id}-${r.product_code ?? ""}`,
+        source_url: `https://www.accessdata.fda.gov/scripts/cdrh/cfdocs/cfres/res.cfm?id=${r.cfres_id ?? ""}`,
+        title: `${r.classification ?? "FDA Recall"} — ${r.recalling_firm ?? "Competitor"}: ${truncate(r.product_description ?? "device", 90)}`,
+        raw_text: [
+          `Recalling firm: ${r.recalling_firm}`,
+          `Classification: ${r.classification}`,
+          `Product: ${r.product_description}`,
+          `Reason: ${r.reason_for_recall}`,
+          `Status: ${r.status}`,
+          `Code info: ${r.code_info}`,
+          `Affected distribution: ${r.distribution_pattern}`,
+          `Quantity in commerce: ${r.product_quantity}`,
+          `Recall initiation date: ${r.recall_initiation_date}`,
+        ].join("\n"),
+        date_discovered: parseFdaDate(r.recall_initiation_date) ?? new Date().toISOString(),
+        raw_payload: r as unknown as Record<string, unknown>,
+      }),
+    );
 }
 
 function parseFdaDate(s?: string): string | null {

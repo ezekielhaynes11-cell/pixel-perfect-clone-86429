@@ -89,9 +89,15 @@ function manualToContact(c: ManualContact): UnifiedContact {
 }
 
 function Row({
-  icon, label, value, href,
+  icon,
+  label,
+  value,
+  href,
 }: {
-  icon: React.ReactNode; label: string; value: string; href?: string;
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  href?: string;
 }) {
   return (
     <div className="flex items-start gap-2 text-xs">
@@ -99,11 +105,17 @@ function Row({
       <span className="w-20 shrink-0 text-muted-foreground">{label}</span>
       <span className="min-w-0 flex-1 break-words text-foreground/90">
         {href ? (
-          <a href={href} className="text-primary hover:underline"
-            target={href.startsWith("http") ? "_blank" : undefined} rel="noreferrer">
+          <a
+            href={href}
+            className="text-primary hover:underline"
+            target={href.startsWith("http") ? "_blank" : undefined}
+            rel="noreferrer"
+          >
             {value}
           </a>
-        ) : value}
+        ) : (
+          value
+        )}
       </span>
     </div>
   );
@@ -127,7 +139,9 @@ function ApolloCTA({ onClick, loading }: { onClick: () => void; loading?: boolea
 }
 
 export function ContactSection({
-  sourceContacts, physicians, leadId,
+  sourceContacts,
+  physicians,
+  leadId,
 }: {
   sourceContacts: LeadContact[];
   physicians: LeadPhysician[];
@@ -150,27 +164,21 @@ export function ContactSection({
   const empty = unified.length === 0;
   const [expanded, setExpanded] = useState(0);
 
+  // Contact enrichment runs the paid Apollo waterfall, so it is NEVER fired
+  // automatically on mount — it only runs when the rep clicks "Enrich with
+  // Apollo" (runApollo -> refetch). enabled:false keeps the query idle until then.
   const enrichQ = useQuery({
     queryKey: ["contact_enrichment", leadId],
-    queryFn: async () => {
-      console.log("[ContactSection] fetching enrich-contact via server fn for lead:", leadId);
-      const result = await fetchContactEnrichment({ data: { lead_id: leadId! } });
-      console.log(
-        "[ContactSection] result status:", result?.status,
-        "name:", result?.name ?? "(none)",
-        "org:", result?.organization ?? "(none)",
-      );
-      return result;
-    },
-    enabled: !!leadId,
-    staleTime: 0,
+    queryFn: () => fetchContactEnrichment({ data: { lead_id: leadId! } }),
+    enabled: false,
+    staleTime: Infinity,
     retry: false,
   });
 
   const enrich = enrichQ.data;
   const enrichLoading = !!(leadId && (enrichQ.isLoading || enrichQ.isFetching));
-  const enrichError  = !!(leadId && enrichQ.isError);
-  const enrichFound  = enrich?.status === "found" || unified.length > 0;
+  const enrichError = !!(leadId && enrichQ.isError);
+  const enrichFound = enrich?.status === "found" || unified.length > 0;
 
   // Trigger the Apollo decision-maker waterfall on demand (user-initiated only).
   const runApollo = () => {
@@ -196,8 +204,8 @@ export function ContactSection({
           Contact
         </h4>
 
-        {leadId && (
-          enrichLoading ? (
+        {leadId &&
+          (enrichLoading ? (
             <span className="inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">
               <Loader2 className="h-3 w-3 animate-spin" />
               Enriching…
@@ -208,7 +216,7 @@ export function ContactSection({
               className="inline-flex items-center gap-1 rounded-full border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive"
             >
               <XCircle className="h-3 w-3" />
-              Enrich error — see console
+              Enrichment failed
             </span>
           ) : enrichFound ? (
             <span className="inline-flex items-center gap-1 rounded-full border border-success/40 bg-success/10 px-2 py-0.5 text-[10px] font-medium text-success">
@@ -220,8 +228,7 @@ export function ContactSection({
               <AlertCircle className="h-3 w-3" />
               No contact on file
             </span>
-          )
-        )}
+          ))}
 
         {empty ? (
           !leadId && (
@@ -239,7 +246,8 @@ export function ContactSection({
 
       {enrichError && errorMessage && (
         <div className="mb-2 rounded border border-destructive/30 bg-destructive/5 px-2 py-2 text-[11px] text-destructive">
-          <span className="font-semibold">Edge function error: </span>{errorMessage}
+          <span className="font-semibold">Enrichment error: </span>
+          {errorMessage}
         </div>
       )}
 
@@ -284,9 +292,7 @@ export function ContactSection({
                   className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-surface-3/40"
                 >
                   <span className="font-medium text-foreground">{label}</span>
-                  {c.name && c.title && (
-                    <span className="text-muted-foreground">· {c.title}</span>
-                  )}
+                  {c.name && c.title && <span className="text-muted-foreground">· {c.title}</span>}
                   <span className="ml-auto flex items-center gap-2">
                     {c.needsApollo && (
                       <span className="rounded-full border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-warning">
@@ -351,7 +357,12 @@ function ContactCard({
       )}
       {contact?.address && <Row icon={<MapPin />} label="Address" value={contact.address} />}
       {contact?.linkedin_url && (
-        <Row icon={<Linkedin />} label="LinkedIn" value={contact.linkedin_url} href={contact.linkedin_url} />
+        <Row
+          icon={<Linkedin />}
+          label="LinkedIn"
+          value={contact.linkedin_url}
+          href={contact.linkedin_url}
+        />
       )}
       {onEnrich && (contact?.needsApollo || !contact) && (
         <ApolloCTA onClick={onEnrich} loading={enriching} />

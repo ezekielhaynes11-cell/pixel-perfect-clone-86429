@@ -46,38 +46,41 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
         | { type: "tool_end"; name: string; summary: string }
         | { type: "error"; message: string }
       >) {
+        // All branches rebuild the last message immutably (never mutate objects
+        // held in a previous state) so StrictMode's double-invoked updaters and
+        // React's referential-equality checks behave correctly.
         if (event.type === "text") {
           setMessages((prev) => {
-            const next = [...prev];
-            const last = next[next.length - 1];
-            if (last?.role === "assistant") last.content += event.text;
-            return next;
+            const last = prev[prev.length - 1];
+            if (last?.role !== "assistant") return prev;
+            return [...prev.slice(0, -1), { ...last, content: last.content + event.text }];
           });
         } else if (event.type === "tool_start") {
           setMessages((prev) => {
-            const next = [...prev];
-            const last = next[next.length - 1];
-            if (last?.role === "assistant") {
-              last.tools = [...(last.tools ?? []), { name: event.name, summary: "running…" }];
-            }
-            return next;
+            const last = prev[prev.length - 1];
+            if (last?.role !== "assistant") return prev;
+            return [
+              ...prev.slice(0, -1),
+              {
+                ...last,
+                tools: [...(last.tools ?? []), { name: event.name, summary: "running…" }],
+              },
+            ];
           });
         } else if (event.type === "tool_end") {
           setMessages((prev) => {
-            const next = [...prev];
-            const last = next[next.length - 1];
-            if (last?.role === "assistant" && last.tools?.length) {
-              const idx = last.tools.length - 1;
-              last.tools[idx] = { name: event.name, summary: event.summary };
-            }
-            return next;
+            const last = prev[prev.length - 1];
+            if (last?.role !== "assistant" || !last.tools?.length) return prev;
+            const tools = last.tools.map((t, i) =>
+              i === last.tools!.length - 1 ? { name: event.name, summary: event.summary } : t,
+            );
+            return [...prev.slice(0, -1), { ...last, tools }];
           });
         } else if (event.type === "error") {
           setMessages((prev) => {
-            const next = [...prev];
-            const last = next[next.length - 1];
-            if (last?.role === "assistant") last.content = `⚠️ ${event.message}`;
-            return next;
+            const last = prev[prev.length - 1];
+            if (last?.role !== "assistant") return prev;
+            return [...prev.slice(0, -1), { ...last, content: `⚠️ ${event.message}` }];
           });
         }
       }
@@ -85,12 +88,12 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
       // Log the real error; show the user a safe, friendly fallback.
       console.error("[copilot] request failed:", e);
       setMessages((prev) => {
-        const next = [...prev];
-        const last = next[next.length - 1];
-        if (last?.role === "assistant") {
-          last.content = "⚠️ Something went wrong reaching the Copilot. Please try again.";
-        }
-        return next;
+        const last = prev[prev.length - 1];
+        if (last?.role !== "assistant") return prev;
+        return [
+          ...prev.slice(0, -1),
+          { ...last, content: "⚠️ Something went wrong reaching the Copilot. Please try again." },
+        ];
       });
     } finally {
       setBusy(false);

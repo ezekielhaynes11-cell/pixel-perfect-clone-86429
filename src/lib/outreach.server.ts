@@ -49,7 +49,10 @@ const TOOL = {
 };
 
 /** Choose a default tone from the lead if caller didn't specify one. */
-export function defaultToneForLead(lead: { source?: string | null; signal_type?: string | null }): OutreachTone {
+export function defaultToneForLead(lead: {
+  source?: string | null;
+  signal_type?: string | null;
+}): OutreachTone {
   if (lead.signal_type === "recall" || lead.signal_type === "m_and_a") return "switch_pitch";
   if (lead.source === "openfda" || lead.source === "gdelt_m_and_a") return "switch_pitch";
   return "discovery";
@@ -100,4 +103,3 @@ ${TONE_GUIDE[tone]}`;
   if (!args) throw new Error("AI returned no draft");
   return JSON.parse(args);
 }
-

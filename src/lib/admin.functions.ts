@@ -15,12 +15,20 @@ export const listKeywords = createServerFn({ method: "GET" }).handler(async () =
 
 export const upsertKeyword = createServerFn({ method: "POST" })
   .inputValidator((input) =>
-    z.object({
-      id: z.string().uuid().optional(),
-      kind: z.enum(["vendor", "product_model", "focus_concept", "role_title", "complaint_signal"]),
-      value: z.string().min(1).max(200),
-      active: z.boolean().default(true),
-    }).parse(input),
+    z
+      .object({
+        id: z.string().uuid().optional(),
+        kind: z.enum([
+          "vendor",
+          "product_model",
+          "focus_concept",
+          "role_title",
+          "complaint_signal",
+        ]),
+        value: z.string().min(1).max(200),
+        active: z.boolean().default(true),
+      })
+      .parse(input),
   )
   .handler(async ({ data }) => {
     if (data.id) {
@@ -34,7 +42,8 @@ export const upsertKeyword = createServerFn({ method: "POST" })
     const { data: row, error } = await supabaseAdmin
       .from("keyword_lists")
       .insert({ kind: data.kind, value: data.value, active: data.active })
-      .select("id").single();
+      .select("id")
+      .single();
     if (error && !error.message.includes("duplicate")) throw new Error(error.message);
     return { id: row?.id ?? null };
   });
@@ -58,10 +67,12 @@ export const listAccounts = createServerFn({ method: "GET" }).handler(async () =
 
 export const scrapePageForAccount = createServerFn({ method: "POST" })
   .inputValidator((input) =>
-    z.object({
-      url: z.string().url(),
-      accountId: z.string().uuid().nullable().optional(),
-    }).parse(input),
+    z
+      .object({
+        url: z.string().url(),
+        accountId: z.string().uuid().nullable().optional(),
+      })
+      .parse(input),
   )
   .handler(async ({ data }) => {
     return await scrapeUrlForAccount({ url: data.url, accountId: data.accountId ?? null });

@@ -23,7 +23,11 @@ Rules:
 interface ChatMsg {
   role: "system" | "user" | "assistant" | "tool";
   content: string | null;
-  tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
+  tool_calls?: Array<{
+    id: string;
+    type: "function";
+    function: { name: string; arguments: string };
+  }>;
   tool_call_id?: string;
 }
 
@@ -65,12 +69,18 @@ export const copilotChat = createServerFn({ method: "POST" })
           return;
         }
         if (res.status === 402) {
-          yield { type: "error", message: "AI credits exhausted. Top up in Settings → Workspace → Usage." } as const;
+          yield {
+            type: "error",
+            message: "AI credits exhausted. Top up in Settings → Workspace → Usage.",
+          } as const;
           return;
         }
         // Log the raw gateway response server-side; show the user a safe message.
         console.error(`[copilot] AI gateway ${res.status}:`, body);
-        yield { type: "error", message: "The Copilot is temporarily unavailable. Please try again in a moment." } as const;
+        yield {
+          type: "error",
+          message: "The Copilot is temporarily unavailable. Please try again in a moment.",
+        } as const;
         return;
       }
       const json = (await res.json()) as {
@@ -79,7 +89,11 @@ export const copilotChat = createServerFn({ method: "POST" })
       const msg = json.choices?.[0]?.message;
       if (!msg) throw new Error("AI returned no message");
 
-      messages.push({ role: "assistant", content: msg.content ?? null, tool_calls: msg.tool_calls });
+      messages.push({
+        role: "assistant",
+        content: msg.content ?? null,
+        tool_calls: msg.tool_calls,
+      });
 
       if (!msg.tool_calls?.length) {
         if (msg.content) yield { type: "text", text: msg.content } as const;
@@ -88,7 +102,16 @@ export const copilotChat = createServerFn({ method: "POST" })
 
       for (const call of msg.tool_calls) {
         toolCallsUsed++;
-        const args = JSON.parse(call.function.arguments || "{}");
+        // The model occasionally emits malformed JSON args; a bare JSON.parse
+        // would kill the whole stream. Fall back to {} and let the tool report.
+        // (No explicit annotation — inference keeps args as the JSON `any` the
+        // server-fn serializer expects.)
+        let args;
+        try {
+          args = JSON.parse(call.function.arguments || "{}");
+        } catch {
+          args = {};
+        }
         yield { type: "tool_start", name: call.function.name, args } as const;
         let result: unknown;
         try {
@@ -105,7 +128,10 @@ export const copilotChat = createServerFn({ method: "POST" })
         });
       }
     }
-    yield { type: "text", text: "_Reached tool-call limit. Ask a more specific question._" } as const;
+    yield {
+      type: "text",
+      text: "_Reached tool-call limit. Ask a more specific question._",
+    } as const;
   });
 
 function summarizeResult(name: string, result: unknown): string {

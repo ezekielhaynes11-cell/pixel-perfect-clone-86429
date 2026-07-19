@@ -66,15 +66,17 @@ export async function sendGmail(input: GmailSendInput): Promise<GmailSendResult>
 function base64Url(s: string): string {
   // Cloudflare Workers have btoa; encode as Latin1 first to avoid UTF-8 issues.
   const utf8 = unescape(encodeURIComponent(s));
-  const b64 = typeof btoa === "function" ? btoa(utf8) : Buffer.from(utf8, "binary").toString("base64");
+  const b64 =
+    typeof btoa === "function" ? btoa(utf8) : Buffer.from(utf8, "binary").toString("base64");
   return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 function encodeRfcHeader(s: string): string {
   // Quote non-ASCII subjects per RFC 2047
   if (/^[\x20-\x7E]*$/.test(s)) return s;
-  const b64 = typeof btoa === "function"
-    ? btoa(unescape(encodeURIComponent(s)))
-    : Buffer.from(s, "utf-8").toString("base64");
+  const b64 =
+    typeof btoa === "function"
+      ? btoa(unescape(encodeURIComponent(s)))
+      : Buffer.from(s, "utf-8").toString("base64");
   return `=?UTF-8?B?${b64}?=`;
 }

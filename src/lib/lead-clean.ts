@@ -5,8 +5,11 @@
 // normalize that at the display layer; they never mutate the database.
 
 // Covers the common emoji blocks plus variation selectors / zero-width joiners.
+// The ZWJ (200D) and variation selector (FE0F) are listed deliberately so we
+// strip them individually; the "misleading character class" lint is a false
+// positive here (we are not trying to match a combined grapheme).
 const EMOJI_RE =
-  /[\u{1F000}-\u{1FAFF}\u{1F1E6}-\u{1F1FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]/gu;
+  /[\u{1F000}-\u{1FAFF}\u{1F1E6}-\u{1F1FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]/gu; // eslint-disable-line no-misleading-character-class
 
 // Bare URLs (http/https or www.) embedded in a title.
 const URL_RE = /\b(?:https?:\/\/|www\.)\S+/gi;
@@ -47,16 +50,7 @@ export function cleanLeadTitle(raw: string | null | undefined): string {
   return t || "Untitled lead";
 }
 
-const HOSPITAL_BLANKS = new Set([
-  "",
-  "unknown",
-  "unspecified",
-  "n/a",
-  "na",
-  "none",
-  "null",
-  "tbd",
-]);
+const HOSPITAL_BLANKS = new Set(["", "unknown", "unspecified", "n/a", "na", "none", "null", "tbd"]);
 
 const HOSPITAL_NOT_IDENTIFIED = "Hospital not identified";
 

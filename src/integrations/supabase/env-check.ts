@@ -4,7 +4,6 @@ const url = import.meta.env.VITE_SUPABASE_URL;
 const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 if (typeof window !== "undefined" && (!url || !key)) {
-  // eslint-disable-next-line no-console
   console.error(
     "%c[FATAL] Supabase env missing in production bundle — published site will be empty.\n" +
       "Expected VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY to be defined at build time.\n" +

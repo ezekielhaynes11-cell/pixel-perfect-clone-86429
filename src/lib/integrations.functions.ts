@@ -66,7 +66,6 @@ export const sendOutreachEmail = createServerFn({ method: "POST" })
         draft_id: z.string().uuid(),
         to: z.string().email().max(200),
         cc: z.string().email().max(200).optional(),
-        schedule_followups: z.boolean().default(true),
       })
       .parse(input),
   )
@@ -86,32 +85,17 @@ export const sendOutreachEmail = createServerFn({ method: "POST" })
     });
     if (!res.ok) return res;
 
-    // Log the send as a lead_action so the UI can show "Contacted on X".
-    await supabaseAdmin.from("lead_actions").insert({
-      lead_id: draft.lead_id,
-      user_id: OWNER_ID,
-      action: "saved",
-      note: `Sent via Gmail to ${data.to}${res.messageId ? ` · message ${res.messageId}` : ""}`,
-    });
-
-    // Schedule follow-ups by writing future draft rows the cron picks up.
-    if (data.schedule_followups) {
-      const plus = (days: number) => new Date(Date.now() + days * 86400_000).toISOString();
-      await supabaseAdmin.from("outreach_drafts").insert([
-        {
-          lead_id: draft.lead_id,
-          user_id: OWNER_ID,
-          subject: `[Follow-up 1] ${draft.subject}`,
-          body: `Hi —\n\nWanted to bump this in case it got buried. Happy to keep it brief — even 15 minutes this week would tell us if there's a fit.\n\n--- Original ---\n${draft.body}\n\n(Scheduled to send around ${plus(3).slice(0, 10)})`,
-        },
-        {
-          lead_id: draft.lead_id,
-          user_id: OWNER_ID,
-          subject: `[Follow-up 2] ${draft.subject}`,
-          body: `Hi —\n\nLast nudge from me. If timing isn't right, no worries — would it make sense to revisit Q${Math.ceil((new Date().getMonth() + 4) / 3)}?\n\n(Scheduled to send around ${plus(7).slice(0, 10)})`,
-        },
-      ]);
-    }
+    // Record the send as a real 'contacted' action so the lead shows as contacted.
+    // (Previously mislabelled 'saved', which polluted the saved/bookmark list.)
+    await supabaseAdmin.from("lead_actions").upsert(
+      {
+        lead_id: draft.lead_id,
+        user_id: OWNER_ID,
+        action: "contacted",
+        note: `Sent via Gmail to ${data.to}${res.messageId ? ` · message ${res.messageId}` : ""}`,
+      },
+      { onConflict: "lead_id,user_id,action" },
+    );
 
     return { ok: true, messageId: res.messageId, threadId: res.threadId };
   });

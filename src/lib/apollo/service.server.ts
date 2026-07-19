@@ -3,11 +3,11 @@
 // apollo.functions.ts (for direct UI button calls).
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { tryConsumeApolloCall } from "./quota.server";
 import {
   apolloOrgSearch,
   apolloPeopleSearch,
   apolloPersonMatch,
+  ApolloCapError,
   type ApolloPerson,
 } from "./client.server";
 
@@ -36,21 +36,20 @@ export async function backfillApolloForLinkedPhysicians(args: { limit?: number }
   let attempted = 0;
   let matched = 0;
   let skippedCap = 0;
-  let capLogged = false;
   for (const row of candidates ?? []) {
-    if (!tryConsumeApolloCall()) {
-      skippedCap++;
-      if (!capLogged) {
-        console.warn("apollo daily cap reached during backfill, stopping");
-        capLogged = true;
-      }
-      break;
-    }
     attempted++;
     try {
       const res = await apolloEnrichPhysician({ npi: row.npi });
       if (res && (res as { email?: string | null }).email) matched++;
     } catch (e) {
+      // The central meter (client.server.ts) throws ApolloCapError when the daily
+      // cap is reached — stop the loop instead of hammering the endpoint.
+      if (e instanceof ApolloCapError) {
+        skippedCap = (candidates ?? []).length - attempted + 1;
+        attempted--;
+        console.warn("apollo daily cap reached during backfill, stopping");
+        break;
+      }
       console.error("backfill apollo failed for", row.npi, e instanceof Error ? e.message : e);
     }
     await new Promise((r) => setTimeout(r, 300));
@@ -83,7 +82,9 @@ function firstPhone(p: ApolloPerson): string | null {
 export async function apolloEnrichPhysician(args: { npi: string }) {
   const { data: existing, error: readErr } = await supabaseAdmin
     .from("physician_contacts")
-    .select("npi, full_name, practice_state, email, title, linkedin_url, apollo_id, apollo_enriched_at")
+    .select(
+      "npi, full_name, practice_state, practice_phone, email, title, linkedin_url, apollo_id, apollo_enriched_at",
+    )
     .eq("npi", args.npi)
     .maybeSingle();
   if (readErr) return { error: readErr.message };
@@ -93,7 +94,6 @@ export async function apolloEnrichPhysician(args: { npi: string }) {
   if (existing.apollo_id || existing.apollo_enriched_at) {
     return { skipped: true, exists: true, npi: args.npi };
   }
-
 
   const [first, ...rest] = (existing.full_name ?? "").trim().split(/\s+/);
   const last = rest.join(" ");
@@ -120,7 +120,7 @@ export async function apolloEnrichPhysician(args: { npi: string }) {
   if (p.email) patch.email = p.email;
   if (p.title) patch.title = p.title;
   if (p.linkedin_url) patch.linkedin_url = p.linkedin_url;
-  if (phone && !existing.email) patch.practice_phone = phone;
+  if (phone && !existing.practice_phone) patch.practice_phone = phone;
 
   const { error: upErr } = await supabaseAdmin
     .from("physician_contacts")

@@ -8,7 +8,6 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 
-
 import appCss from "../styles.css?url";
 
 function NotFoundComponent() {
@@ -79,10 +78,24 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "twitter:card", content: "summary" },
       { property: "og:title", content: "Yield Architect — Philips Sales Intelligence" },
       { name: "twitter:title", content: "Yield Architect — Philips Sales Intelligence" },
-      { property: "og:description", content: "AI-powered medical device sales intelligence dashboard." },
-      { name: "twitter:description", content: "AI-powered medical device sales intelligence dashboard." },
-      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/8c485388-d749-4cf7-af6e-c563b9dec165/id-preview-bbcea32c--4153fd65-1b3f-4a50-9892-2fe6d3062712.lovable.app-1779175069832.png" },
-      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/8c485388-d749-4cf7-af6e-c563b9dec165/id-preview-bbcea32c--4153fd65-1b3f-4a50-9892-2fe6d3062712.lovable.app-1779175069832.png" },
+      {
+        property: "og:description",
+        content: "AI-powered medical device sales intelligence dashboard.",
+      },
+      {
+        name: "twitter:description",
+        content: "AI-powered medical device sales intelligence dashboard.",
+      },
+      {
+        property: "og:image",
+        content:
+          "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/8c485388-d749-4cf7-af6e-c563b9dec165/id-preview-bbcea32c--4153fd65-1b3f-4a50-9892-2fe6d3062712.lovable.app-1779175069832.png",
+      },
+      {
+        name: "twitter:image",
+        content:
+          "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/8c485388-d749-4cf7-af6e-c563b9dec165/id-preview-bbcea32c--4153fd65-1b3f-4a50-9892-2fe6d3062712.lovable.app-1779175069832.png",
+      },
     ],
     links: [
       { rel: "stylesheet", href: appCss },

@@ -3,13 +3,24 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { listKeywords, upsertKeyword, deleteKeyword, scrapePageForAccount, listScrapedPages } from "@/lib/admin.functions";
+import {
+  listKeywords,
+  upsertKeyword,
+  deleteKeyword,
+  scrapePageForAccount,
+  listScrapedPages,
+} from "@/lib/admin.functions";
 import { bulkEnrichApollo, countUnenrichedPhysicians } from "@/lib/apollo.functions";
 import { batchEnrichContacts } from "@/lib/leads.functions";
 
-
-const KINDS = ["vendor", "product_model", "focus_concept", "role_title", "complaint_signal"] as const;
-type Kind = typeof KINDS[number];
+const KINDS = [
+  "vendor",
+  "product_model",
+  "focus_concept",
+  "role_title",
+  "complaint_signal",
+] as const;
+type Kind = (typeof KINDS)[number];
 
 export const Route = createFileRoute("/settings/keywords")({
   head: () => ({ meta: [{ title: "Keywords & Scraping — Yield Architect" }] }),
@@ -29,7 +40,10 @@ function KeywordsPage() {
 
   const kw = useQuery({ queryKey: ["keywords"], queryFn: () => list() });
   const sp = useQuery({ queryKey: ["scraped_pages"], queryFn: () => pages() });
-  const unenrichedQ = useQuery({ queryKey: ["physician_contacts_unenriched_count"], queryFn: () => countUnenriched() });
+  const unenrichedQ = useQuery({
+    queryKey: ["physician_contacts_unenriched_count"],
+    queryFn: () => countUnenriched(),
+  });
 
   const [kind, setKind] = useState<Kind>("vendor");
   const [value, setValue] = useState("");
@@ -37,10 +51,13 @@ function KeywordsPage() {
   const [enrichLimit, setEnrichLimit] = useState(25);
   const [contactEnrichLimit, setContactEnrichLimit] = useState(20);
 
-
   const add = useMutation({
     mutationFn: () => upsert({ data: { kind, value: value.trim(), active: true } }),
-    onSuccess: () => { setValue(""); qc.invalidateQueries({ queryKey: ["keywords"] }); toast.success("Added"); },
+    onSuccess: () => {
+      setValue("");
+      qc.invalidateQueries({ queryKey: ["keywords"] });
+      toast.success("Added");
+    },
     onError: (e: Error) => toast.error(e.message),
   });
   const remove = useMutation({
@@ -49,7 +66,11 @@ function KeywordsPage() {
   });
   const doScrape = useMutation({
     mutationFn: () => scrape({ data: { url: url.trim() } }),
-    onSuccess: () => { setUrl(""); qc.invalidateQueries({ queryKey: ["scraped_pages"] }); toast.success("Scraped"); },
+    onSuccess: () => {
+      setUrl("");
+      qc.invalidateQueries({ queryKey: ["scraped_pages"] });
+      toast.success("Scraped");
+    },
     onError: (e: Error) => toast.error(e.message),
   });
   const doBulkEnrich = useMutation({
@@ -66,11 +87,12 @@ function KeywordsPage() {
     mutationFn: () => batchEnrich({ data: { limit: contactEnrichLimit } }),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ["contact_enrichment_count"] });
-      toast.success(`Processed ${r.total} leads · ${r.enriched} contacts found · ${r.errors} errors`);
+      toast.success(
+        `Processed ${r.total} leads · ${r.enriched} contacts found · ${r.errors} errors`,
+      );
     },
     onError: (e: Error) => toast.error(e.message),
   });
-
 
   const grouped = (kw.data ?? []).reduce<Record<string, typeof kw.data>>((acc, k) => {
     (acc[k.kind] ||= [] as never).push(k);
@@ -82,24 +104,37 @@ function KeywordsPage() {
       <header>
         <h1 className="font-display text-2xl font-semibold">Keywords & Scraping</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Edit the taxonomy that drives Reddit / Bluesky / GDELT / RSS matching and AI lead extraction. Paste any
-          fellowship or leadership page URL to extract people and vendor mentions.
+          Edit the taxonomy that drives Reddit / Bluesky / GDELT / RSS matching and AI lead
+          extraction. Paste any fellowship or leadership page URL to extract people and vendor
+          mentions.
         </p>
       </header>
 
       <section className="rounded-md border border-border bg-surface-2 p-4">
         <h2 className="mb-3 font-medium">Add term</h2>
         <div className="flex flex-wrap gap-2">
-          <select value={kind} onChange={(e) => setKind(e.target.value as Kind)}
-            className="h-9 rounded-md border border-border bg-surface-3 px-2 text-sm">
-            {KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
+          <select
+            value={kind}
+            onChange={(e) => setKind(e.target.value as Kind)}
+            className="h-9 rounded-md border border-border bg-surface-3 px-2 text-sm"
+          >
+            {KINDS.map((k) => (
+              <option key={k} value={k}>
+                {k}
+              </option>
+            ))}
           </select>
-          <input value={value} onChange={(e) => setValue(e.target.value)}
+          <input
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
             placeholder='e.g. "TE7 Max" or "POCUS director"'
-            className="h-9 flex-1 rounded-md border border-border bg-surface-3 px-3 text-sm" />
-          <button onClick={() => value.trim() && add.mutate()}
+            className="h-9 flex-1 rounded-md border border-border bg-surface-3 px-3 text-sm"
+          />
+          <button
+            onClick={() => value.trim() && add.mutate()}
             disabled={add.isPending || !value.trim()}
-            className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50">
+            className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
+          >
             Add
           </button>
         </div>
@@ -108,15 +143,27 @@ function KeywordsPage() {
       <section className="space-y-4">
         {KINDS.map((k) => (
           <div key={k} className="rounded-md border border-border bg-surface-2 p-4">
-            <h3 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">{k}</h3>
+            <h3 className="mb-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+              {k}
+            </h3>
             <div className="flex flex-wrap gap-2">
               {(grouped[k] ?? []).map((row) => (
-                <span key={row.id} className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-3 px-3 py-1 text-xs">
+                <span
+                  key={row.id}
+                  className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-3 px-3 py-1 text-xs"
+                >
                   {row.value}
-                  <button onClick={() => remove.mutate(row.id)} className="ml-1 text-muted-foreground hover:text-destructive">×</button>
+                  <button
+                    onClick={() => remove.mutate(row.id)}
+                    className="ml-1 text-muted-foreground hover:text-destructive"
+                  >
+                    ×
+                  </button>
                 </span>
               ))}
-              {(grouped[k] ?? []).length === 0 && <span className="text-xs text-muted-foreground">No terms.</span>}
+              {(grouped[k] ?? []).length === 0 && (
+                <span className="text-xs text-muted-foreground">No terms.</span>
+              )}
             </div>
           </div>
         ))}
@@ -125,28 +172,52 @@ function KeywordsPage() {
       <section className="rounded-md border border-border bg-surface-2 p-4">
         <h2 className="mb-3 font-medium">Scrape a hospital / fellowship page</h2>
         <div className="flex flex-wrap gap-2">
-          <input value={url} onChange={(e) => setUrl(e.target.value)}
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
             placeholder="https://hospital.org/emergency-medicine/fellowship"
-            className="h-9 flex-1 rounded-md border border-border bg-surface-3 px-3 text-sm" />
-          <button onClick={() => url.trim() && doScrape.mutate()}
+            className="h-9 flex-1 rounded-md border border-border bg-surface-3 px-3 text-sm"
+          />
+          <button
+            onClick={() => url.trim() && doScrape.mutate()}
             disabled={doScrape.isPending || !url.trim()}
-            className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50">
+            className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
+          >
             {doScrape.isPending ? "Scraping…" : "Scrape"}
           </button>
         </div>
         <div className="mt-4 space-y-2">
           {(sp.data ?? []).map((p) => {
-            const ex = (p.extracted as { summary?: string; people?: { name: string; role_hint: string | null }[]; vendor_mentions?: string[] }) ?? {};
+            const ex =
+              (p.extracted as {
+                summary?: string;
+                people?: { name: string; role_hint: string | null }[];
+                vendor_mentions?: string[];
+              }) ?? {};
             return (
               <div key={p.id} className="rounded border border-border bg-surface-3 p-3 text-sm">
-                <a href={p.url} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">{p.title ?? p.url}</a>
+                <a
+                  href={p.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-primary hover:underline"
+                >
+                  {p.title ?? p.url}
+                </a>
                 {ex.summary && <p className="mt-1 text-muted-foreground">{ex.summary}</p>}
                 {ex.people && ex.people.length > 0 && (
-                  <p className="mt-1 text-xs"><span className="text-muted-foreground">People: </span>
-                    {ex.people.map((p) => `${p.name}${p.role_hint ? ` (${p.role_hint})` : ""}`).join(", ")}</p>
+                  <p className="mt-1 text-xs">
+                    <span className="text-muted-foreground">People: </span>
+                    {ex.people
+                      .map((p) => `${p.name}${p.role_hint ? ` (${p.role_hint})` : ""}`)
+                      .join(", ")}
+                  </p>
                 )}
                 {ex.vendor_mentions && ex.vendor_mentions.length > 0 && (
-                  <p className="mt-1 text-xs"><span className="text-muted-foreground">Vendors: </span>{ex.vendor_mentions.join(", ")}</p>
+                  <p className="mt-1 text-xs">
+                    <span className="text-muted-foreground">Vendors: </span>
+                    {ex.vendor_mentions.join(", ")}
+                  </p>
                 )}
               </div>
             );
@@ -157,8 +228,9 @@ function KeywordsPage() {
       <section className="rounded-md border border-border bg-surface-2 p-4">
         <h2 className="mb-1 font-medium">Enrich decision-maker contacts</h2>
         <p className="mb-3 text-xs text-muted-foreground">
-          Runs NPPES → Apollo waterfall on the highest-confidence, freshest leads that have not yet been attempted.
-          Sorted by confidence DESC then date DESC so the best leads are enriched first.
+          Runs NPPES → Apollo waterfall on the highest-confidence, freshest leads that have not yet
+          been attempted. Sorted by confidence DESC then date DESC so the best leads are enriched
+          first.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <input
@@ -166,7 +238,9 @@ function KeywordsPage() {
             min={1}
             max={50}
             value={contactEnrichLimit}
-            onChange={(e) => setContactEnrichLimit(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
+            onChange={(e) =>
+              setContactEnrichLimit(Math.max(1, Math.min(50, Number(e.target.value) || 1)))
+            }
             className="h-9 w-24 rounded-md border border-border bg-surface-3 px-3 text-sm"
           />
           <button
@@ -182,7 +256,8 @@ function KeywordsPage() {
       <section className="rounded-md border border-border bg-surface-2 p-4">
         <h2 className="mb-1 font-medium">Bulk enrich physicians via Apollo</h2>
         <p className="mb-3 text-xs text-muted-foreground">
-          {unenrichedQ.data?.count ?? "—"} physicians have no Apollo data yet. Runs sequentially with a short delay; counts against your Apollo quota.
+          {unenrichedQ.data?.count ?? "—"} physicians have no Apollo data yet. Runs sequentially
+          with a short delay; counts against your Apollo quota.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <input
@@ -190,7 +265,9 @@ function KeywordsPage() {
             min={1}
             max={100}
             value={enrichLimit}
-            onChange={(e) => setEnrichLimit(Math.max(1, Math.min(100, Number(e.target.value) || 1)))}
+            onChange={(e) =>
+              setEnrichLimit(Math.max(1, Math.min(100, Number(e.target.value) || 1)))
+            }
             className="h-9 w-24 rounded-md border border-border bg-surface-3 px-3 text-sm"
           />
           <button
@@ -203,6 +280,5 @@ function KeywordsPage() {
         </div>
       </section>
     </div>
-
   );
 }

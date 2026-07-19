@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { X, Sparkles, Copy, Mail, Loader2 } from "lucide-react";
@@ -42,18 +42,25 @@ export function OutreachDraftDialog({
     enabled: !!lead && open,
   });
 
+  // Seed the editor from saved drafts ONCE per lead. A background refetch (e.g.
+  // window focus, or the invalidation after "Save edits") must not overwrite
+  // whatever the rep is currently typing.
+  const seededLeadRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!drafts.data || drafts.data.length === 0) {
+    if (!lead || drafts.isLoading) return;
+    if (seededLeadRef.current === lead.id) return;
+    seededLeadRef.current = lead.id;
+    const latest = drafts.data?.[0];
+    if (latest) {
+      setDraftId(latest.id);
+      setSubject(latest.subject);
+      setBody(latest.body);
+    } else {
       setDraftId(null);
       setSubject("");
       setBody("");
-      return;
     }
-    const latest = drafts.data[0];
-    setDraftId(latest.id);
-    setSubject(latest.subject);
-    setBody(latest.body);
-  }, [drafts.data]);
+  }, [lead, drafts.data, drafts.isLoading]);
 
   const gen = useMutation({
     mutationFn: () => generate({ data: { lead_id: lead!.id, tone } }),
@@ -69,8 +76,7 @@ export function OutreachDraftDialog({
   });
 
   const save = useMutation({
-    mutationFn: () =>
-      update({ data: { id: draftId!, subject, body } }),
+    mutationFn: () => update({ data: { id: draftId!, subject, body } }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["outreach_drafts", lead?.id] });
       toast.success("Saved");
@@ -80,13 +86,18 @@ export function OutreachDraftDialog({
 
   if (!open || !lead) return null;
 
+  // Prefill the recipient from the best known email on the lead so "Open in mail"
+  // doesn't drop the address the app already has.
+  const recipient = lead.sourceContacts?.find((c) => c.email)?.email ?? "";
+
   const copyAll = async () => {
     await navigator.clipboard.writeText(`Subject: ${subject}\n\n${body}`);
     toast.success("Copied to clipboard");
   };
 
   const mailto = () => {
-    const url = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    const to = recipient ? encodeURIComponent(recipient) : "";
+    const url = `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     window.location.href = url;
   };
 
@@ -133,7 +144,11 @@ export function OutreachDraftDialog({
               disabled={gen.isPending}
               className="ml-auto flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
             >
-              {gen.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+              {gen.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5" />
+              )}
               {gen.isPending
                 ? "Drafting…"
                 : drafts.data && drafts.data.length > 0
@@ -185,12 +200,19 @@ export function OutreachDraftDialog({
           <button
             onClick={mailto}
             disabled={!body}
+            title={
+              recipient
+                ? `To: ${recipient}`
+                : "No recipient email on file — add it in your mail app"
+            }
             className="flex h-10 items-center gap-1.5 rounded-md border border-border px-3 text-sm text-foreground/80 transition-colors hover:bg-surface-2 disabled:opacity-40"
           >
-            <Mail className="h-3.5 w-3.5" /> Open in mail
+            <Mail className="h-3.5 w-3.5" /> {recipient ? "Email contact" : "Open in mail"}
           </button>
           <span className="ml-auto text-[11px] text-muted-foreground">
-            {drafts.data ? `${drafts.data.length} draft${drafts.data.length === 1 ? "" : "s"} saved` : ""}
+            {drafts.data
+              ? `${drafts.data.length} draft${drafts.data.length === 1 ? "" : "s"} saved`
+              : ""}
           </span>
         </div>
       </div>

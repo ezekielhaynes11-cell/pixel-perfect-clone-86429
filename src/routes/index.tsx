@@ -2,13 +2,42 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { RefreshCw, Bookmark, BarChart3, AlertCircle, EyeOff, Eye, XCircle, RotateCcw, Sparkles } from "lucide-react";
+import {
+  RefreshCw,
+  Bookmark,
+  BarChart3,
+  AlertCircle,
+  EyeOff,
+  Eye,
+  XCircle,
+  RotateCcw,
+  Sparkles,
+} from "lucide-react";
 import { toast } from "sonner";
-import { listLeads, triggerIngestionForSource, setLeadAction, listLeadActions, getRecentIngestionRuns, listLeadPhysicians, bulkSetLeadAction, getEnrichedContactCount, INGESTION_SOURCES, type LeadPhysician } from "@/lib/leads.functions";
-import { rowToLead, leadStateCode, leadIsHighPriority, isDiscoveredToday, type Lead, type LeadRow } from "@/data/leads";
+import {
+  listLeads,
+  triggerIngestionForSource,
+  setLeadAction,
+  listLeadActions,
+  getRecentIngestionRuns,
+  listLeadPhysicians,
+  bulkSetLeadAction,
+  getEnrichedContactCount,
+  INGESTION_SOURCES,
+  type LeadPhysician,
+} from "@/lib/leads.functions";
+import {
+  rowToLead,
+  leadStateCode,
+  leadIsHighPriority,
+  isDiscoveredToday,
+  type Lead,
+  type LeadRow,
+} from "@/data/leads";
 import { isLikelyNonEnglish, leadDedupeKey } from "@/lib/lead-clean";
 import { SummaryCard } from "@/components/dashboard/SummaryCard";
-import { FilterBar, emptyFilters, type Filters } from "@/components/dashboard/FilterBar";
+import { FilterBar } from "@/components/dashboard/FilterBar";
+import { emptyFilters, type Filters } from "@/components/dashboard/filters";
 import { LeadCard } from "@/components/dashboard/LeadCard";
 import { LeadDetailModal } from "@/components/dashboard/LeadDetailModal";
 import { Sidebar } from "@/components/dashboard/Sidebar";
@@ -27,8 +56,12 @@ export const Route = createFileRoute("/")({
   component: Dashboard,
 });
 
+// Module-scope constants (stable identities) so the feed useMemo doesn't need
+// them in its dependency array and doesn't reallocate them every render.
+const AGE_FILTER_MS = 365 * 24 * 60 * 60 * 1000;
+const TERRITORY_STATES = new Set(["TX", "OK", "AR", "LA"]);
+
 function Dashboard() {
-  
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [active, setActive] = useState<Lead | null>(null);
   const [draftFor, setDraftFor] = useState<Lead | null>(null);
@@ -96,15 +129,17 @@ function Dashboard() {
     },
     onMutate: () => toast.loading("Scanning live sources…", { id: "ingest" }),
     onSuccess: ({ inserted, failed }) => {
-      const msg = failed > 0
-        ? `Found ${inserted} new leads · ${failed} source${failed === 1 ? "" : "s"} failed`
-        : `Found ${inserted} new leads`;
+      const msg =
+        failed > 0
+          ? `Found ${inserted} new leads · ${failed} source${failed === 1 ? "" : "s"} failed`
+          : `Found ${inserted} new leads`;
       toast.success(msg, { id: "ingest" });
       qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["ingestion_runs"] });
       qc.invalidateQueries({ queryKey: ["lead_physicians"] });
     },
-    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Ingestion failed", { id: "ingest" }),
+    onError: (e: unknown) =>
+      toast.error(e instanceof Error ? e.message : "Ingestion failed", { id: "ingest" }),
   });
 
   // Auto-trigger first ingestion if the database is empty and nothing has ever run.
@@ -121,11 +156,16 @@ function Dashboard() {
   }, [leadsQ.isLoading, leadsQ.data, runsQ.isLoading, runsQ.data, ingest]);
 
   const act = useMutation({
-    mutationFn: (input: { lead_id: string; action: "saved" | "dismissed" | "pushed_sfdc"; remove?: boolean }) =>
-      actionFn({ data: input }),
+    mutationFn: (input: {
+      lead_id: string;
+      action: "saved" | "dismissed" | "pushed_sfdc" | "contacted";
+      remove?: boolean;
+    }) => actionFn({ data: input }),
     onSuccess: (_res, vars) => {
       if (vars.action === "saved") {
         toast.success(vars.remove ? "Unsaved" : "Saved");
+      } else if (vars.action === "contacted") {
+        toast.success(vars.remove ? "Marked not contacted" : "Marked contacted");
       }
       qc.invalidateQueries({ queryKey: ["lead_actions"] });
     },
@@ -143,70 +183,113 @@ function Dashboard() {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Bulk action failed"),
   });
 
-  const leads: Lead[] = useMemo(
-    () => {
-      const mapped = (leadsQ.data ?? [])
-        .map((r) => rowToLead(r as LeadRow))
-        // Hide non-English items (e.g. the German Siemens Healthineers listing).
-        .filter((l) => !isLikelyNonEnglish(`${l.title} ${l.summary}`));
-      // Dedupe by normalized headline AND by source_url, keep highest confidence (tiebreak newest).
-      const better = (a: Lead, b: Lead) =>
-        a.confidence !== b.confidence
-          ? a.confidence > b.confidence
-          : new Date(a.dateDiscovered).getTime() > new Date(b.dateDiscovered).getTime();
-      const byKey = new Map<string, Lead>();
-      for (const l of mapped) {
-        // Signature key collapses near-duplicate recall listings that differ
-        // only by recall number/class; URL key collapses exact re-ingests.
-        const keys = [`t:${leadDedupeKey(l.title)}`];
-        if (l.sourceUrl && l.sourceUrl !== "#") keys.push(`u:${l.sourceUrl}`);
-        const existing = keys.map((k) => byKey.get(k)).find(Boolean);
-        if (!existing || better(l, existing)) {
-          for (const k of keys) byKey.set(k, l);
-        }
-      }
-      return Array.from(new Set(byKey.values()));
-    },
-    [leadsQ.data],
-  );
+  const leads: Lead[] = useMemo(() => {
+    const mapped = (leadsQ.data ?? [])
+      .map((r) => rowToLead(r as LeadRow))
+      // Hide non-English items (e.g. the German Siemens Healthineers listing).
+      .filter((l) => !isLikelyNonEnglish(`${l.title} ${l.summary}`));
+    // Dedupe by normalized headline AND by source_url, keep highest confidence (tiebreak newest).
+    const better = (a: Lead, b: Lead) =>
+      a.confidence !== b.confidence
+        ? a.confidence > b.confidence
+        : new Date(a.dateDiscovered).getTime() > new Date(b.dateDiscovered).getTime();
+    // Winners keyed by lead id; keyToId maps each dedupe key to its current
+    // winner. Tracking winners by id (rather than storing leads under each key)
+    // means displacing a lead removes it entirely — it can't survive under a
+    // non-shared key the way it did before.
+    const winners = new Map<string, Lead>();
+    const keyToId = new Map<string, string>();
+    for (const l of mapped) {
+      // Signature key collapses near-duplicate recall listings that differ
+      // only by recall number/class; URL key collapses exact re-ingests.
+      const keys = [`t:${leadDedupeKey(l.title)}`];
+      if (l.sourceUrl && l.sourceUrl !== "#") keys.push(`u:${l.sourceUrl}`);
+      const rivals = Array.from(
+        new Set(keys.map((k) => keyToId.get(k)).filter((id): id is string => !!id)),
+      )
+        .map((id) => winners.get(id))
+        .filter((r): r is Lead => !!r);
+      if (rivals.length > 0 && !rivals.every((r) => better(l, r))) continue; // l is the dup, drop it
+      for (const r of rivals) winners.delete(r.id);
+      winners.set(l.id, l);
+      for (const k of keys) keyToId.set(k, l.id);
+    }
+    return Array.from(winners.values());
+  }, [leadsQ.data]);
   const dismissedIds = useMemo(
-    () => new Set((actionsQ.data ?? []).filter((a) => a.action === "dismissed").map((a) => a.lead_id)),
+    () =>
+      new Set((actionsQ.data ?? []).filter((a) => a.action === "dismissed").map((a) => a.lead_id)),
     [actionsQ.data],
   );
   const savedIds = useMemo(
     () => new Set((actionsQ.data ?? []).filter((a) => a.action === "saved").map((a) => a.lead_id)),
     [actionsQ.data],
   );
-  const activeLeads = useMemo(() => leads.filter((l) => !dismissedIds.has(l.id)), [leads, dismissedIds]);
-  const dismissedLeads = useMemo(() => leads.filter((l) => dismissedIds.has(l.id)), [leads, dismissedIds]);
+  const contactedIds = useMemo(
+    () =>
+      new Set((actionsQ.data ?? []).filter((a) => a.action === "contacted").map((a) => a.lead_id)),
+    [actionsQ.data],
+  );
+  const pushedIds = useMemo(
+    () =>
+      new Set(
+        (actionsQ.data ?? []).filter((a) => a.action === "pushed_sfdc").map((a) => a.lead_id),
+      ),
+    [actionsQ.data],
+  );
+  const activeLeads = useMemo(
+    () => leads.filter((l) => !dismissedIds.has(l.id)),
+    [leads, dismissedIds],
+  );
+  const dismissedLeads = useMemo(
+    () => leads.filter((l) => dismissedIds.has(l.id)),
+    [leads, dismissedIds],
+  );
   const visibleLeads = showDismissed ? dismissedLeads : activeLeads;
 
   const hospitals = useMemo(
-    () => Array.from(new Set(visibleLeads.map((l) => l.hospital).filter((x): x is string => !!x))).sort(),
+    () =>
+      Array.from(
+        new Set(visibleLeads.map((l) => l.hospital).filter((x): x is string => !!x)),
+      ).sort(),
     [visibleLeads],
   );
   const specialties = useMemo(
-    () => Array.from(new Set(visibleLeads.map((l) => l.specialty).filter((x): x is string => !!x))).sort(),
+    () =>
+      Array.from(
+        new Set(visibleLeads.map((l) => l.specialty).filter((x): x is string => !!x)),
+      ).sort(),
     [visibleLeads],
   );
-
-  const AGE_FILTER_MS = 365 * 24 * 60 * 60 * 1000;
-  const TERRITORY_STATES = new Set(["TX", "OK", "AR", "LA"]);
 
   const filtered = useMemo(
     () =>
       visibleLeads.filter((l) => {
-        if (!showOld && Date.now() - new Date(l.dateDiscovered).getTime() > AGE_FILTER_MS) return false;
+        if (!showOld && Date.now() - new Date(l.dateDiscovered).getTime() > AGE_FILTER_MS)
+          return false;
         if (!showAllTerritories && filters.states.length === 0) {
           const code = leadStateCode(l);
           if (!code || !TERRITORY_STATES.has(code)) return false;
         }
-        if (filters.hospitals.length && (!l.hospital || !filters.hospitals.includes(l.hospital))) return false;
-        if (filters.specialties.length && (!l.specialty || !filters.specialties.includes(l.specialty))) return false;
+        if (filters.hospitals.length && (!l.hospital || !filters.hospitals.includes(l.hospital)))
+          return false;
+        if (
+          filters.specialties.length &&
+          (!l.specialty || !filters.specialties.includes(l.specialty))
+        )
+          return false;
         if (filters.sources.length && !filters.sources.includes(l.source)) return false;
         if (l.confidence < filters.minConfidence) return false;
-        if (filters.signalTypes.length && (!l.signalType || !filters.signalTypes.includes(l.signalType as never))) return false;
-        if (filters.accountTypes.length && (!l.accountType || !filters.accountTypes.includes(l.accountType as never))) return false;
+        if (
+          filters.signalTypes.length &&
+          (!l.signalType || !filters.signalTypes.includes(l.signalType as never))
+        )
+          return false;
+        if (
+          filters.accountTypes.length &&
+          (!l.accountType || !filters.accountTypes.includes(l.accountType as never))
+        )
+          return false;
         if (filters.vendors.length) {
           const hay = [...l.vendorMentions, l.competitorIncumbent ?? ""].join(" ").toLowerCase();
           if (!filters.vendors.some((v) => hay.includes(v.toLowerCase()))) return false;
@@ -217,7 +300,7 @@ function Dashboard() {
         }
         return true;
       }),
-    [visibleLeads, filters, showOld, showAllTerritories, AGE_FILTER_MS],
+    [visibleLeads, filters, showOld, showAllTerritories],
   );
 
   const discoveredToday = activeLeads.filter((l) => isDiscoveredToday(l.dateDiscovered)).length;
@@ -253,10 +336,13 @@ function Dashboard() {
             }
             const when = new Date(last.started_at);
             const mins = Math.max(0, Math.round((Date.now() - when.getTime()) / 60000));
-            const ago = mins < 1 ? "just now" : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
+            const ago =
+              mins < 1 ? "just now" : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
             return (
               <div className="hidden items-center gap-1.5 text-xs text-muted-foreground md:flex">
-                <RefreshCw className={`h-3.5 w-3.5 ${last.status === "running" ? "animate-spin text-primary" : "text-success"}`} />
+                <RefreshCw
+                  className={`h-3.5 w-3.5 ${last.status === "running" ? "animate-spin text-primary" : "text-success"}`}
+                />
                 Daily sync · {ago}
                 {last.status === "error" ? " · failed" : ""}
               </div>
@@ -301,17 +387,19 @@ function Dashboard() {
           if (!last) return null;
           const when = new Date(last.started_at);
           const mins = Math.max(0, Math.round((Date.now() - when.getTime()) / 60000));
-          const ago = mins < 1 ? "just now" : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
+          const ago =
+            mins < 1 ? "just now" : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
           const color =
             last.status === "error"
               ? "text-destructive"
               : last.status === "running"
-              ? "text-muted-foreground"
-              : "text-success";
+                ? "text-muted-foreground"
+                : "text-success";
           return (
             <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
               <span className={`inline-block h-1.5 w-1.5 rounded-full bg-current ${color}`} />
-              Last scan: {ago} · {last.source} · {last.new_count ?? 0} new · {enrichedCountQ.data?.count ?? 0} enriched
+              Last scan: {ago} · {last.source} · {last.new_count ?? 0} new ·{" "}
+              {enrichedCountQ.data?.count ?? 0} enriched
               {last.status === "error" ? " · failed" : ""}
             </div>
           );
@@ -331,8 +419,12 @@ function Dashboard() {
 
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
           <div>
-            <FilterBar filters={filters} onChange={setFilters} hospitals={hospitals} specialties={specialties} />
-
+            <FilterBar
+              filters={filters}
+              onChange={setFilters}
+              hospitals={hospitals}
+              specialties={specialties}
+            />
 
             <div className="mb-3 flex flex-wrap items-center gap-3">
               <h2 className="font-display text-sm font-semibold uppercase tracking-wider text-muted-foreground">
@@ -342,11 +434,18 @@ function Dashboard() {
                 </span>
               </h2>
               <button
-                onClick={() => { setShowDismissed((v) => !v); setSelected(new Set()); }}
+                onClick={() => {
+                  setShowDismissed((v) => !v);
+                  setSelected(new Set());
+                }}
                 className="flex h-7 items-center gap-1.5 rounded-sm border border-border bg-surface-2 px-2.5 text-[11px] font-medium text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground"
                 title={showDismissed ? "Back to active feed" : "View dismissed leads"}
               >
-                {showDismissed ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                {showDismissed ? (
+                  <Eye className="h-3.5 w-3.5" />
+                ) : (
+                  <EyeOff className="h-3.5 w-3.5" />
+                )}
                 {showDismissed ? "Show active" : `Show dismissed (${dismissedLeads.length})`}
               </button>
               <button
@@ -380,7 +479,11 @@ function Dashboard() {
                   {showDismissed ? (
                     <button
                       onClick={() =>
-                        bulkAct.mutate({ lead_ids: Array.from(selected), action: "dismissed", remove: true })
+                        bulkAct.mutate({
+                          lead_ids: Array.from(selected),
+                          action: "dismissed",
+                          remove: true,
+                        })
                       }
                       disabled={bulkAct.isPending}
                       className="flex h-7 items-center gap-1.5 rounded-sm border border-success/40 bg-success/10 px-2.5 text-[11px] font-medium text-success hover:bg-success/20 disabled:opacity-50"
@@ -433,8 +536,8 @@ function Dashboard() {
                 {showDismissed
                   ? "No dismissed leads."
                   : leads.length === 0
-                  ? 'No leads yet. Click "Refresh feed" to pull live signals from SAM.gov, FDA, and news.'
-                  : "No leads match your filters."}
+                    ? 'No leads yet. Click "Refresh feed" to pull live signals from SAM.gov, FDA, and news.'
+                    : "No leads match your filters."}
               </div>
             ) : (
               <div className="space-y-3">
@@ -449,7 +552,13 @@ function Dashboard() {
                       physicians={physiciansByLead.get(lead.id) ?? []}
                       onView={setActive}
                       saved={savedIds.has(lead.id)}
-                      onSave={() => act.mutate({ lead_id: lead.id, action: "saved", remove: savedIds.has(lead.id) })}
+                      onSave={() =>
+                        act.mutate({
+                          lead_id: lead.id,
+                          action: "saved",
+                          remove: savedIds.has(lead.id),
+                        })
+                      }
                       onDismiss={() => act.mutate({ lead_id: lead.id, action: "dismissed" })}
                       onDraft={() => setDraftFor(lead)}
                       selectable
@@ -478,14 +587,20 @@ function Dashboard() {
         <footer className="mt-12 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4 text-xs text-muted-foreground">
           {(() => {
             const labels: Record<string, string> = {
-              sam_gov: "SAM.gov", openfda: "openFDA", gdelt: "GDELT",
-              gdelt_m_and_a: "GDELT", gdelt_va_funding: "GDELT",
-              reddit: "Reddit", bluesky: "Bluesky", news: "News",
-              clinicaltrials: "ClinicalTrials", cms_open_payments: "CMS Payments",
+              sam_gov: "SAM.gov",
+              openfda: "openFDA",
+              gdelt: "GDELT",
+              gdelt_m_and_a: "GDELT",
+              gdelt_va_funding: "GDELT",
+              reddit: "Reddit",
+              bluesky: "Bluesky",
+              news: "News",
+              clinicaltrials: "ClinicalTrials",
+              cms_open_payments: "CMS Payments",
               funding_rss: "Gov Funding RSS",
             };
             const active = Array.from(
-              new Set(activeLeads.map((l) => labels[l.source] ?? l.source))
+              new Set(activeLeads.map((l) => labels[l.source] ?? l.source)),
             ).sort();
             const list = active.length ? active.join(" · ") : "active sources";
             return <span>Live data from {list} · Enriched by Yield AI</span>;
@@ -494,7 +609,26 @@ function Dashboard() {
         </footer>
       </main>
 
-      <LeadDetailModal lead={active} physicians={active ? physiciansByLead.get(active.id) ?? [] : []} onClose={() => setActive(null)} />
+      <LeadDetailModal
+        lead={active}
+        physicians={active ? (physiciansByLead.get(active.id) ?? []) : []}
+        saved={active ? savedIds.has(active.id) : false}
+        contacted={active ? contactedIds.has(active.id) : false}
+        pushed={active ? pushedIds.has(active.id) : false}
+        onSave={() =>
+          active &&
+          act.mutate({ lead_id: active.id, action: "saved", remove: savedIds.has(active.id) })
+        }
+        onMarkContacted={() =>
+          active &&
+          act.mutate({
+            lead_id: active.id,
+            action: "contacted",
+            remove: contactedIds.has(active.id),
+          })
+        }
+        onClose={() => setActive(null)}
+      />
       <OutreachDraftDialog lead={draftFor} open={!!draftFor} onClose={() => setDraftFor(null)} />
       <SavedSearchesDrawer
         open={searchesOpen}

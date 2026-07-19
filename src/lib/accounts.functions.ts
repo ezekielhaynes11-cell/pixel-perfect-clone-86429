@@ -175,7 +175,6 @@ export const getAccountDetail = createServerFn({ method: "POST" })
         }));
     }
 
-
     const { data: scrapedPages } = await supabaseAdmin
       .from("scraped_pages")
       .select("id, url, title, fetched_at")
