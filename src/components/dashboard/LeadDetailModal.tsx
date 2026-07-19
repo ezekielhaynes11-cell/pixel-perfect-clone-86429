@@ -1,15 +1,5 @@
 import { useEffect, useState } from "react";
-import {
-  X,
-  ExternalLink,
-  Building2,
-  User2,
-  Wrench,
-  Tag,
-  Loader2,
-  Check,
-  Link2,
-} from "lucide-react";
+import { X, ExternalLink, Building2, User2, Wrench, Tag, Loader2, Check } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -21,19 +11,15 @@ import { ContactSection } from "./ContactSection";
 export function LeadDetailModal({
   lead,
   physicians = [],
-  saved = false,
   contacted = false,
   pushed = false,
-  onSave,
   onMarkContacted,
   onClose,
 }: {
   lead: Lead | null;
   physicians?: LeadPhysician[];
-  saved?: boolean;
   contacted?: boolean;
   pushed?: boolean;
-  onSave?: () => void;
   onMarkContacted?: () => void;
   onClose: () => void;
 }) {
@@ -86,15 +72,6 @@ export function LeadDetailModal({
   });
 
   if (!lead) return null;
-
-  const copyLink = async () => {
-    if (!lead.sourceUrl || lead.sourceUrl === "#") {
-      toast.error("No source link on this lead");
-      return;
-    }
-    await navigator.clipboard.writeText(lead.sourceUrl);
-    toast.success("Source link copied");
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm md:p-8">
@@ -184,28 +161,18 @@ export function LeadDetailModal({
           </a>
         </div>
 
-        <div className="flex flex-wrap gap-2 border-t border-border p-5">
+        <div className="flex flex-col gap-2 border-t border-border p-5 sm:flex-row">
           <button
             onClick={() => crm.mutate()}
             disabled={crm.isPending || pushed}
-            className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-md bg-primary text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+            className="flex h-10 w-full items-center justify-center gap-1.5 rounded-md bg-primary text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60 sm:flex-1"
           >
             {crm.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
             {pushed ? "In CRM" : "Add to CRM"}
           </button>
           <button
-            onClick={onSave}
-            className={`h-10 rounded-md border px-4 text-sm transition-colors ${
-              saved
-                ? "border-primary/50 bg-primary/10 text-primary"
-                : "border-border text-foreground/80 hover:bg-surface-2"
-            }`}
-          >
-            {saved ? "Saved" : "Save"}
-          </button>
-          <button
             onClick={onMarkContacted}
-            className={`flex h-10 items-center gap-1.5 rounded-md border px-4 text-sm transition-colors ${
+            className={`flex h-10 w-full items-center justify-center gap-1.5 rounded-md border text-sm transition-colors sm:flex-1 sm:px-4 ${
               contacted
                 ? "border-success/50 bg-success/10 text-success"
                 : "border-border text-foreground/80 hover:bg-surface-2"
@@ -213,12 +180,6 @@ export function LeadDetailModal({
           >
             {contacted ? <Check className="h-3.5 w-3.5" /> : null}
             {contacted ? "Contacted" : "Mark Contacted"}
-          </button>
-          <button
-            onClick={copyLink}
-            className="flex h-10 items-center gap-1.5 rounded-md border border-border px-4 text-sm text-foreground/80 transition-colors hover:bg-surface-2"
-          >
-            <Link2 className="h-3.5 w-3.5" /> Copy link
           </button>
         </div>
       </div>
