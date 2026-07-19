@@ -42,7 +42,6 @@ export const bulkEnrichApollo = createServerFn({ method: "POST" })
       try {
         const result = await apolloEnrichPhysician({ npi: row.npi });
         if (result && (result as { exists?: boolean }).exists) matched++;
-
       } catch (e) {
         console.error("bulkEnrichApollo failed for", row.npi, e instanceof Error ? e.message : e);
         errors++;
@@ -51,7 +50,6 @@ export const bulkEnrichApollo = createServerFn({ method: "POST" })
     }
     return { attempted: targets.length, matched, errors };
   });
-
 
 export const enrichAccountApollo = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

@@ -2,15 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { ArrowLeft, TrendingUp, Target, Gauge } from "lucide-react";
-import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-} from "recharts";
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import { getPipelineForecast } from "@/lib/leads.functions";
 import { formatUsd } from "@/data/leads";
 import { cleanLeadTitle, cleanHospital } from "@/lib/lead-clean";
@@ -32,7 +24,10 @@ function PipelinePage() {
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-30 h-16 border-b border-border bg-background/95 backdrop-blur">
         <div className="mx-auto flex h-full max-w-[1400px] items-center gap-4 px-6">
-          <Link to="/" className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+          <Link
+            to="/"
+            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+          >
             <ArrowLeft className="h-4 w-4" /> Back
           </Link>
           <div className="font-display text-base font-bold">Pipeline forecast</div>
@@ -47,7 +42,12 @@ function PipelinePage() {
         ) : (
           <>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-              <Stat icon={<TrendingUp />} label="Weighted pipeline" value={formatUsd(d.totalWeighted)} accent />
+              <Stat
+                icon={<TrendingUp />}
+                label="Weighted pipeline"
+                value={formatUsd(d.totalWeighted)}
+                accent
+              />
               <Stat icon={<Target />} label="Open qualified leads" value={String(d.openCount)} />
               <Stat icon={<Gauge />} label="Avg confidence" value={`${d.avgConfidence}%`} />
             </div>
@@ -63,25 +63,33 @@ function PipelinePage() {
                   );
                 }
                 return (
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                    <XAxis dataKey="name" stroke="var(--color-muted-foreground)" fontSize={11} />
-                    <YAxis stroke="var(--color-muted-foreground)" fontSize={11} tickFormatter={(v) => formatUsd(v)} />
-                    <Tooltip
-                      contentStyle={{
-                        background: "var(--color-surface-2)",
-                        border: "1px solid var(--color-border)",
-                        borderRadius: 8,
-                        fontSize: 12,
-                      }}
-                      formatter={(v: number) => formatUsd(v)}
-                    />
-                    <Bar dataKey="value" fill="var(--color-primary)" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={chartData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                        <XAxis
+                          dataKey="name"
+                          stroke="var(--color-muted-foreground)"
+                          fontSize={11}
+                        />
+                        <YAxis
+                          stroke="var(--color-muted-foreground)"
+                          fontSize={11}
+                          tickFormatter={(v) => formatUsd(v)}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            background: "var(--color-surface-2)",
+                            border: "1px solid var(--color-border)",
+                            borderRadius: 8,
+                            fontSize: 12,
+                          }}
+                          formatter={(v: number) => formatUsd(v)}
+                        />
+                        <Bar dataKey="value" fill="var(--color-primary)" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
                 );
               })()}
             </Panel>
@@ -103,9 +111,13 @@ function PipelinePage() {
                     {d.topLeads.map((l) => (
                       <tr key={l.id} className="border-b border-border/50 hover:bg-surface-2">
                         <td className="py-2 pr-3 font-medium">{cleanLeadTitle(l.title)}</td>
-                        <td className="py-2 pr-3 text-foreground/80">{l.hospital ? cleanHospital(l.hospital) : "—"}</td>
+                        <td className="py-2 pr-3 text-foreground/80">
+                          {l.hospital ? cleanHospital(l.hospital) : "—"}
+                        </td>
                         <td className="py-2 pr-3 text-foreground/80">{l.specialty ?? "—"}</td>
-                        <td className="py-2 pr-3 text-right tabular-nums">{formatUsd(l.estimated_value_usd)}</td>
+                        <td className="py-2 pr-3 text-right tabular-nums">
+                          {formatUsd(l.estimated_value_usd)}
+                        </td>
                         <td className="py-2 pr-3 text-right tabular-nums">
                           {Math.round((Number(l.win_probability) || 0) * 100)}%
                         </td>
@@ -153,7 +165,9 @@ function Stat({
         <span className="[&_svg]:h-3.5 [&_svg]:w-3.5">{icon}</span>
         {label}
       </div>
-      <div className={`font-display text-3xl font-bold ${accent ? "text-primary" : ""}`}>{value}</div>
+      <div className={`font-display text-3xl font-bold ${accent ? "text-primary" : ""}`}>
+        {value}
+      </div>
     </div>
   );
 }

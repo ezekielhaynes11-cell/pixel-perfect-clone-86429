@@ -23,6 +23,22 @@ export function Sidebar({ leads }: { leads: Lead[] }) {
     return acc;
   }, {});
   const total = leads.length || 1;
+
+  // Real 7-day trend: count leads by discovery day for the last 7 calendar days
+  // (oldest → newest), replacing what used to be a hardcoded array.
+  const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const todayStart = startOfDay(new Date());
+  const trend = Array.from({ length: 7 }, (_, i) => {
+    const dayStart = todayStart - (6 - i) * 86_400_000;
+    const nextDayStart = dayStart + 86_400_000;
+    const count = leads.reduce((n, l) => {
+      const t = new Date(l.dateDiscovered).getTime();
+      return t >= dayStart && t < nextDayStart ? n + 1 : n;
+    }, 0);
+    return { label: DAY_LABELS[new Date(dayStart).getDay()], count };
+  });
+  const trendMax = Math.max(1, ...trend.map((d) => d.count));
   const sourceColors: Record<string, string> = {
     sam_gov: "bg-blue-500",
     openfda: "bg-red-500",
@@ -54,15 +70,15 @@ export function Sidebar({ leads }: { leads: Lead[] }) {
     <aside className="space-y-4">
       <Panel icon={<TrendingUp />} title="Top Opportunity Type">
         <div className="font-display text-lg font-semibold">{topType?.[0] ?? "—"}</div>
-        <div className="text-xs text-muted-foreground">
-          {topType?.[1] ?? 0} leads today
-        </div>
+        <div className="text-xs text-muted-foreground">{topType?.[1] ?? 0} leads today</div>
       </Panel>
 
       <Panel icon={<Building2 />} title="Most Active Hospital">
         <div className="font-display text-lg font-semibold">{topHospital?.[0] ?? "—"}</div>
         <div className="text-xs text-muted-foreground">
-          {topHospital ? `Mentioned in ${topHospital[1]} lead${topHospital[1] === 1 ? "" : "s"}` : "No hospital signals yet"}
+          {topHospital
+            ? `Mentioned in ${topHospital[1]} lead${topHospital[1] === 1 ? "" : "s"}`
+            : "No hospital signals yet"}
         </div>
       </Panel>
 
@@ -93,18 +109,19 @@ export function Sidebar({ leads }: { leads: Lead[] }) {
 
       <Panel title="7-Day Trend">
         <div className="flex h-16 items-end gap-1">
-          {[8, 10, 12, 14, 11, 9, 12].map((v, i) => (
+          {trend.map((d, i) => (
             <div
               key={i}
               className="flex-1 rounded-sm bg-primary/60 transition-all hover:bg-primary"
-              style={{ height: `${(v / 14) * 100}%` }}
-              title={`${v} leads`}
+              style={{ height: `${Math.max(4, (d.count / trendMax) * 100)}%` }}
+              title={`${d.label}: ${d.count} lead${d.count === 1 ? "" : "s"} discovered`}
             />
           ))}
         </div>
         <div className="mt-2 flex justify-between text-[10px] text-muted-foreground">
-          <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span>
-          <span>Fri</span><span>Sat</span><span>Sun</span>
+          {trend.map((d, i) => (
+            <span key={i}>{d.label}</span>
+          ))}
         </div>
       </Panel>
     </aside>

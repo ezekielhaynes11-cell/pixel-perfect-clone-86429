@@ -5,7 +5,16 @@ import { PHILLIPS_KEYWORDS } from "./types";
 // Docs: https://open.gsa.gov/api/get-opportunities-public-api/
 const BASE = "https://api.sam.gov/opportunities/v2/search";
 
-const TERRITORY_STATE_NAMES = new Set(["Texas", "Oklahoma", "Arkansas", "Louisiana", "TX", "OK", "AR", "LA"]);
+const TERRITORY_STATE_NAMES = new Set([
+  "Texas",
+  "Oklahoma",
+  "Arkansas",
+  "Louisiana",
+  "TX",
+  "OK",
+  "AR",
+  "LA",
+]);
 
 export async function fetchSamGov(opts: {
   apiKey: string;
@@ -66,7 +75,8 @@ export async function fetchSamGov(opts: {
               .join("\n")
           : "";
       const agencyLabel = [o.department, o.subTier].filter(Boolean).join(" — ");
-      const stateLabel = o.placeOfPerformance?.state?.name ?? o.placeOfPerformance?.state?.code ?? "";
+      const stateLabel =
+        o.placeOfPerformance?.state?.name ?? o.placeOfPerformance?.state?.code ?? "";
       return {
         source: "sam_gov",
         source_external_id: o.noticeId,
@@ -126,8 +136,7 @@ function formatAddress(a?: SamAddress | null): string | null {
 
 function mapPocs(o: SamOpportunity): LeadContact[] {
   const list = o.pointOfContact ?? [];
-  const orgName =
-    o.officeAddress?.name ?? o.subTier ?? o.department ?? null;
+  const orgName = o.officeAddress?.name ?? o.subTier ?? o.department ?? null;
   const officeAddr = formatAddress(o.officeAddress);
   return list
     .map((p): LeadContact => {

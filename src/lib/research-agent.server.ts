@@ -46,7 +46,10 @@ const TOOLS = [
       parameters: {
         type: "object",
         properties: {
-          exec_summary: { type: "string", description: "120-220 word strategic summary for a Philips sales rep." },
+          exec_summary: {
+            type: "string",
+            description: "120-220 word strategic summary for a Philips sales rep.",
+          },
           vendor_footprint: { type: "array", items: { type: "string" } },
           capital_plans: { type: "array", items: { type: "string" } },
           key_people: {
@@ -99,38 +102,51 @@ Rules:
 - Hard limit: 6 tool calls total. Always call finish before that.`;
 
 async function readExistingSignals(accountId: string) {
-  const [{ data: account }, { data: leads }, { data: pages }, { data: physRows }] = await Promise.all([
-    supabaseAdmin.from("accounts").select("name, state, system, account_type, is_va, notes").eq("id", accountId).single(),
-    supabaseAdmin
-      .from("leads")
-      .select("title, summary, source, source_url, signal_type, vendor_mentions, competitor_incumbent, date_discovered, confidence")
-      .eq("account_id", accountId)
-      .order("date_discovered", { ascending: false })
-      .limit(40),
-    supabaseAdmin
-      .from("scraped_pages")
-      .select("url, title, extracted, fetched_at")
-      .eq("account_id", accountId)
-      .order("fetched_at", { ascending: false })
-      .limit(15),
-    supabaseAdmin
-      .from("lead_physicians")
-      .select("role_hint, physician_contacts!inner(full_name, credentials, primary_specialty, practice_city, practice_state)")
-      .in(
-        "lead_id",
-        (
-          await supabaseAdmin.from("leads").select("id").eq("account_id", accountId).limit(40)
-        ).data?.map((r) => r.id) ?? ["00000000-0000-0000-0000-000000000000"],
-      )
-      .limit(50),
-  ]);
+  const [{ data: account }, { data: leads }, { data: pages }, { data: physRows }] =
+    await Promise.all([
+      supabaseAdmin
+        .from("accounts")
+        .select("name, state, system, account_type, is_va, notes")
+        .eq("id", accountId)
+        .single(),
+      supabaseAdmin
+        .from("leads")
+        .select(
+          "title, summary, source, source_url, signal_type, vendor_mentions, competitor_incumbent, date_discovered, confidence",
+        )
+        .eq("account_id", accountId)
+        .order("date_discovered", { ascending: false })
+        .limit(40),
+      supabaseAdmin
+        .from("scraped_pages")
+        .select("url, title, extracted, fetched_at")
+        .eq("account_id", accountId)
+        .order("fetched_at", { ascending: false })
+        .limit(15),
+      supabaseAdmin
+        .from("lead_physicians")
+        .select(
+          "role_hint, physician_contacts!inner(full_name, credentials, primary_specialty, practice_city, practice_state)",
+        )
+        .in(
+          "lead_id",
+          (
+            await supabaseAdmin.from("leads").select("id").eq("account_id", accountId).limit(40)
+          ).data?.map((r) => r.id) ?? ["00000000-0000-0000-0000-000000000000"],
+        )
+        .limit(50),
+    ]);
   return { account, leads: leads ?? [], scraped_pages: pages ?? [], physicians: physRows ?? [] };
 }
 
 interface ChatMsg {
   role: "system" | "user" | "assistant" | "tool";
   content: string | null;
-  tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
+  tool_calls?: Array<{
+    id: string;
+    type: "function";
+    function: { name: string; arguments: string };
+  }>;
   tool_call_id?: string;
 }
 
@@ -161,9 +177,7 @@ export async function runAccountResearch(accountId: string): Promise<ResearchPro
         model: "google/gemini-2.5-flash",
         messages,
         tools: TOOLS,
-        tool_choice: isLast
-          ? { type: "function", function: { name: "finish" } }
-          : "auto",
+        tool_choice: isLast ? { type: "function", function: { name: "finish" } } : "auto",
       }),
     });
     if (!res.ok) throw new Error(`AI gateway ${res.status}: ${await res.text()}`);

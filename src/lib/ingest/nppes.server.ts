@@ -4,8 +4,7 @@
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { apolloEnrichPhysician } from "@/lib/apollo/service.server";
-import { tryConsumeApolloCall } from "@/lib/apollo/quota.server";
-
+import { ApolloCapError } from "@/lib/apollo/client.server";
 
 const NPPES_URL = "https://npiregistry.cms.hhs.gov/api/?version=2.1";
 
@@ -133,7 +132,6 @@ async function fetchByName(
   return mapNppesToContact(results[0]);
 }
 
-
 /**
  * Resolve a list of physician references for a single lead, upsert the contacts,
  * and create lead_physicians rows. Safe to call repeatedly — uses ON CONFLICT.
@@ -145,7 +143,6 @@ export async function attachPhysiciansToLead(
   if (refs.length === 0) return 0;
   let linked = 0;
   let capLoggedThisRun = false;
-
 
   // Dedup by best key
   const seen = new Set<string>();
@@ -181,33 +178,29 @@ export async function attachPhysiciansToLead(
 
       if (!contact) continue;
 
-      await supabaseAdmin
-        .from("physician_contacts")
-        .upsert(
-          {
-            npi: contact.npi,
-            full_name: contact.full_name,
-            credentials: contact.credentials,
-            primary_specialty: contact.primary_specialty,
-            practice_address: contact.practice_address,
-            practice_city: contact.practice_city,
-            practice_state: contact.practice_state,
-            practice_zip: contact.practice_zip,
-            practice_phone: contact.practice_phone,
-            last_verified_at: new Date().toISOString(),
-          },
-          { onConflict: "npi" },
-        );
-
-      const { error: linkErr } = await supabaseAdmin
-        .from("lead_physicians")
-        .insert({
-          lead_id: leadId,
+      await supabaseAdmin.from("physician_contacts").upsert(
+        {
           npi: contact.npi,
-          role: ref.role ?? "named_in_source",
-          role_hint: ref.roleHint ?? null,
-          match_confidence: confidence,
-        });
+          full_name: contact.full_name,
+          credentials: contact.credentials,
+          primary_specialty: contact.primary_specialty,
+          practice_address: contact.practice_address,
+          practice_city: contact.practice_city,
+          practice_state: contact.practice_state,
+          practice_zip: contact.practice_zip,
+          practice_phone: contact.practice_phone,
+          last_verified_at: new Date().toISOString(),
+        },
+        { onConflict: "npi" },
+      );
+
+      const { error: linkErr } = await supabaseAdmin.from("lead_physicians").insert({
+        lead_id: leadId,
+        npi: contact.npi,
+        role: ref.role ?? "named_in_source",
+        role_hint: ref.roleHint ?? null,
+        match_confidence: confidence,
+      });
       if (!linkErr) linked++;
       else if (!linkErr.message?.includes("duplicate")) {
         console.error("lead_physicians insert:", linkErr.message);
@@ -222,19 +215,26 @@ export async function attachPhysiciansToLead(
       const alreadyEnriched = !!(enrichRow?.apollo_enriched_at || enrichRow?.apollo_id);
 
       if (!alreadyEnriched && !contact.npi.startsWith("APL-")) {
-        if (tryConsumeApolloCall()) {
-          try {
-            await apolloEnrichPhysician({ npi: contact.npi });
-          } catch (e) {
-            console.error("apollo auto-enrich failed for", contact.npi, e instanceof Error ? e.message : e);
-          }
+        try {
+          // The central meter (client.server.ts) enforces the daily cap and throws
+          // ApolloCapError when it is reached.
+          await apolloEnrichPhysician({ npi: contact.npi });
           await new Promise((r) => setTimeout(r, 300));
-        } else if (!capLoggedThisRun) {
-          console.warn("apollo daily cap reached, skipping further enrichment this run");
-          capLoggedThisRun = true;
+        } catch (e) {
+          if (e instanceof ApolloCapError) {
+            if (!capLoggedThisRun) {
+              console.warn("apollo daily cap reached, skipping further enrichment this run");
+              capLoggedThisRun = true;
+            }
+          } else {
+            console.error(
+              "apollo auto-enrich failed for",
+              contact.npi,
+              e instanceof Error ? e.message : e,
+            );
+          }
         }
       }
-
     } catch (e) {
       console.error("NPPES lookup failed:", e instanceof Error ? e.message : e);
     }

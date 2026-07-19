@@ -84,9 +84,7 @@ export interface LeadRow {
 
 export function rowToLead(r: LeadRow): Lead {
   const ents = (r.entities as Partial<LeadEntities>) ?? {};
-  const contacts = Array.isArray(r.source_contacts)
-    ? (r.source_contacts as LeadContact[])
-    : [];
+  const contacts = Array.isArray(r.source_contacts) ? (r.source_contacts as LeadContact[]) : [];
   return {
     id: r.id,
     title: cleanLeadTitle(r.title),
@@ -107,7 +105,9 @@ export function rowToLead(r: LeadRow): Lead {
       equipment: ents.equipment ?? [],
       keywords: ents.keywords ?? [],
     },
-    priority: (["high", "medium", "low"].includes(r.priority) ? r.priority : "medium") as Lead["priority"],
+    priority: (["high", "medium", "low"].includes(r.priority)
+      ? r.priority
+      : "medium") as Lead["priority"],
     signalType: r.signal_type ?? null,
     accountType: r.account_type ?? null,
     vendorMentions: r.vendor_mentions ?? [],
@@ -170,13 +170,18 @@ export function leadHospital(l: Lead): string | null {
 
 export function opportunityType(l: Lead): string {
   switch (l.signalType) {
-    case "recall": return "Regulatory Response";
-    case "rfp": return "Equipment Replacement";
+    case "recall":
+      return "Regulatory Response";
+    case "rfp":
+      return "Equipment Replacement";
     case "funding":
-    case "expansion": return "New Facility";
+    case "expansion":
+      return "New Facility";
     case "m_and_a":
-    case "incumbency": return "Competitive Displacement";
-    case "sentiment": return "Market Intelligence";
+    case "incumbency":
+      return "Competitive Displacement";
+    case "sentiment":
+      return "Market Intelligence";
   }
   if (l.vendorMentions.length > 0 || l.competitorIncumbent) return "Competitive Displacement";
   if (l.entities.equipment.length > 0) return "Clinical Event";

@@ -37,7 +37,9 @@ interface OpRow {
   Record_ID?: string;
 }
 
-export async function fetchCmsOpenPayments(opts: { limit?: number; minAmount?: number; territoryState?: string } = {}): Promise<RawLead[]> {
+export async function fetchCmsOpenPayments(
+  opts: { limit?: number; minAmount?: number; territoryState?: string } = {},
+): Promise<RawLead[]> {
   const { limit = 40, minAmount = 5000, territoryState = "CA" } = opts;
 
   // CMS exposes each dataset under a slug identifier resolved by the discovery API.
@@ -83,13 +85,14 @@ export async function fetchCmsOpenPayments(opts: { limit?: number; minAmount?: n
     grouped.set(key, g);
   }
 
-
   return Array.from(grouped.entries())
     .filter(([, g]) => g.total >= minAmount)
     .map(([key, g]): RawLead => {
       const first = g.rows[0];
-      const name = `Dr. ${first.Physician_First_Name ?? ""} ${first.Physician_Last_Name ?? ""}`.trim();
-      const mfr = first.Submitting_Applicable_Manufacturer_or_Applicable_GPO_Name ?? "Unknown competitor";
+      const name =
+        `Dr. ${first.Physician_First_Name ?? ""} ${first.Physician_Last_Name ?? ""}`.trim();
+      const mfr =
+        first.Submitting_Applicable_Manufacturer_or_Applicable_GPO_Name ?? "Unknown competitor";
       const city = first.Recipient_City ?? "";
       const state = first.Recipient_State ?? "";
       const specialty = first.Physician_Specialty ?? "";

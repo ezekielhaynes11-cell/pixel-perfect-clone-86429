@@ -10,22 +10,8 @@ import { fetchFundingRss } from "./funding-rss.server";
 import { enrichRawLead } from "./enrich.server";
 import { attachPhysiciansToLead, type PhysicianLookupInput } from "./nppes.server";
 import { backfillApolloForLinkedPhysicians } from "@/lib/apollo/service.server";
+import { STATE_NAME_TO_CODE as STATE_TO_CODE, territoryMatchesStates } from "@/lib/territory";
 import type { LeadSource, RawLead } from "./types";
-
-// Map US state name → 2-letter code for NPPES name lookups
-const STATE_TO_CODE: Record<string, string> = {
-  alabama: "AL", alaska: "AK", arizona: "AZ", arkansas: "AR", california: "CA",
-  colorado: "CO", connecticut: "CT", delaware: "DE", florida: "FL", georgia: "GA",
-  hawaii: "HI", idaho: "ID", illinois: "IL", indiana: "IN", iowa: "IA",
-  kansas: "KS", kentucky: "KY", louisiana: "LA", maine: "ME", maryland: "MD",
-  massachusetts: "MA", michigan: "MI", minnesota: "MN", mississippi: "MS", missouri: "MO",
-  montana: "MT", nebraska: "NE", nevada: "NV", "new hampshire": "NH", "new jersey": "NJ",
-  "new mexico": "NM", "new york": "NY", "north carolina": "NC", "north dakota": "ND",
-  ohio: "OH", oklahoma: "OK", oregon: "OR", pennsylvania: "PA", "rhode island": "RI",
-  "south carolina": "SC", "south dakota": "SD", tennessee: "TN", texas: "TX", utah: "UT",
-  vermont: "VT", virginia: "VA", washington: "WA", "west virginia": "WV", wisconsin: "WI",
-  wyoming: "WY",
-};
 
 // Heuristic: filter out Reddit usernames (junk names that won't match NPPES).
 function looksLikeRedditUsername(name: string): boolean {
@@ -40,7 +26,6 @@ function looksLikeRedditUsername(name: string): boolean {
   }
   return false;
 }
-
 
 export interface IngestionSummary {
   source: string;
@@ -69,9 +54,17 @@ function buildSources(): SourceSpec[] {
   // (gdelt / gdelt_m_and_a / gdelt_va_funding). Treat the call as a single
   // ingestion-run entry but bucket inserts by their own source for clarity.
   return [
-    { name: "sam_gov", sourceFilter: ["sam_gov"], fn: () => (samKey ? fetchSamGov({ apiKey: samKey }) : Promise.resolve([])) },
+    {
+      name: "sam_gov",
+      sourceFilter: ["sam_gov"],
+      fn: () => (samKey ? fetchSamGov({ apiKey: samKey }) : Promise.resolve([])),
+    },
     { name: "openfda", sourceFilter: ["openfda"], fn: () => fetchOpenFda({}) },
-    { name: "gdelt", sourceFilter: ["gdelt", "gdelt_m_and_a", "gdelt_va_funding"], fn: () => fetchGdelt({}) },
+    {
+      name: "gdelt",
+      sourceFilter: ["gdelt", "gdelt_m_and_a", "gdelt_va_funding"],
+      fn: () => fetchGdelt({}),
+    },
     { name: "clinicaltrials", sourceFilter: ["clinicaltrials"], fn: () => fetchClinicalTrials({}) },
     { name: "reddit", sourceFilter: ["reddit"], fn: () => fetchReddit({}) },
     { name: "bluesky", sourceFilter: ["bluesky"], fn: () => fetchBluesky({}) },
@@ -97,13 +90,25 @@ function buildSources(): SourceSpec[] {
 }
 
 export const INGESTION_SOURCE_NAMES = [
-  "sam_gov", "openfda", "gdelt", "clinicaltrials",
-  "reddit", "bluesky", "funding_rss", "cms_open_payments",
+  "sam_gov",
+  "openfda",
+  "gdelt",
+  "clinicaltrials",
+  "reddit",
+  "bluesky",
+  "funding_rss",
+  "cms_open_payments",
 ] as const;
 export type IngestionSourceName = (typeof INGESTION_SOURCE_NAMES)[number];
 
-async function runOneSource(src: SourceSpec): Promise<{ summary: IngestionSummary; enrichedIds: string[] }> {
-  const runRow = await supabaseAdmin.from("ingestion_runs").insert({ source: src.name }).select().single();
+async function runOneSource(
+  src: SourceSpec,
+): Promise<{ summary: IngestionSummary; enrichedIds: string[] }> {
+  const runRow = await supabaseAdmin
+    .from("ingestion_runs")
+    .insert({ source: src.name })
+    .select()
+    .single();
   const runId = runRow.data?.id;
   const enrichedIds: string[] = [];
   try {
@@ -116,24 +121,38 @@ async function runOneSource(src: SourceSpec): Promise<{ summary: IngestionSummar
       enrichedTotal += ids.length;
     }
     if (runId) {
-      await supabaseAdmin.from("ingestion_runs").update({
-        finished_at: new Date().toISOString(),
-        fetched_count: raws.length,
-        new_count: inserted,
-        enriched_count: enrichedTotal,
-        status: "ok",
-      }).eq("id", runId);
+      await supabaseAdmin
+        .from("ingestion_runs")
+        .update({
+          finished_at: new Date().toISOString(),
+          fetched_count: raws.length,
+          new_count: inserted,
+          enriched_count: enrichedTotal,
+          status: "ok",
+        })
+        .eq("id", runId);
     }
-    return { summary: { source: src.name, fetched: raws.length, inserted, enriched: enrichedTotal }, enrichedIds };
+    return {
+      summary: { source: src.name, fetched: raws.length, inserted, enriched: enrichedTotal },
+      enrichedIds,
+    };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(`Ingestion failed for ${src.name}:`, msg);
     if (runId) {
-      await supabaseAdmin.from("ingestion_runs").update({
-        finished_at: new Date().toISOString(), status: "error", error: msg,
-      }).eq("id", runId);
+      await supabaseAdmin
+        .from("ingestion_runs")
+        .update({
+          finished_at: new Date().toISOString(),
+          status: "error",
+          error: msg,
+        })
+        .eq("id", runId);
     }
-    return { summary: { source: src.name, fetched: 0, inserted: 0, enriched: 0, error: msg }, enrichedIds };
+    return {
+      summary: { source: src.name, fetched: 0, inserted: 0, enriched: 0, error: msg },
+      enrichedIds,
+    };
   }
 }
 
@@ -145,11 +164,17 @@ export async function runIngestionForSource(
   if (!src) throw new Error(`Unknown ingestion source: ${name}`);
   const { summary, enrichedIds } = await runOneSource(src);
   if (enrichedIds.length > 0) {
-    try { await evaluateAlerts(enrichedIds, forUserId); }
-    catch (e) { console.error("alerts evaluation failed:", e); }
+    try {
+      await evaluateAlerts(enrichedIds, forUserId);
+    } catch (e) {
+      console.error("alerts evaluation failed:", e);
+    }
   }
-  try { await backfillApolloForLinkedPhysicians({ limit: 25 }); }
-  catch (e) { console.error("apollo backfill failed:", e); }
+  try {
+    await backfillApolloForLinkedPhysicians({ limit: 25 });
+  } catch (e) {
+    console.error("apollo backfill failed:", e);
+  }
   return summary;
 }
 
@@ -163,35 +188,67 @@ export async function runIngestion(forUserId?: string): Promise<IngestionSummary
     newlyEnrichedIds.push(...enrichedIds);
   }
   if (newlyEnrichedIds.length > 0) {
-    try { await evaluateAlerts(newlyEnrichedIds, forUserId); }
-    catch (e) { console.error("alerts evaluation failed:", e); }
+    try {
+      await evaluateAlerts(newlyEnrichedIds, forUserId);
+    } catch (e) {
+      console.error("alerts evaluation failed:", e);
+    }
   }
-  try { await backfillApolloForLinkedPhysicians({ limit: 50 }); }
-  catch (e) { console.error("apollo backfill failed:", e); }
+  try {
+    await backfillApolloForLinkedPhysicians({ limit: 50 });
+  } catch (e) {
+    console.error("apollo backfill failed:", e);
+  }
   return summaries;
 }
 
 // Sources that are domain-pure (medical/healthcare by construction) bypass the gate.
-const GATE_BYPASS_SOURCES = new Set<string>([
-  "openfda",
-  "clinicaltrials",
-  "cms_open_payments",
-]);
+const GATE_BYPASS_SOURCES = new Set<string>(["openfda", "clinicaltrials", "cms_open_payments"]);
 
 // Hard pre-enrichment gate: only let through items with explicit
 // medical / healthcare / hospital terminology. Prevents pop-culture and
 // general-news noise (esp. from GDELT/Reddit/Bluesky/SAM.gov) from being
 // inserted into leads or sent to the LLM for enrichment.
 const MEDICAL_GATE_TERMS = [
-  "ultrasound", "pocus", "echocard", "sonograph", "doppler",
-  "cath lab", "catheterization", "radiolog", "cardiolog", "oncolog",
-  "emergency medicine", "anesthesi", "surgical", "surgery",
-  "hospital", "health system", "healthcare", "health care",
-  "medical center", "clinic", "physician", "nurse", "patient",
-  "va medical", "va healthcare", "veterans health",
-  "imaging", "mri", "ct scan", "x-ray", "biomed",
-  "medtech", "medical device", "fda", "clinical trial",
-  "icu", "ed ", "ehr", "emr",
+  "ultrasound",
+  "pocus",
+  "echocard",
+  "sonograph",
+  "doppler",
+  "cath lab",
+  "catheterization",
+  "radiolog",
+  "cardiolog",
+  "oncolog",
+  "emergency medicine",
+  "anesthesi",
+  "surgical",
+  "surgery",
+  "hospital",
+  "health system",
+  "healthcare",
+  "health care",
+  "medical center",
+  "clinic",
+  "physician",
+  "nurse",
+  "patient",
+  "va medical",
+  "va healthcare",
+  "veterans health",
+  "imaging",
+  "mri",
+  "ct scan",
+  "x-ray",
+  "biomed",
+  "medtech",
+  "medical device",
+  "fda",
+  "clinical trial",
+  "icu",
+  "ed ",
+  "ehr",
+  "emr",
 ];
 
 function passesMedicalGate(r: RawLead, extraTerms: string[]): boolean {
@@ -210,7 +267,10 @@ async function persistRaws(raws: RawLead[]): Promise<number> {
     const kw = await loadKeywords();
     extraTerms = kw.all;
   } catch (e) {
-    console.error("medical gate: keyword load failed, using built-in terms only:", e instanceof Error ? e.message : e);
+    console.error(
+      "medical gate: keyword load failed, using built-in terms only:",
+      e instanceof Error ? e.message : e,
+    );
   }
 
   let inserted = 0;
@@ -235,14 +295,17 @@ async function persistRaws(raws: RawLead[]): Promise<number> {
     if (!error) inserted++;
     else if (!error.message?.includes("duplicate")) console.error("insert lead:", error.message);
   }
-  if (gated > 0) console.log(`[ingest] medical gate dropped ${gated}/${raws.length} non-medical items`);
+  if (gated > 0)
+    console.log(`[ingest] medical gate dropped ${gated}/${raws.length} non-medical items`);
   return inserted;
 }
 
 async function enrichPending(source: string): Promise<string[]> {
   const { data: pending } = await supabaseAdmin
     .from("leads")
-    .select("id, source, source_external_id, source_url, title, summary, raw_payload, date_discovered")
+    .select(
+      "id, source, source_external_id, source_url, title, summary, raw_payload, date_discovered",
+    )
     .eq("source", source)
     .eq("enriched", false)
     .order("date_discovered", { ascending: false })
@@ -267,15 +330,22 @@ async function enrichPending(source: string): Promise<string[]> {
       let accountId: string | null = null;
       if (enriched.hospital) {
         const { data: existing } = await supabaseAdmin
-          .from("accounts").select("id").eq("name", enriched.hospital).maybeSingle();
+          .from("accounts")
+          .select("id")
+          .eq("name", enriched.hospital)
+          .maybeSingle();
         if (existing) accountId = existing.id;
         else {
-          const { data: created } = await supabaseAdmin.from("accounts").insert({
-            name: enriched.hospital,
-            state: enriched.territory,
-            account_type: enriched.account_type,
-            is_va: enriched.account_type === "va",
-          }).select("id").maybeSingle();
+          const { data: created } = await supabaseAdmin
+            .from("accounts")
+            .insert({
+              name: enriched.hospital,
+              state: enriched.territory,
+              account_type: enriched.account_type,
+              is_va: enriched.account_type === "va",
+            })
+            .select("id")
+            .maybeSingle();
           accountId = created?.id ?? null;
         }
       }
@@ -290,29 +360,33 @@ async function enrichPending(source: string): Promise<string[]> {
         keywords: enriched.entities.keywords,
       };
 
-      await supabaseAdmin.from("leads").update({
-        summary: enriched.summary,
-        confidence: enriched.confidence,
-        priority: enriched.priority,
-        hospital: enriched.hospital,
-        specialty: enriched.specialty,
-        territory: enriched.territory,
-        entities: entitiesForStorage as never,
-        estimated_value_usd: enriched.estimated_value_usd,
-        win_probability: enriched.win_probability,
-        competitor_incumbent: enriched.competitor_incumbent,
-        vendor_mentions: enriched.vendor_mentions,
-        account_type: enriched.account_type,
-        signal_type: enriched.signal_type,
-        account_id: accountId,
-        enriched: true,
-      }).eq("id", row.id);
+      await supabaseAdmin
+        .from("leads")
+        .update({
+          summary: enriched.summary,
+          confidence: enriched.confidence,
+          priority: enriched.priority,
+          hospital: enriched.hospital,
+          specialty: enriched.specialty,
+          territory: enriched.territory,
+          entities: entitiesForStorage as never,
+          estimated_value_usd: enriched.estimated_value_usd,
+          win_probability: enriched.win_probability,
+          competitor_incumbent: enriched.competitor_incumbent,
+          vendor_mentions: enriched.vendor_mentions,
+          account_type: enriched.account_type,
+          signal_type: enriched.signal_type,
+          account_id: accountId,
+          enriched: true,
+        })
+        .eq("id", row.id);
       ids.push(row.id);
 
       try {
         const refs: PhysicianLookupInput[] = [];
         const territory = enriched.territory?.toLowerCase() ?? "";
-        const stateCode = STATE_TO_CODE[territory] ?? (territory.length === 2 ? territory.toUpperCase() : null);
+        const stateCode =
+          STATE_TO_CODE[territory] ?? (territory.length === 2 ? territory.toUpperCase() : null);
 
         if (source === "cms_open_payments") {
           const payload = raw.raw_payload as { rows?: Array<Record<string, string>> } | undefined;
@@ -336,7 +410,6 @@ async function enrichPending(source: string): Promise<string[]> {
           });
         }
         if (refs.length > 0) await attachPhysiciansToLead(row.id, refs);
-
       } catch (e) {
         console.error("physician enrichment failed:", e instanceof Error ? e.message : e);
       }
@@ -350,7 +423,9 @@ async function enrichPending(source: string): Promise<string[]> {
 async function evaluateAlerts(newLeadIds: string[], forUserId?: string) {
   const { data: leads } = await supabaseAdmin
     .from("leads")
-    .select("id, hospital, specialty, source, confidence, territory, account_type, signal_type, vendor_mentions")
+    .select(
+      "id, hospital, specialty, source, confidence, territory, account_type, signal_type, vendor_mentions",
+    )
     .in("id", newLeadIds);
   if (!leads || leads.length === 0) return;
 
@@ -370,12 +445,14 @@ async function evaluateAlerts(newLeadIds: string[], forUserId?: string) {
       if (f.hospitals?.length && (!l.hospital || !f.hospitals.includes(l.hospital))) continue;
       if (f.specialties?.length && (!l.specialty || !f.specialties.includes(l.specialty))) continue;
       if (f.sources?.length && !f.sources.includes(l.source)) continue;
-      if (f.states?.length) {
-        const t = (l.territory ?? "").toLowerCase();
-        if (!f.states.some((st) => st.toLowerCase() === t)) continue;
-      }
-      if (f.accountTypes?.length && (!l.account_type || !f.accountTypes.includes(l.account_type))) continue;
-      if (f.signalTypes?.length && (!l.signal_type || !f.signalTypes.includes(l.signal_type))) continue;
+      // Saved-search states are 2-letter codes ("TX"); leads.territory is stored
+      // as a slug ("texas"). Normalize both before comparing, or the alert never
+      // fires.
+      if (f.states?.length && !territoryMatchesStates(f.states, l.territory)) continue;
+      if (f.accountTypes?.length && (!l.account_type || !f.accountTypes.includes(l.account_type)))
+        continue;
+      if (f.signalTypes?.length && (!l.signal_type || !f.signalTypes.includes(l.signal_type)))
+        continue;
       if (f.vendors?.length) {
         const vm = (l.vendor_mentions ?? []) as string[];
         if (!vm.some((v) => f.vendors!.includes(v))) continue;

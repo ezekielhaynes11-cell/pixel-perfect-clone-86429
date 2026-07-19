@@ -45,14 +45,27 @@ const TOOL_SCHEMA = {
         hospital: { type: ["string", "null"] },
         specialty: {
           type: ["string", "null"],
-          description: "One of: Cardiology, Radiology, Pulmonology, Critical Care, Anesthesia, Oncology, Emergency, Surgery, OB/GYN, Other",
+          description:
+            "One of: Cardiology, Radiology, Pulmonology, Critical Care, Anesthesia, Oncology, Emergency, Surgery, OB/GYN, Other",
         },
         territory: { type: ["string", "null"], description: "US state slug or null" },
         estimated_value_usd: { type: ["number", "null"] },
         win_probability: { type: ["number", "null"], minimum: 0, maximum: 1 },
         competitor_incumbent: { type: ["string", "null"] },
         account_type: { type: "string", enum: ["va", "non_va", "unknown"] },
-        signal_type: { type: "string", enum: ["recall", "rfp", "funding", "expansion", "sentiment", "m_and_a", "incumbency", "other"] },
+        signal_type: {
+          type: "string",
+          enum: [
+            "recall",
+            "rfp",
+            "funding",
+            "expansion",
+            "sentiment",
+            "m_and_a",
+            "incumbency",
+            "other",
+          ],
+        },
         vendor_mentions: { type: "array", items: { type: "string" } },
         entities: {
           type: "object",
@@ -78,9 +91,19 @@ const TOOL_SCHEMA = {
         },
       },
       required: [
-        "summary", "confidence", "priority", "hospital", "specialty", "territory",
-        "estimated_value_usd", "win_probability", "competitor_incumbent",
-        "account_type", "signal_type", "vendor_mentions", "entities",
+        "summary",
+        "confidence",
+        "priority",
+        "hospital",
+        "specialty",
+        "territory",
+        "estimated_value_usd",
+        "win_probability",
+        "competitor_incumbent",
+        "account_type",
+        "signal_type",
+        "vendor_mentions",
+        "entities",
       ],
       additionalProperties: false,
     },
@@ -134,7 +157,12 @@ ${raw.raw_text}`;
     parsed.win_probability = Math.max(0, Math.min(1, parsed.win_probability));
   }
   parsed.vendor_mentions = parsed.vendor_mentions ?? [];
-  parsed.entities = parsed.entities ?? { hospitals: [], physicians: [], equipment: [], keywords: [] };
+  parsed.entities = parsed.entities ?? {
+    hospitals: [],
+    physicians: [],
+    equipment: [],
+    keywords: [],
+  };
   parsed.entities.physicians = (parsed.entities.physicians ?? []).map((p) =>
     typeof p === "string" ? { name: p, role_hint: null } : p,
   );

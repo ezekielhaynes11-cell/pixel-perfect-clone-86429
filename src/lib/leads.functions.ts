@@ -2,14 +2,14 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { OWNER_ID } from "./owner.server";
-import { runIngestion, runIngestionForSource, INGESTION_SOURCE_NAMES, type IngestionSourceName } from "./ingest/run.server";
-import { backfillApolloForLinkedPhysicians } from "./apollo/service.server";
+import {
+  runIngestion,
+  runIngestionForSource,
+  INGESTION_SOURCE_NAMES,
+  type IngestionSourceName,
+} from "./ingest/run.server";
 import { draftOutreachEmail } from "./outreach.server";
-import { generateDailyBriefing, type BriefingLead } from "./briefings.server";
-
-export const triggerApolloBackfill = createServerFn({ method: "POST" }).handler(async () => {
-  return await backfillApolloForLinkedPhysicians({ limit: 50 });
-});
+import { throwIfError, throwUnlessDuplicate } from "./supabase-errors";
 
 export const INGESTION_SOURCES = INGESTION_SOURCE_NAMES;
 
@@ -18,39 +18,29 @@ export const INGESTION_SOURCES = INGESTION_SOURCE_NAMES;
 const LEAD_LIST_COLUMNS =
   "id, source, source_external_id, source_url, title, summary, confidence, priority, hospital, specialty, territory, entities, estimated_value_usd, win_probability, competitor_incumbent, date_discovered, date_ingested, enriched, vendor_mentions, account_type, signal_type, account_id, source_contacts";
 
+// Returns ALL enriched leads (including dismissed ones). Dismissed/saved state is
+// derived on the client from listLeadActions, which lets the "Show dismissed"
+// view actually populate after a refetch. (Previously dismissed leads were
+// filtered out server-side via a NOT-IN over every dismissed UUID — that both
+// broke Restore and risked a URL-length failure once dismissals piled up.)
 export const listLeads = createServerFn({ method: "GET" }).handler(async () => {
-  const { data: dismissed, error: dismissedErr } = await supabaseAdmin
-    .from("lead_actions")
-    .select("lead_id")
-    .eq("user_id", OWNER_ID)
-    .eq("action", "dismissed");
-  if (dismissedErr) throw new Error(dismissedErr.message);
-  const dismissedIds = (dismissed ?? []).map((r) => r.lead_id);
-
-  let q = supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from("leads")
     .select(LEAD_LIST_COLUMNS)
     .eq("enriched", true)
     .order("confidence", { ascending: false })
     .order("date_discovered", { ascending: false })
     .limit(500);
-  if (dismissedIds.length > 0) {
-    q = q.not("id", "in", `(${dismissedIds.join(",")})`);
-  }
-  const { data, error } = await q;
-  if (error) throw new Error(error.message);
+  throwIfError(error);
   return data ?? [];
 });
-
 
 export const triggerIngestion = createServerFn({ method: "POST" }).handler(async () => {
   return await runIngestion(OWNER_ID);
 });
 
 export const triggerIngestionForSource = createServerFn({ method: "POST" })
-  .inputValidator((input) =>
-    z.object({ source: z.enum(INGESTION_SOURCE_NAMES) }).parse(input),
-  )
+  .inputValidator((input) => z.object({ source: z.enum(INGESTION_SOURCE_NAMES) }).parse(input))
   .handler(async ({ data }) => {
     return await runIngestionForSource(data.source as IngestionSourceName, OWNER_ID);
   });
@@ -58,17 +48,22 @@ export const triggerIngestionForSource = createServerFn({ method: "POST" })
 export const listLeadActions = createServerFn({ method: "GET" }).handler(async () => {
   const { data, error } = await supabaseAdmin
     .from("lead_actions")
-    .select("lead_id, action, note, created_at");
-  if (error) throw new Error(error.message);
+    .select("lead_id, action, note, created_at")
+    .eq("user_id", OWNER_ID);
+  throwIfError(error);
   return data ?? [];
 });
+
+// Workflow actions the rep can toggle on a lead. 'note' is persisted separately
+// via saveLeadNote (it carries free text rather than being a boolean flag).
+const LEAD_ACTION = z.enum(["saved", "dismissed", "pushed_sfdc", "contacted"]);
 
 export const setLeadAction = createServerFn({ method: "POST" })
   .inputValidator((input) =>
     z
       .object({
         lead_id: z.string().uuid(),
-        action: z.enum(["saved", "dismissed", "pushed_sfdc"]),
+        action: LEAD_ACTION,
         note: z.string().max(2000).optional(),
         remove: z.boolean().optional(),
       })
@@ -76,12 +71,13 @@ export const setLeadAction = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     if (data.remove) {
-      await supabaseAdmin
+      const { error } = await supabaseAdmin
         .from("lead_actions")
         .delete()
         .eq("lead_id", data.lead_id)
         .eq("user_id", OWNER_ID)
         .eq("action", data.action);
+      throwIfError(error);
       return { ok: true };
     }
     const { error } = await supabaseAdmin.from("lead_actions").insert({
@@ -90,7 +86,7 @@ export const setLeadAction = createServerFn({ method: "POST" })
       action: data.action,
       note: data.note ?? null,
     });
-    if (error && !error.message.includes("duplicate")) throw new Error(error.message);
+    throwUnlessDuplicate(error);
     return { ok: true };
   });
 
@@ -99,7 +95,7 @@ export const bulkSetLeadAction = createServerFn({ method: "POST" })
     z
       .object({
         lead_ids: z.array(z.string().uuid()).min(1).max(500),
-        action: z.enum(["saved", "dismissed", "pushed_sfdc"]),
+        action: LEAD_ACTION,
         remove: z.boolean().optional(),
       })
       .parse(input),
@@ -112,7 +108,7 @@ export const bulkSetLeadAction = createServerFn({ method: "POST" })
         .eq("user_id", OWNER_ID)
         .eq("action", data.action)
         .in("lead_id", data.lead_ids);
-      if (error) throw new Error(error.message);
+      throwIfError(error);
       return { ok: true, count: data.lead_ids.length };
     }
     const rows = data.lead_ids.map((id) => ({
@@ -120,9 +116,44 @@ export const bulkSetLeadAction = createServerFn({ method: "POST" })
       user_id: OWNER_ID,
       action: data.action,
     }));
-    const { error } = await supabaseAdmin.from("lead_actions").insert(rows);
-    if (error && !error.message.includes("duplicate")) throw new Error(error.message);
+    // Upsert with ignoreDuplicates so a single already-existing (lead,user,action)
+    // row can't abort the whole atomic insert and silently drop the other writes.
+    const { error } = await supabaseAdmin
+      .from("lead_actions")
+      .upsert(rows, { onConflict: "lead_id,user_id,action", ignoreDuplicates: true });
+    throwIfError(error);
     return { ok: true, count: rows.length };
+  });
+
+/* -------------------- Lead notes -------------------- */
+
+export const getLeadNote = createServerFn({ method: "POST" })
+  .inputValidator((input) => z.object({ lead_id: z.string().uuid() }).parse(input))
+  .handler(async ({ data }) => {
+    const { data: row, error } = await supabaseAdmin
+      .from("lead_actions")
+      .select("note")
+      .eq("lead_id", data.lead_id)
+      .eq("user_id", OWNER_ID)
+      .eq("action", "note")
+      .maybeSingle();
+    throwIfError(error);
+    return { note: row?.note ?? "" };
+  });
+
+export const saveLeadNote = createServerFn({ method: "POST" })
+  .inputValidator((input) =>
+    z.object({ lead_id: z.string().uuid(), note: z.string().max(2000) }).parse(input),
+  )
+  .handler(async ({ data }) => {
+    const { error } = await supabaseAdmin
+      .from("lead_actions")
+      .upsert(
+        { lead_id: data.lead_id, user_id: OWNER_ID, action: "note", note: data.note },
+        { onConflict: "lead_id,user_id,action" },
+      );
+    throwIfError(error);
+    return { ok: true };
   });
 
 /* -------------------- Outreach drafts -------------------- */
@@ -172,12 +203,13 @@ export const generateOutreachDraft = createServerFn({ method: "POST" })
         source: lead.source,
         signal_type: (lead as { signal_type?: string | null }).signal_type ?? null,
         competitor_incumbent: lead.competitor_incumbent,
-        vendor_mentions: ((lead as { vendor_mentions?: string[] | null }).vendor_mentions) ?? [],
-        entities: (lead.entities as {
-          physicians?: string[];
-          equipment?: string[];
-          keywords?: string[];
-        }) ?? {},
+        vendor_mentions: (lead as { vendor_mentions?: string[] | null }).vendor_mentions ?? [],
+        entities:
+          (lead.entities as {
+            physicians?: string[];
+            equipment?: string[];
+            keywords?: string[];
+          }) ?? {},
       },
       repName: profile?.display_name ?? "Your Philips rep",
       tone: data.tone,
@@ -310,20 +342,22 @@ export const listAlerts = createServerFn({ method: "GET" }).handler(async () => 
 export const markAlertRead = createServerFn({ method: "POST" })
   .inputValidator((input) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => {
-    await supabaseAdmin
+    const { error } = await supabaseAdmin
       .from("alerts")
       .update({ read_at: new Date().toISOString() })
       .eq("id", data.id)
       .eq("user_id", OWNER_ID);
+    throwIfError(error);
     return { ok: true };
   });
 
 export const markAllAlertsRead = createServerFn({ method: "POST" }).handler(async () => {
-  await supabaseAdmin
+  const { error } = await supabaseAdmin
     .from("alerts")
     .update({ read_at: new Date().toISOString() })
     .eq("user_id", OWNER_ID)
     .is("read_at", null);
+  throwIfError(error);
   return { ok: true };
 });
 
@@ -336,10 +370,12 @@ export const getPipelineForecast = createServerFn({ method: "GET" }).handler(asy
       .select(
         "id, title, hospital, specialty, confidence, estimated_value_usd, win_probability, date_discovered, source",
       )
-      // Same base set as the dashboard feed (listLeads): enriched leads minus
-      // dismissed ones. This keeps "Open qualified leads" reconciled with the
-      // feed count rather than diverging via a separate confidence cut.
+      // Same base set AND ordering as the dashboard feed (listLeads): enriched
+      // leads, top 500 by confidence then recency. Without the ORDER BY the 500-row
+      // window was arbitrary, so the forecast didn't reconcile with the feed.
       .eq("enriched", true)
+      .order("confidence", { ascending: false })
+      .order("date_discovered", { ascending: false })
       .limit(500),
     supabaseAdmin.from("lead_actions").select("lead_id, action").eq("user_id", OWNER_ID),
   ]);
@@ -361,14 +397,11 @@ export const getPipelineForecast = createServerFn({ method: "GET" }).handler(asy
     return Number.isFinite(conf) && conf > 0 ? Math.min(1, conf / 100) : 0;
   };
 
-  const weighted = (l: (typeof open)[number]) =>
-    (Number(l.estimated_value_usd) || 0) * winProb(l);
+  const weighted = (l: (typeof open)[number]) => (Number(l.estimated_value_usd) || 0) * winProb(l);
 
   const totalWeighted = open.reduce((s, l) => s + weighted(l), 0);
   const avgConfidence =
-    open.length === 0
-      ? 0
-      : Math.round(open.reduce((s, l) => s + l.confidence, 0) / open.length);
+    open.length === 0 ? 0 : Math.round(open.reduce((s, l) => s + l.confidence, 0) / open.length);
 
   const bySpecialty: Record<string, number> = {};
   const byHospital: Record<string, number> = {};
@@ -407,56 +440,6 @@ export const getPipelineForecast = createServerFn({ method: "GET" }).handler(asy
   };
 });
 
-/* -------------------- Daily AI briefing -------------------- */
-
-export const getOrCreateDailyBriefing = createServerFn({ method: "POST" }).handler(async () => {
-  const today = new Date().toISOString().slice(0, 10);
-
-  const { data: existing } = await supabaseAdmin
-    .from("briefings")
-    .select("*")
-    .eq("user_id", OWNER_ID)
-    .eq("date", today)
-    .maybeSingle();
-  if (existing) return existing;
-
-  const { data: leads } = await supabaseAdmin
-    .from("leads")
-    .select("id, title, summary, hospital, specialty, confidence, estimated_value_usd, win_probability")
-    .eq("enriched", true)
-    .order("confidence", { ascending: false })
-    .limit(5);
-  const top = (leads ?? []) as Array<BriefingLead & { id: string }>;
-  if (top.length === 0) {
-    return {
-      date: today,
-      markdown:
-        "_No enriched leads yet today. Hit **Refresh feed** to pull fresh signals from SAM.gov, FDA and news._",
-      top_lead_ids: [] as string[],
-    };
-  }
-
-  const { data: profile } = await supabaseAdmin
-    .from("profiles")
-    .select("display_name")
-    .eq("user_id", OWNER_ID)
-    .maybeSingle();
-
-  const markdown = await generateDailyBriefing(profile?.display_name ?? "rep", top);
-
-  const { data: saved } = await supabaseAdmin
-    .from("briefings")
-    .insert({
-      user_id: OWNER_ID,
-      date: today,
-      markdown,
-      top_lead_ids: top.map((l) => l.id),
-    })
-    .select()
-    .single();
-  return saved;
-});
-
 /* -------------------- Ingestion runs -------------------- */
 
 export const getRecentIngestionRuns = createServerFn({ method: "GET" }).handler(async () => {
@@ -490,53 +473,55 @@ export interface LeadPhysician {
   apollo_enriched_at: string | null;
 }
 
-export const listLeadPhysicians = createServerFn({ method: "GET" }).handler(async (): Promise<LeadPhysician[]> => {
-  const { data, error } = await supabaseAdmin
-    .from("lead_physicians")
-    .select(
-      "lead_id, role, match_confidence, physician_contacts!inner(npi, full_name, credentials, primary_specialty, practice_city, practice_state, practice_phone, practice_address, practice_zip, email, title, linkedin_url, apollo_enriched_at)",
-    )
-    .limit(2000);
-  if (error) throw new Error(error.message);
-  type Row = {
-    lead_id: string;
-    role: string;
-    match_confidence: number;
-    physician_contacts: {
-      npi: string;
-      full_name: string;
-      credentials: string | null;
-      primary_specialty: string | null;
-      practice_city: string | null;
-      practice_state: string | null;
-      practice_phone: string | null;
-      practice_address: string | null;
-      practice_zip: string | null;
-      email: string | null;
-      title: string | null;
-      linkedin_url: string | null;
-      apollo_enriched_at: string | null;
+export const listLeadPhysicians = createServerFn({ method: "GET" }).handler(
+  async (): Promise<LeadPhysician[]> => {
+    const { data, error } = await supabaseAdmin
+      .from("lead_physicians")
+      .select(
+        "lead_id, role, match_confidence, physician_contacts!inner(npi, full_name, credentials, primary_specialty, practice_city, practice_state, practice_phone, practice_address, practice_zip, email, title, linkedin_url, apollo_enriched_at)",
+      )
+      .limit(2000);
+    if (error) throw new Error(error.message);
+    type Row = {
+      lead_id: string;
+      role: string;
+      match_confidence: number;
+      physician_contacts: {
+        npi: string;
+        full_name: string;
+        credentials: string | null;
+        primary_specialty: string | null;
+        practice_city: string | null;
+        practice_state: string | null;
+        practice_phone: string | null;
+        practice_address: string | null;
+        practice_zip: string | null;
+        email: string | null;
+        title: string | null;
+        linkedin_url: string | null;
+        apollo_enriched_at: string | null;
+      };
     };
-  };
-  return ((data ?? []) as unknown as Row[]).map((r) => ({
-    lead_id: r.lead_id,
-    role: r.role,
-    match_confidence: r.match_confidence,
-    npi: r.physician_contacts.npi,
-    full_name: r.physician_contacts.full_name,
-    credentials: r.physician_contacts.credentials,
-    primary_specialty: r.physician_contacts.primary_specialty,
-    practice_city: r.physician_contacts.practice_city,
-    practice_state: r.physician_contacts.practice_state,
-    practice_phone: r.physician_contacts.practice_phone,
-    practice_address: r.physician_contacts.practice_address,
-    practice_zip: r.physician_contacts.practice_zip,
-    email: r.physician_contacts.email,
-    title: r.physician_contacts.title,
-    linkedin_url: r.physician_contacts.linkedin_url,
-    apollo_enriched_at: r.physician_contacts.apollo_enriched_at,
-  }));
-});
+    return ((data ?? []) as unknown as Row[]).map((r) => ({
+      lead_id: r.lead_id,
+      role: r.role,
+      match_confidence: r.match_confidence,
+      npi: r.physician_contacts.npi,
+      full_name: r.physician_contacts.full_name,
+      credentials: r.physician_contacts.credentials,
+      primary_specialty: r.physician_contacts.primary_specialty,
+      practice_city: r.physician_contacts.practice_city,
+      practice_state: r.physician_contacts.practice_state,
+      practice_phone: r.physician_contacts.practice_phone,
+      practice_address: r.physician_contacts.practice_address,
+      practice_zip: r.physician_contacts.practice_zip,
+      email: r.physician_contacts.email,
+      title: r.physician_contacts.title,
+      linkedin_url: r.physician_contacts.linkedin_url,
+      apollo_enriched_at: r.physician_contacts.apollo_enriched_at,
+    }));
+  },
+);
 
 /* -------------------- Manually-sourced contacts (contacts table) -------------------- */
 
@@ -659,10 +644,8 @@ async function runContactWaterfall(leadId: string): Promise<ContactEnrichmentRow
     .limit(1);
   const phys = (physRows as unknown as PhysJoin[] | null)?.[0]?.physician_contacts;
   if (phys) {
-    const name =
-      [phys.full_name, phys.credentials].filter(Boolean).join(", ") || phys.full_name;
-    const physOrg =
-      [phys.practice_city, phys.practice_state].filter(Boolean).join(", ") || null;
+    const name = [phys.full_name, phys.credentials].filter(Boolean).join(", ") || phys.full_name;
+    const physOrg = [phys.practice_city, phys.practice_state].filter(Boolean).join(", ") || null;
     return writeAndReturn({
       lead_id: leadId,
       status: "found",
@@ -675,18 +658,23 @@ async function runContactWaterfall(leadId: string): Promise<ContactEnrichmentRow
     });
   }
 
-  // Step 4: resolve org name from lead fields
+  // Step 4: resolve org name from lead fields. Only ever use an actual
+  // organization here — never fall back to a physician name, which would send a
+  // person into Apollo's organization_name search and cache garbage as "found".
   const ents = (lead.entities as { hospitals?: string[]; physicians?: string[] }) ?? {};
   const org =
-    ((lead.hospital as string | null)?.trim() || null) ??
-    (ents.hospitals?.[0]?.trim() || null) ??
-    (ents.physicians?.[0]?.trim() || null);
+    ((lead.hospital as string | null)?.trim() || null) ?? (ents.hospitals?.[0]?.trim() || null);
 
   if (!org) {
     return writeAndReturn({
-      lead_id: leadId, status: "none",
-      name: null, title: null, organization: null,
-      phone: null, email: null, linkedin_url: null,
+      lead_id: leadId,
+      status: "none",
+      name: null,
+      title: null,
+      organization: null,
+      phone: null,
+      email: null,
+      linkedin_url: null,
     });
   }
 
@@ -701,19 +689,20 @@ async function runContactWaterfall(leadId: string): Promise<ContactEnrichmentRow
     const person = (res.people ?? [])[0];
     if (!person) {
       return writeAndReturn({
-        lead_id: leadId, status: "none",
-        name: null, title: null, organization: org,
-        phone: null, email: null, linkedin_url: null,
+        lead_id: leadId,
+        status: "none",
+        name: null,
+        title: null,
+        organization: org,
+        phone: null,
+        email: null,
+        linkedin_url: null,
       });
     }
     const name =
-      person.name ||
-      [person.first_name, person.last_name].filter(Boolean).join(" ") ||
-      null;
+      person.name || [person.first_name, person.last_name].filter(Boolean).join(" ") || null;
     const phone =
-      person.phone_numbers?.[0]?.sanitized_number ??
-      person.phone_numbers?.[0]?.raw_number ??
-      null;
+      person.phone_numbers?.[0]?.sanitized_number ?? person.phone_numbers?.[0]?.raw_number ?? null;
     return writeAndReturn({
       lead_id: leadId,
       status: "found",
@@ -725,20 +714,24 @@ async function runContactWaterfall(leadId: string): Promise<ContactEnrichmentRow
       linkedin_url: person.linkedin_url ?? null,
     });
   } catch (e) {
-    console.error("[runContactWaterfall]", leadId, "apollo failed:", e instanceof Error ? e.message : e);
+    console.error(
+      "[runContactWaterfall]",
+      leadId,
+      "apollo failed:",
+      e instanceof Error ? e.message : e,
+    );
     return writeAndReturn({
-      lead_id: leadId, status: "none",
-      name: null, title: null, organization: org,
-      phone: null, email: null, linkedin_url: null,
+      lead_id: leadId,
+      status: "none",
+      name: null,
+      title: null,
+      organization: org,
+      phone: null,
+      email: null,
+      linkedin_url: null,
     });
   }
 }
-
-export const enrichLeadContact = createServerFn({ method: "POST" })
-  .inputValidator((input) => z.object({ lead_id: z.string().uuid() }).parse(input))
-  .handler(async ({ data }): Promise<ContactEnrichmentRow> => {
-    return runContactWaterfall(data.lead_id);
-  });
 
 export const fetchContactEnrichment = createServerFn({ method: "POST" })
   .inputValidator((input) => z.object({ lead_id: z.string().uuid() }).parse(input))
@@ -769,9 +762,7 @@ export const batchEnrichContacts = createServerFn({ method: "POST" })
       .limit(fetchLimit);
     if (error) throw new Error(error.message);
 
-    const toProcess = (leads ?? [])
-      .filter((l) => !foundSet.has(l.id))
-      .slice(0, limit);
+    const toProcess = (leads ?? []).filter((l) => !foundSet.has(l.id)).slice(0, limit);
 
     let enriched = 0;
     let errors = 0;
@@ -814,9 +805,6 @@ export const getEnrichedContactCount = createServerFn({ method: "GET" }).handler
         (r.physician_contacts.practice_phone || r.physician_contacts.email),
     )
     .map((r) => r.lead_id);
-  const ids = new Set([
-    ...(enrichRes.data ?? []).map((r) => r.lead_id),
-    ...physIds,
-  ]);
+  const ids = new Set([...(enrichRes.data ?? []).map((r) => r.lead_id), ...physIds]);
   return { count: ids.size };
 });

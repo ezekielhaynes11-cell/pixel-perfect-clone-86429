@@ -1,8 +1,20 @@
 // Thin wrapper around the Apollo.io REST API.
 // Docs: https://docs.apollo.io/reference
 
+import { tryConsumeApolloCall } from "./quota.server";
+
 const APOLLO_BASE = "https://api.apollo.io/api/v1";
 const TIMEOUT_MS = 30_000;
+
+// Thrown when the daily Apollo cap is reached. Callers that loop over many
+// contacts (backfill, NPPES auto-enrich) can catch this to stop early instead of
+// hammering the metered endpoint.
+export class ApolloCapError extends Error {
+  constructor() {
+    super("Apollo daily cap reached — resets at midnight UTC.");
+    this.name = "ApolloCapError";
+  }
+}
 
 function key(): string {
   const k = process.env.APOLLO_API_KEY;
@@ -11,6 +23,10 @@ function key(): string {
 }
 
 async function call<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  // Central metering: every Apollo request goes through here, so this is the one
+  // place the daily cap is enforced. Consume a unit before spending a credit.
+  if (!(await tryConsumeApolloCall())) throw new ApolloCapError();
+
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
@@ -30,12 +46,15 @@ async function call<T>(path: string, body: Record<string, unknown>): Promise<T> 
       if (res.status === 429) throw new Error("Apollo rate limit hit — try again in a minute.");
       if (res.status === 402) throw new Error("Apollo credits exhausted.");
       if (res.status === 401) throw new Error("Apollo API key rejected.");
-      if (res.status === 403) throw new Error(`Apollo 403 forbidden on ${path} — endpoint may require a paid plan.`);
+      if (res.status === 403)
+        throw new Error(`Apollo 403 forbidden on ${path} — endpoint may require a paid plan.`);
       let detail = text.slice(0, 200);
       try {
         const j = JSON.parse(text) as { message?: string; error?: string };
         detail = j.message ?? j.error ?? detail;
-      } catch { /* not json */ }
+      } catch {
+        /* not json */
+      }
       throw new Error(`Apollo ${path} ${res.status}: ${detail}`);
     }
     return (await res.json()) as T;

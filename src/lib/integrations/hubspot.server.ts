@@ -70,7 +70,10 @@ export async function pushLeadToHubspot(input: HubSpotPushInput): Promise<HubSpo
 
   if (!dealRes.ok) {
     const text = await dealRes.text().catch(() => "");
-    return { ok: false, error: `HubSpot deal create failed [${dealRes.status}]: ${text.slice(0, 300)}` };
+    return {
+      ok: false,
+      error: `HubSpot deal create failed [${dealRes.status}]: ${text.slice(0, 300)}`,
+    };
   }
   const deal = (await dealRes.json()) as { id?: string };
   const dealId = deal.id;

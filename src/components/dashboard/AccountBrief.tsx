@@ -60,10 +60,9 @@ export function AccountBrief({ accountId }: { accountId: string }) {
         return;
       }
       const r = res as { domain?: string | null; employee_count?: number | null };
-      toast.success(
-        `Apollo: ${r.domain ?? "no domain"} · ${r.employee_count ?? "?"} employees`,
-        { id: "apollo-acct" },
-      );
+      toast.success(`Apollo: ${r.domain ?? "no domain"} · ${r.employee_count ?? "?"} employees`, {
+        id: "apollo-acct",
+      });
       qc.invalidateQueries({ queryKey: ["account", accountId] });
     },
     onError: (e: unknown) =>
@@ -100,7 +99,11 @@ export function AccountBrief({ accountId }: { accountId: string }) {
             onClick={() => run.mutate()}
             disabled={run.isPending}
             className="flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-            title={isFresh ? "A recent brief exists — re-running will create a new one" : "Run deep-dive research"}
+            title={
+              isFresh
+                ? "A recent brief exists — re-running will create a new one"
+                : "Run deep-dive research"
+            }
           >
             {run.isPending ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -114,7 +117,11 @@ export function AccountBrief({ accountId }: { accountId: string }) {
               onClick={() => setOpen((v) => !v)}
               className="rounded-md border border-border bg-surface-2 p-1.5 text-foreground/70 hover:text-foreground"
             >
-              {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              {open ? (
+                <ChevronUp className="h-3.5 w-3.5" />
+              ) : (
+                <ChevronDown className="h-3.5 w-3.5" />
+              )}
             </button>
           )}
         </div>
@@ -134,9 +141,9 @@ export function AccountBrief({ accountId }: { accountId: string }) {
 
       {!latest && !run.isPending && (
         <p className="text-sm text-muted-foreground">
-          No brief yet. Click <span className="font-semibold text-foreground">Research account</span>{" "}
-          to have the agent pull existing signals, scrape a hospital page if useful, and synthesize a
-          strategic brief.
+          No brief yet. Click{" "}
+          <span className="font-semibold text-foreground">Research account</span> to have the agent
+          pull existing signals, scrape a hospital page if useful, and synthesize a strategic brief.
         </p>
       )}
 

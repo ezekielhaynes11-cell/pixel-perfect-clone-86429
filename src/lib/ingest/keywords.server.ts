@@ -15,11 +15,49 @@ let cache: { at: number; data: Keywords } | null = null;
 const TTL_MS = 5 * 60 * 1000;
 
 const FALLBACK: Keywords = {
-  vendors: ["GE Healthcare", "Mindray", "SonoSite", "Samsung Medison", "Canon Medical", "Siemens Healthineers", "Fujifilm Sonosite"],
-  products: ["Venue", "Venue Fit", "Venue Go", "TE7", "TE7 Max", "TE8", "M9", "LX", "PX", "S2", "Lumify"],
-  focusConcepts: ["POCUS", "point-of-care ultrasound", "MSK ultrasound", "echocardiography", "cath lab", "VA hospital ultrasound"],
-  roleTitles: ["POCUS director", "fellowship director", "chief of emergency medicine", "biomed director"],
-  complaintSignals: ["what should we replace", "frustrated with", "looking to buy", "end of life", "any recommendations"],
+  vendors: [
+    "GE Healthcare",
+    "Mindray",
+    "SonoSite",
+    "Samsung Medison",
+    "Canon Medical",
+    "Siemens Healthineers",
+    "Fujifilm Sonosite",
+  ],
+  products: [
+    "Venue",
+    "Venue Fit",
+    "Venue Go",
+    "TE7",
+    "TE7 Max",
+    "TE8",
+    "M9",
+    "LX",
+    "PX",
+    "S2",
+    "Lumify",
+  ],
+  focusConcepts: [
+    "POCUS",
+    "point-of-care ultrasound",
+    "MSK ultrasound",
+    "echocardiography",
+    "cath lab",
+    "VA hospital ultrasound",
+  ],
+  roleTitles: [
+    "POCUS director",
+    "fellowship director",
+    "chief of emergency medicine",
+    "biomed director",
+  ],
+  complaintSignals: [
+    "what should we replace",
+    "frustrated with",
+    "looking to buy",
+    "end of life",
+    "any recommendations",
+  ],
   all: [...PHILLIPS_KEYWORDS],
 };
 

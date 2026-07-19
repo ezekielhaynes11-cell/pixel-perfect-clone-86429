@@ -11,52 +11,20 @@ import {
   MapPin,
   Factory,
 } from "lucide-react";
-import { sources, type LeadSource } from "@/data/leads";
+import { sources } from "@/data/leads";
+import {
+  type SignalType,
+  type AccountType,
+  type TerritoryState,
+  type Filters,
+  emptyFilters,
+  signalTypeOptions,
+} from "./filters";
 
-export type SignalType =
-  | "recall"
-  | "rfp"
-  | "funding"
-  | "m_and_a"
-  | "expansion"
-  | "sentiment"
-  | "incumbency";
-
-export type AccountType = "va" | "non_va";
-
-export type TerritoryState = "TX" | "OK" | "AR" | "LA";
-
-export interface Filters {
-  hospitals: string[];
-  specialties: string[];
-  sources: LeadSource[];
-  signalTypes: SignalType[];
-  accountTypes: AccountType[];
-  vendors: string[];
-  states: TerritoryState[];
-  minConfidence: number;
-}
-
-export const emptyFilters: Filters = {
-  hospitals: [],
-  specialties: [],
-  sources: [],
-  signalTypes: [],
-  accountTypes: [],
-  vendors: [],
-  states: [],
-  minConfidence: 75,
-};
-
-export const signalTypeOptions: SignalType[] = [
-  "recall",
-  "rfp",
-  "funding",
-  "m_and_a",
-  "expansion",
-  "sentiment",
-  "incumbency",
-];
+// Type-only re-exports are erased at build time, so they don't affect Fast
+// Refresh. Value constants (emptyFilters, signalTypeOptions) are imported from
+// "./filters" directly by consumers.
+export type { SignalType, AccountType, TerritoryState, Filters };
 
 const signalLabels: Record<SignalType, string> = {
   recall: "Recall",
@@ -351,9 +319,7 @@ export function FilterBar({
                 max={100}
                 step={5}
                 value={filters.minConfidence}
-                onChange={(e) =>
-                  onChange({ ...filters, minConfidence: Number(e.target.value) })
-                }
+                onChange={(e) => onChange({ ...filters, minConfidence: Number(e.target.value) })}
                 className="w-full accent-primary"
               />
               <div className="mt-2 flex justify-between text-[10px] text-muted-foreground">

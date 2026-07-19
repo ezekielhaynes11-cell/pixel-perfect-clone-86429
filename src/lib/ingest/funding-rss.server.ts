@@ -7,7 +7,8 @@ const FEEDS = [
 ];
 
 const TERRITORY_RX = /\b(texas|oklahoma|arkansas|louisiana|TX|OK|AR|LA)\b/i;
-const TOPIC_RX = /\b(imaging|ultrasound|modernization|equipment|rural hospital|capital|grant|expansion|fellowship|cath|monitor)\b/i;
+const TOPIC_RX =
+  /\b(imaging|ultrasound|modernization|equipment|rural hospital|capital|grant|expansion|fellowship|cath|monitor)\b/i;
 
 interface FeedItem {
   title: string;
@@ -30,7 +31,12 @@ function decodeEntities(s: string): string {
 function pick(xml: string, tag: string): string {
   const m = xml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, "i"));
   if (!m) return "";
-  return decodeEntities(m[1].replace(/<!\[CDATA\[|\]\]>/g, "").replace(/<[^>]+>/g, "").trim());
+  return decodeEntities(
+    m[1]
+      .replace(/<!\[CDATA\[|\]\]>/g, "")
+      .replace(/<[^>]+>/g, "")
+      .trim(),
+  );
 }
 
 function parseRss(xml: string): FeedItem[] {

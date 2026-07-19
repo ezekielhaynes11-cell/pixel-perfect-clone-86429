@@ -3,12 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { X, Bookmark, Bell, BellOff, Trash2, Plus } from "lucide-react";
 import { toast } from "sonner";
-import {
-  listSavedSearches,
-  upsertSavedSearch,
-  deleteSavedSearch,
-} from "@/lib/leads.functions";
-import { emptyFilters, type Filters } from "./FilterBar";
+import { listSavedSearches, upsertSavedSearch, deleteSavedSearch } from "@/lib/leads.functions";
+import { emptyFilters, type Filters } from "./filters";
 
 interface SavedSearchRow {
   id: string;
@@ -137,9 +133,7 @@ export function SavedSearchesDrawer({
           {q.isLoading ? (
             <div className="p-6 text-center text-sm text-muted-foreground">Loading…</div>
           ) : (q.data ?? []).length === 0 ? (
-            <div className="p-6 text-center text-sm text-muted-foreground">
-              No saved views yet.
-            </div>
+            <div className="p-6 text-center text-sm text-muted-foreground">No saved views yet.</div>
           ) : (
             <ul className="space-y-2">
               {(q.data as unknown as SavedSearchRow[]).map((s) => (
@@ -194,9 +188,11 @@ export function SavedSearchesDrawer({
 
 function FilterSummary({ filter }: { filter: Filters }) {
   const bits: string[] = [];
-  if (filter.hospitals?.length) bits.push(`${filter.hospitals.length} hospital${filter.hospitals.length === 1 ? "" : "s"}`);
+  if (filter.hospitals?.length)
+    bits.push(`${filter.hospitals.length} hospital${filter.hospitals.length === 1 ? "" : "s"}`);
   if (filter.specialties?.length) bits.push(`${filter.specialties.length} specialty`);
-  if (filter.sources?.length) bits.push(`${filter.sources.length} source${filter.sources.length === 1 ? "" : "s"}`);
+  if (filter.sources?.length)
+    bits.push(`${filter.sources.length} source${filter.sources.length === 1 ? "" : "s"}`);
   if (filter.minConfidence) bits.push(`≥${filter.minConfidence}%`);
   return (
     <div className="mt-0.5 text-xs text-muted-foreground">
