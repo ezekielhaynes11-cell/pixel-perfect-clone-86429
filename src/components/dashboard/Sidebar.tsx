@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { TrendingUp, Building2, PieChart } from "lucide-react";
 import { type Lead, leadHospital, opportunityType } from "@/data/leads";
 
