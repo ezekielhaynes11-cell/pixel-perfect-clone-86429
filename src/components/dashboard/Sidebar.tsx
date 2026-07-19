@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { TrendingUp, Building2, PieChart } from "lucide-react";
 import { type Lead, leadHospital, opportunityType } from "@/data/leads";
 
@@ -26,18 +27,28 @@ export function Sidebar({ leads }: { leads: Lead[] }) {
 
   // Real 7-day trend: count leads by discovery day for the last 7 calendar days
   // (oldest → newest), replacing what used to be a hardcoded array.
+  // Computed after mount to avoid SSR/client hydration mismatch when the
+  // server's "today" differs from the client's local "today" (timezone / midnight boundary).
   const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const todayStart = startOfDay(new Date());
-  const trend = Array.from({ length: 7 }, (_, i) => {
-    const dayStart = todayStart - (6 - i) * 86_400_000;
-    const nextDayStart = dayStart + 86_400_000;
-    const count = leads.reduce((n, l) => {
-      const t = new Date(l.dateDiscovered).getTime();
-      return t >= dayStart && t < nextDayStart ? n + 1 : n;
-    }, 0);
-    return { label: DAY_LABELS[new Date(dayStart).getDay()], count };
-  });
+  const [trend, setTrend] = useState<Array<{ label: string; count: number }>>(() =>
+    Array.from({ length: 7 }, () => ({ label: "", count: 0 })),
+  );
+  useEffect(() => {
+    const startOfDay = (d: Date) =>
+      new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const todayStart = startOfDay(new Date());
+    setTrend(
+      Array.from({ length: 7 }, (_, i) => {
+        const dayStart = todayStart - (6 - i) * 86_400_000;
+        const nextDayStart = dayStart + 86_400_000;
+        const count = leads.reduce((n, l) => {
+          const t = new Date(l.dateDiscovered).getTime();
+          return t >= dayStart && t < nextDayStart ? n + 1 : n;
+        }, 0);
+        return { label: DAY_LABELS[new Date(dayStart).getDay()], count };
+      }),
+    );
+  }, [leads]);
   const trendMax = Math.max(1, ...trend.map((d) => d.count));
   const sourceColors: Record<string, string> = {
     sam_gov: "bg-blue-500",
