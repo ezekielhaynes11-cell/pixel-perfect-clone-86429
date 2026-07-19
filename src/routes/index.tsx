@@ -80,6 +80,7 @@ function Dashboard() {
   const [showOld, setShowOld] = useState(false);
   const [showAllTerritories, setShowAllTerritories] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
+  const [showInsights, setShowInsights] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const qc = useQueryClient();
   const fetchLeads = useServerFn(listLeads);
@@ -630,7 +631,21 @@ function Dashboard() {
             )}
           </div>
 
-          <Sidebar leads={filtered.length ? filtered : visibleLeads} />
+          {/* Insights: always visible on desktop; collapsed behind a toggle on
+              phones so the rep sees leads first, not four analytics panels. */}
+          <div>
+            <button
+              onClick={() => setShowInsights((v) => !v)}
+              className="mb-3 flex w-full items-center justify-between rounded-md border border-border bg-surface-2 px-4 py-2 text-xs font-medium text-foreground/80 transition-colors hover:bg-surface-3 lg:hidden"
+              aria-expanded={showInsights}
+            >
+              {showInsights ? "Hide insights" : "Show insights"}
+              <BarChart3 className="h-3.5 w-3.5" />
+            </button>
+            <div className={showInsights ? "block" : "hidden lg:block"}>
+              <Sidebar leads={filtered.length ? filtered : visibleLeads} />
+            </div>
+          </div>
         </div>
 
         <footer className="mt-12 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4 text-xs text-muted-foreground">

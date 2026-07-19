@@ -37,7 +37,11 @@ export const emptyFilters: Filters = {
   accountTypes: [],
   vendors: [],
   states: [],
-  minConfidence: 75,
+  // The feed is sorted by confidence (best first) rather than filtered by it, and
+  // there is no min-confidence UI control, so the default is 0 — never silently
+  // hide sub-threshold leads with no way to reveal them. (minConfidence stays in
+  // the type because saved-search alerting can still set it.)
+  minConfidence: 0,
 };
 
 export const signalTypeOptions: SignalType[] = [

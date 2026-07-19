@@ -3,7 +3,7 @@ import {
   Building2,
   Stethoscope,
   Satellite,
-  BarChart3,
+  SlidersHorizontal,
   X,
   Check,
   Zap,
@@ -69,10 +69,12 @@ function useOutside(ref: React.RefObject<HTMLDivElement | null>, cb: () => void)
 function FilterPopover({
   open,
   onClose,
+  width = "w-64",
   children,
 }: {
   open: boolean;
   onClose: () => void;
+  width?: string;
   children: React.ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -81,7 +83,7 @@ function FilterPopover({
   return (
     <div
       ref={ref}
-      className="fade-up absolute left-0 top-full z-30 mt-2 w-64 rounded-md border border-border bg-surface-2 p-2 shadow-xl"
+      className={`fade-up absolute left-0 top-full z-30 mt-2 ${width} rounded-md border border-border bg-surface-2 p-2 shadow-xl`}
     >
       {children}
     </div>
@@ -100,20 +102,24 @@ function MultiSelect<T extends string>({
   labelFor?: (v: T) => string;
 }) {
   return (
-    <div className="max-h-64 overflow-y-auto scrollbar-thin">
-      {options.map((o) => {
-        const isOn = (selected as readonly string[]).includes(o);
-        return (
-          <button
-            key={o}
-            onClick={() => onToggle(o)}
-            className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-surface-3"
-          >
-            <span className="truncate">{labelFor ? labelFor(o) : o}</span>
-            {isOn && <Check className="h-3.5 w-3.5 text-primary" />}
-          </button>
-        );
-      })}
+    <div className="max-h-48 overflow-y-auto scrollbar-thin">
+      {options.length === 0 ? (
+        <div className="px-2 py-1.5 text-xs text-muted-foreground/60">None available</div>
+      ) : (
+        options.map((o) => {
+          const isOn = (selected as readonly string[]).includes(o);
+          return (
+            <button
+              key={o}
+              onClick={() => onToggle(o)}
+              className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-surface-3"
+            >
+              <span className="truncate">{labelFor ? labelFor(o) : o}</span>
+              {isOn && <Check className="h-3.5 w-3.5 text-primary" />}
+            </button>
+          );
+        })
+      )}
     </div>
   );
 }
@@ -156,6 +162,27 @@ function FilterButton({
   );
 }
 
+// A titled section inside the "More filters" popover.
+function FilterSection({
+  icon,
+  title,
+  children,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="border-b border-border/60 py-2 last:border-b-0">
+      <div className="mb-1 flex items-center gap-1.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {icon}
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 export function FilterBar({
   filters,
   onChange,
@@ -168,16 +195,19 @@ export function FilterBar({
   specialties: string[];
 }) {
   const [open, setOpen] = useState<string | null>(null);
-  const anyActive =
+
+  // "More filters" bundles the five less-used facets. Its badge shows the total
+  // number of selections across them.
+  const moreCount =
+    filters.accountTypes.length +
+    filters.vendors.length +
     filters.hospitals.length +
-      filters.specialties.length +
-      filters.sources.length +
-      filters.signalTypes.length +
-      filters.accountTypes.length +
-      filters.vendors.length +
-      filters.states.length +
-      (filters.minConfidence > 0 ? 1 : 0) >
-    0;
+    filters.specialties.length +
+    filters.sources.length;
+
+  // Clear-all appears only when a real facet is active. minConfidence is
+  // intentionally excluded — it has no UI control here and defaults to 0.
+  const anyActive = filters.states.length + filters.signalTypes.length + moreCount > 0;
 
   const toggle = <K extends keyof Filters>(
     key: K,
@@ -225,110 +255,50 @@ export function FilterBar({
         </FilterButton>
 
         <FilterButton
-          icon={<Flag className="h-3.5 w-3.5" />}
-          label="Account"
-          count={filters.accountTypes.length}
-          active={filters.accountTypes.length > 0 || open === "at"}
-          onClick={() => setOpen(open === "at" ? null : "at")}
+          icon={<SlidersHorizontal className="h-3.5 w-3.5" />}
+          label="More filters"
+          count={moreCount}
+          active={moreCount > 0 || open === "more"}
+          onClick={() => setOpen(open === "more" ? null : "more")}
         >
-          <FilterPopover open={open === "at"} onClose={() => setOpen(null)}>
-            <MultiSelect
-              options={accountTypeOptions}
-              selected={filters.accountTypes}
-              onToggle={(v) => toggle("accountTypes", v as never)}
-              labelFor={(v) => accountTypeLabels[v]}
-            />
-          </FilterPopover>
-        </FilterButton>
-
-        <FilterButton
-          icon={<Factory className="h-3.5 w-3.5" />}
-          label="Vendor"
-          count={filters.vendors.length}
-          active={filters.vendors.length > 0 || open === "v"}
-          onClick={() => setOpen(open === "v" ? null : "v")}
-        >
-          <FilterPopover open={open === "v"} onClose={() => setOpen(null)}>
-            <MultiSelect
-              options={vendorOptions}
-              selected={filters.vendors}
-              onToggle={(v) => toggle("vendors", v as never)}
-            />
-          </FilterPopover>
-        </FilterButton>
-
-        <FilterButton
-          icon={<Building2 className="h-3.5 w-3.5" />}
-          label="Hospital"
-          count={filters.hospitals.length}
-          active={filters.hospitals.length > 0 || open === "h"}
-          onClick={() => setOpen(open === "h" ? null : "h")}
-        >
-          <FilterPopover open={open === "h"} onClose={() => setOpen(null)}>
-            <MultiSelect
-              options={hospitals}
-              selected={filters.hospitals}
-              onToggle={(v) => toggle("hospitals", v as never)}
-            />
-          </FilterPopover>
-        </FilterButton>
-
-        <FilterButton
-          icon={<Stethoscope className="h-3.5 w-3.5" />}
-          label="Specialty"
-          count={filters.specialties.length}
-          active={filters.specialties.length > 0 || open === "s"}
-          onClick={() => setOpen(open === "s" ? null : "s")}
-        >
-          <FilterPopover open={open === "s"} onClose={() => setOpen(null)}>
-            <MultiSelect
-              options={specialties}
-              selected={filters.specialties}
-              onToggle={(v) => toggle("specialties", v as never)}
-            />
-          </FilterPopover>
-        </FilterButton>
-
-        <FilterButton
-          icon={<Satellite className="h-3.5 w-3.5" />}
-          label="Source"
-          count={filters.sources.length}
-          active={filters.sources.length > 0 || open === "src"}
-          onClick={() => setOpen(open === "src" ? null : "src")}
-        >
-          <FilterPopover open={open === "src"} onClose={() => setOpen(null)}>
-            <MultiSelect
-              options={sources}
-              selected={filters.sources}
-              onToggle={(v) => toggle("sources", v as never)}
-            />
-          </FilterPopover>
-        </FilterButton>
-
-        <FilterButton
-          icon={<BarChart3 className="h-3.5 w-3.5" />}
-          label={`Min Confidence: ${filters.minConfidence}%`}
-          active={filters.minConfidence > 0 || open === "c"}
-          onClick={() => setOpen(open === "c" ? null : "c")}
-        >
-          <FilterPopover open={open === "c"} onClose={() => setOpen(null)}>
-            <div className="px-2 py-3">
-              <input
-                type="range"
-                min={0}
-                max={100}
-                step={5}
-                value={filters.minConfidence}
-                onChange={(e) => onChange({ ...filters, minConfidence: Number(e.target.value) })}
-                className="w-full accent-primary"
-              />
-              <div className="mt-2 flex justify-between text-[10px] text-muted-foreground">
-                <span>0</span>
-                <span>25</span>
-                <span>50</span>
-                <span>75</span>
-                <span>100</span>
-              </div>
+          <FilterPopover open={open === "more"} onClose={() => setOpen(null)} width="w-72">
+            <div className="max-h-[70vh] overflow-y-auto scrollbar-thin">
+              <FilterSection icon={<Flag className="h-3 w-3" />} title="Account">
+                <MultiSelect
+                  options={accountTypeOptions}
+                  selected={filters.accountTypes}
+                  onToggle={(v) => toggle("accountTypes", v as never)}
+                  labelFor={(v) => accountTypeLabels[v]}
+                />
+              </FilterSection>
+              <FilterSection icon={<Factory className="h-3 w-3" />} title="Vendor">
+                <MultiSelect
+                  options={vendorOptions}
+                  selected={filters.vendors}
+                  onToggle={(v) => toggle("vendors", v as never)}
+                />
+              </FilterSection>
+              <FilterSection icon={<Building2 className="h-3 w-3" />} title="Hospital">
+                <MultiSelect
+                  options={hospitals}
+                  selected={filters.hospitals}
+                  onToggle={(v) => toggle("hospitals", v as never)}
+                />
+              </FilterSection>
+              <FilterSection icon={<Stethoscope className="h-3 w-3" />} title="Specialty">
+                <MultiSelect
+                  options={specialties}
+                  selected={filters.specialties}
+                  onToggle={(v) => toggle("specialties", v as never)}
+                />
+              </FilterSection>
+              <FilterSection icon={<Satellite className="h-3 w-3" />} title="Source">
+                <MultiSelect
+                  options={sources}
+                  selected={filters.sources}
+                  onToggle={(v) => toggle("sources", v as never)}
+                />
+              </FilterSection>
             </div>
           </FilterPopover>
         </FilterButton>
