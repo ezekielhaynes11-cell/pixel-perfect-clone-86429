@@ -45,6 +45,8 @@ import { OutreachDraftDialog } from "@/components/dashboard/OutreachDraftDialog"
 import { SavedSearchesDrawer } from "@/components/dashboard/SavedSearchesDrawer";
 import { AlertsBell } from "@/components/dashboard/AlertsBell";
 import { CopilotPanel } from "@/components/dashboard/CopilotPanel";
+import { RefreshStatusPanel, formatWhen } from "@/components/dashboard/RefreshStatusPanel";
+import { getRefreshStatus, beginRefresh, completeRefresh } from "@/lib/refresh.functions";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -108,6 +110,14 @@ function Dashboard() {
     queryKey: ["lead_physicians"],
     queryFn: () => fetchPhysicians(),
   });
+  const fetchRefreshStatus = useServerFn(getRefreshStatus);
+  const startRefresh = useServerFn(beginRefresh);
+  const finishRefresh = useServerFn(completeRefresh);
+  const refreshQ = useQuery({
+    queryKey: ["refresh_status"],
+    queryFn: () => fetchRefreshStatus(),
+    refetchInterval: 30_000,
+  });
   const fetchEnrichedCount = useServerFn(getEnrichedContactCount);
   const enrichedCountQ = useQuery({
     queryKey: ["contact_enrichment_count"],
@@ -126,17 +136,56 @@ function Dashboard() {
 
   const ingest = useMutation({
     mutationFn: async () => {
-      // Fan out per-source so each call stays well under the Worker 60s timeout.
-      const results = await Promise.allSettled(
-        INGESTION_SOURCES.map((source) => runIngestForSource({ data: { source } })),
-      );
-      let inserted = 0;
-      let failed = 0;
-      for (const r of results) {
-        if (r.status === "fulfilled") inserted += r.value.inserted;
-        else failed += 1;
+      // Claim the server-side lock first: prevents concurrent runs across tabs
+      // and records the attempt even if the run later fails.
+      await startRefresh({ data: { trigger: "manual" as const } });
+      try {
+        // Fan out per-source so each call stays well under the Worker 60s timeout.
+        const results = await Promise.allSettled(
+          INGESTION_SOURCES.map((source) => runIngestForSource({ data: { source } })),
+        );
+        let inserted = 0;
+        let fetched = 0;
+        let failed = 0;
+        const errors: string[] = [];
+        for (let i = 0; i < results.length; i++) {
+          const r = results[i];
+          if (r.status === "fulfilled" && !r.value.error) {
+            inserted += r.value.inserted;
+            fetched += r.value.fetched;
+          } else {
+            failed += 1;
+            const msg =
+              r.status === "rejected"
+                ? r.reason instanceof Error
+                  ? r.reason.message
+                  : String(r.reason)
+                : (r.value.error ?? "unknown error");
+            errors.push(`${INGESTION_SOURCES[i]}: ${msg}`);
+          }
+        }
+        const allFailed = failed === results.length;
+        await finishRefresh({
+          data: {
+            ok: !allFailed,
+            recordsScanned: fetched,
+            recordsUpdated: inserted,
+            sourcesOk: results.length - failed,
+            sourcesFailed: failed,
+            errorMessage: errors.length ? errors.slice(0, 3).join(" | ") : undefined,
+          },
+        });
+        if (allFailed) throw new Error(errors[0] ?? "All sources failed");
+        return { inserted, failed };
+      } catch (e) {
+        await finishRefresh({
+          data: {
+            ok: false,
+            errorMessage: e instanceof Error ? e.message : String(e),
+          },
+        }).catch(() => undefined);
+        throw e;
       }
-      return { inserted, failed };
     },
     onMutate: () => toast.loading("Scanning live sources…", { id: "ingest" }),
     onSuccess: ({ inserted, failed }) => {
@@ -150,7 +199,8 @@ function Dashboard() {
       qc.invalidateQueries({ queryKey: ["lead_physicians"] });
     },
     onError: (e: unknown) =>
-      toast.error(e instanceof Error ? e.message : "Ingestion failed", { id: "ingest" }),
+      toast.error(e instanceof Error ? e.message : "Refresh failed", { id: "ingest" }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["refresh_status"] }),
   });
 
   // Auto-trigger first ingestion if the database is empty and nothing has ever run.
