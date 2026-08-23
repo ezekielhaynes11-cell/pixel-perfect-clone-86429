@@ -623,6 +623,48 @@ export type Database = {
         }
         Relationships: []
       }
+      refresh_state: {
+        Row: {
+          error_message: string | null
+          id: string
+          last_attempted_at: string | null
+          last_succeeded_at: string | null
+          records_scanned: number
+          records_updated: number
+          sources_failed: number
+          sources_ok: number
+          status: string
+          trigger: string | null
+          updated_at: string
+        }
+        Insert: {
+          error_message?: string | null
+          id: string
+          last_attempted_at?: string | null
+          last_succeeded_at?: string | null
+          records_scanned?: number
+          records_updated?: number
+          sources_failed?: number
+          sources_ok?: number
+          status?: string
+          trigger?: string | null
+          updated_at?: string
+        }
+        Update: {
+          error_message?: string | null
+          id?: string
+          last_attempted_at?: string | null
+          last_succeeded_at?: string | null
+          records_scanned?: number
+          records_updated?: number
+          sources_failed?: number
+          sources_ok?: number
+          status?: string
+          trigger?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       saved_searches: {
         Row: {
           alert_threshold: number
