@@ -423,12 +423,15 @@ function Dashboard() {
           <AlertsBell leads={activeLeads} onOpenLead={setActive} />
           <button
             onClick={() => ingest.mutate()}
-            disabled={ingest.isPending}
-            aria-label="Refresh feed"
-            title={ingest.isPending ? "Scanning…" : "Refresh feed"}
-            className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+            disabled={ingest.isPending || refreshQ.data?.status === "running"}
+            aria-label="Refresh Intelligence"
+            title={ingest.isPending ? "Refreshing…" : "Refresh Intelligence"}
+            className="flex h-8 items-center justify-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             <RefreshCw className={`h-4 w-4 ${ingest.isPending ? "animate-spin" : ""}`} />
+            <span className="hidden sm:inline">
+              {ingest.isPending ? "Refreshing…" : "Refresh Intelligence"}
+            </span>
           </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -458,27 +461,33 @@ function Dashboard() {
       </header>
 
       <main className="mx-auto max-w-[1600px] px-6 py-6">
-        <SummaryCard total={discoveredToday} highPriority={highPriority} />
+        <SummaryCard
+          total={discoveredToday}
+          highPriority={highPriority}
+          isLive={refreshQ.data?.isLive ?? false}
+          lastSucceededAt={refreshQ.data?.lastSucceededAt ?? null}
+          refreshFailed={refreshQ.data?.status === "failed"}
+          isRefreshing={ingest.isPending || refreshQ.data?.status === "running"}
+        />
 
         {(() => {
-          const last = (runsQ.data ?? [])[0];
-          if (!last) return null;
-          const when = new Date(last.started_at);
-          const mins = Math.max(0, Math.round((Date.now() - when.getTime()) / 60000));
-          const ago =
-            mins < 1 ? "just now" : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
+          const rs = refreshQ.data;
+          if (!rs) return null;
           const color =
-            last.status === "error"
+            rs.status === "failed"
               ? "text-destructive"
-              : last.status === "running"
-                ? "text-muted-foreground"
-                : "text-success";
+              : rs.status === "running" || ingest.isPending
+                ? "text-primary"
+                : rs.isLive
+                  ? "text-success"
+                  : "text-warning";
           return (
-            <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span className={`inline-block h-1.5 w-1.5 rounded-full bg-current ${color}`} />
-              Last scan: {ago} · {last.source} · {last.new_count ?? 0} new ·{" "}
-              {enrichedCountQ.data?.count ?? 0} enriched
-              {last.status === "error" ? " · failed" : ""}
+              Last successful refresh: {formatWhen(rs.lastSucceededAt)} · last attempt:{" "}
+              {formatWhen(rs.lastAttemptedAt)} · {rs.recordsScanned} scanned · {rs.recordsUpdated}{" "}
+              new · {enrichedCountQ.data?.count ?? 0} enriched
+              {rs.sourcesFailed > 0 ? ` · ${rs.sourcesFailed} source(s) failed` : ""}
             </div>
           );
         })()}
