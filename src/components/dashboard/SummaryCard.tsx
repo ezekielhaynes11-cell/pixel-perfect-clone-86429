@@ -19,7 +19,30 @@ function CountUp({ value, className }: { value: number; className?: string }) {
   return <span className={className}>{n}</span>;
 }
 
-export function SummaryCard({ total, highPriority }: { total: number; highPriority: number }) {
+function formatWhen(iso: string | null): string {
+  if (!iso) return "never";
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  return hrs < 48 ? `${hrs}h ago` : `${Math.round(hrs / 24)}d ago`;
+}
+
+export function SummaryCard({
+  total,
+  highPriority,
+  isLive,
+  lastSucceededAt,
+  refreshFailed,
+  isRefreshing,
+}: {
+  total: number;
+  highPriority: number;
+  isLive: boolean;
+  lastSucceededAt: string | null;
+  refreshFailed: boolean;
+  isRefreshing: boolean;
+}) {
   return (
     <div
       className="fade-up grid grid-cols-1 gap-6 rounded-md border-l-4 border-primary bg-gradient-to-r from-surface-2 to-surface px-6 py-6 md:grid-cols-3"
@@ -49,15 +72,47 @@ export function SummaryCard({ total, highPriority }: { total: number; highPriori
       </div>
 
       <div className="md:border-l md:border-border md:pl-6">
-        <div className="flex items-center gap-2 text-success">
-          <span className="pulse-dot inline-block h-2 w-2 rounded-full bg-success" />
-          <span className="text-sm font-medium">Live monitoring</span>
-        </div>
-        <div className="mt-2 text-[11px] text-muted-foreground">Sync status shown in header</div>
+        {(() => {
+          const tone = isRefreshing
+            ? { color: "text-primary", dot: "bg-primary", label: "Refreshing sources…" }
+            : refreshFailed
+              ? { color: "text-destructive", dot: "bg-destructive", label: "Last refresh failed" }
+              : isLive
+                ? { color: "text-success", dot: "bg-success", label: "Live monitoring" }
+                : lastSucceededAt
+                  ? {
+                      color: "text-warning",
+                      dot: "bg-warning",
+                      label: "Manual refresh required",
+                    }
+                  : { color: "text-warning", dot: "bg-warning", label: "Never refreshed" };
+          return (
+            <>
+              <div className={`flex items-center gap-2 ${tone.color}`}>
+                <span
+                  className={`inline-block h-2 w-2 rounded-full ${tone.dot} ${isLive && !isRefreshing && !refreshFailed ? "pulse-dot" : ""}`}
+                />
+                <span className="text-sm font-medium">{tone.label}</span>
+              </div>
+              <div className="mt-2 text-[11px] text-muted-foreground">
+                {refreshFailed
+                  ? lastSucceededAt
+                    ? `Last successful sync ${formatWhen(lastSucceededAt)} · see Refresh Status`
+                    : "No successful sync yet · see Refresh Status"
+                  : isLive
+                    ? `Public sources synced ${formatWhen(lastSucceededAt)}`
+                    : lastSucceededAt
+                      ? `Showing stored data · last synced ${formatWhen(lastSucceededAt)}`
+                      : "Showing stored data · run Refresh Intelligence to pull live sources"}
+              </div>
+            </>
+          );
+        })()}
         <div className="mt-1 text-[11px] uppercase tracking-wider text-muted-foreground">
           Territory: OK · AR · LA · TX
         </div>
       </div>
+
     </div>
   );
 }

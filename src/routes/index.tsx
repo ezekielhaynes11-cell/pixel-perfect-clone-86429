@@ -45,6 +45,8 @@ import { OutreachDraftDialog } from "@/components/dashboard/OutreachDraftDialog"
 import { SavedSearchesDrawer } from "@/components/dashboard/SavedSearchesDrawer";
 import { AlertsBell } from "@/components/dashboard/AlertsBell";
 import { CopilotPanel } from "@/components/dashboard/CopilotPanel";
+import { RefreshStatusPanel, formatWhen } from "@/components/dashboard/RefreshStatusPanel";
+import { getRefreshStatus, beginRefresh, completeRefresh } from "@/lib/refresh.functions";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -108,6 +110,14 @@ function Dashboard() {
     queryKey: ["lead_physicians"],
     queryFn: () => fetchPhysicians(),
   });
+  const fetchRefreshStatus = useServerFn(getRefreshStatus);
+  const startRefresh = useServerFn(beginRefresh);
+  const finishRefresh = useServerFn(completeRefresh);
+  const refreshQ = useQuery({
+    queryKey: ["refresh_status"],
+    queryFn: () => fetchRefreshStatus(),
+    refetchInterval: 30_000,
+  });
   const fetchEnrichedCount = useServerFn(getEnrichedContactCount);
   const enrichedCountQ = useQuery({
     queryKey: ["contact_enrichment_count"],
@@ -126,17 +136,56 @@ function Dashboard() {
 
   const ingest = useMutation({
     mutationFn: async () => {
-      // Fan out per-source so each call stays well under the Worker 60s timeout.
-      const results = await Promise.allSettled(
-        INGESTION_SOURCES.map((source) => runIngestForSource({ data: { source } })),
-      );
-      let inserted = 0;
-      let failed = 0;
-      for (const r of results) {
-        if (r.status === "fulfilled") inserted += r.value.inserted;
-        else failed += 1;
+      // Claim the server-side lock first: prevents concurrent runs across tabs
+      // and records the attempt even if the run later fails.
+      await startRefresh({ data: { trigger: "manual" as const } });
+      try {
+        // Fan out per-source so each call stays well under the Worker 60s timeout.
+        const results = await Promise.allSettled(
+          INGESTION_SOURCES.map((source) => runIngestForSource({ data: { source } })),
+        );
+        let inserted = 0;
+        let fetched = 0;
+        let failed = 0;
+        const errors: string[] = [];
+        for (let i = 0; i < results.length; i++) {
+          const r = results[i];
+          if (r.status === "fulfilled" && !r.value.error) {
+            inserted += r.value.inserted;
+            fetched += r.value.fetched;
+          } else {
+            failed += 1;
+            const msg =
+              r.status === "rejected"
+                ? r.reason instanceof Error
+                  ? r.reason.message
+                  : String(r.reason)
+                : (r.value.error ?? "unknown error");
+            errors.push(`${INGESTION_SOURCES[i]}: ${msg}`);
+          }
+        }
+        const allFailed = failed === results.length;
+        await finishRefresh({
+          data: {
+            ok: !allFailed,
+            recordsScanned: fetched,
+            recordsUpdated: inserted,
+            sourcesOk: results.length - failed,
+            sourcesFailed: failed,
+            errorMessage: errors.length ? errors.slice(0, 3).join(" | ") : undefined,
+          },
+        });
+        if (allFailed) throw new Error(errors[0] ?? "All sources failed");
+        return { inserted, failed };
+      } catch (e) {
+        await finishRefresh({
+          data: {
+            ok: false,
+            errorMessage: e instanceof Error ? e.message : String(e),
+          },
+        }).catch(() => undefined);
+        throw e;
       }
-      return { inserted, failed };
     },
     onMutate: () => toast.loading("Scanning live sources…", { id: "ingest" }),
     onSuccess: ({ inserted, failed }) => {
@@ -150,7 +199,8 @@ function Dashboard() {
       qc.invalidateQueries({ queryKey: ["lead_physicians"] });
     },
     onError: (e: unknown) =>
-      toast.error(e instanceof Error ? e.message : "Ingestion failed", { id: "ingest" }),
+      toast.error(e instanceof Error ? e.message : "Refresh failed", { id: "ingest" }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["refresh_status"] }),
   });
 
   // Auto-trigger first ingestion if the database is empty and nothing has ever run.
@@ -336,29 +386,33 @@ function Dashboard() {
           </div>
           <div className="flex-1" />
           {(() => {
-            const last = (runsQ.data ?? [])[0];
-            if (!last) {
-              return (
-                <div className="hidden items-center gap-1.5 text-xs text-muted-foreground md:flex">
-                  <RefreshCw className="h-3.5 w-3.5 text-success" />
-                  Awaiting first sync…
-                </div>
-              );
-            }
-            const when = new Date(last.started_at);
-            const mins = Math.max(0, Math.round((Date.now() - when.getTime()) / 60000));
-            const ago =
-              mins < 1 ? "just now" : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
+            const rs = refreshQ.data;
+            const running = ingest.isPending || rs?.status === "running";
+            const failed = !running && rs?.status === "failed";
+            const label = running
+              ? "Refreshing…"
+              : failed
+                ? "Last refresh failed"
+                : rs?.isLive
+                  ? `Live monitoring · updated ${formatWhen(rs.lastSucceededAt)}`
+                  : rs?.lastSucceededAt
+                    ? `Manual refresh required · last synced ${formatWhen(rs.lastSucceededAt)}`
+                    : "Never refreshed · manual refresh required";
+            const color = running
+              ? "text-primary"
+              : failed
+                ? "text-destructive"
+                : rs?.isLive
+                  ? "text-success"
+                  : "text-warning";
             return (
               <div className="hidden items-center gap-1.5 text-xs text-muted-foreground md:flex">
-                <RefreshCw
-                  className={`h-3.5 w-3.5 ${last.status === "running" ? "animate-spin text-primary" : "text-success"}`}
-                />
-                Daily sync · {ago}
-                {last.status === "error" ? " · failed" : ""}
+                <RefreshCw className={`h-3.5 w-3.5 ${color} ${running ? "animate-spin" : ""}`} />
+                {label}
               </div>
             );
           })()}
+
           <button
             onClick={() => setCopilotOpen(true)}
             className="flex items-center gap-1.5 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20"
@@ -369,12 +423,15 @@ function Dashboard() {
           <AlertsBell leads={activeLeads} onOpenLead={setActive} />
           <button
             onClick={() => ingest.mutate()}
-            disabled={ingest.isPending}
-            aria-label="Refresh feed"
-            title={ingest.isPending ? "Scanning…" : "Refresh feed"}
-            className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+            disabled={ingest.isPending || refreshQ.data?.status === "running"}
+            aria-label="Refresh Intelligence"
+            title={ingest.isPending ? "Refreshing…" : "Refresh Intelligence"}
+            className="flex h-8 items-center justify-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             <RefreshCw className={`h-4 w-4 ${ingest.isPending ? "animate-spin" : ""}`} />
+            <span className="hidden sm:inline">
+              {ingest.isPending ? "Refreshing…" : "Refresh Intelligence"}
+            </span>
           </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -404,27 +461,33 @@ function Dashboard() {
       </header>
 
       <main className="mx-auto max-w-[1600px] px-6 py-6">
-        <SummaryCard total={discoveredToday} highPriority={highPriority} />
+        <SummaryCard
+          total={discoveredToday}
+          highPriority={highPriority}
+          isLive={refreshQ.data?.isLive ?? false}
+          lastSucceededAt={refreshQ.data?.lastSucceededAt ?? null}
+          refreshFailed={refreshQ.data?.status === "failed"}
+          isRefreshing={ingest.isPending || refreshQ.data?.status === "running"}
+        />
 
         {(() => {
-          const last = (runsQ.data ?? [])[0];
-          if (!last) return null;
-          const when = new Date(last.started_at);
-          const mins = Math.max(0, Math.round((Date.now() - when.getTime()) / 60000));
-          const ago =
-            mins < 1 ? "just now" : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
+          const rs = refreshQ.data;
+          if (!rs) return null;
           const color =
-            last.status === "error"
+            rs.status === "failed"
               ? "text-destructive"
-              : last.status === "running"
-                ? "text-muted-foreground"
-                : "text-success";
+              : rs.status === "running" || ingest.isPending
+                ? "text-primary"
+                : rs.isLive
+                  ? "text-success"
+                  : "text-warning";
           return (
-            <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span className={`inline-block h-1.5 w-1.5 rounded-full bg-current ${color}`} />
-              Last scan: {ago} · {last.source} · {last.new_count ?? 0} new ·{" "}
-              {enrichedCountQ.data?.count ?? 0} enriched
-              {last.status === "error" ? " · failed" : ""}
+              Last successful refresh: {formatWhen(rs.lastSucceededAt)} · last attempt:{" "}
+              {formatWhen(rs.lastAttemptedAt)} · {rs.recordsScanned} scanned · {rs.recordsUpdated}{" "}
+              new · {enrichedCountQ.data?.count ?? 0} enriched
+              {rs.sourcesFailed > 0 ? ` · ${rs.sourcesFailed} source(s) failed` : ""}
             </div>
           );
         })()}
@@ -642,9 +705,17 @@ function Dashboard() {
               {showInsights ? "Hide insights" : "Show insights"}
               <BarChart3 className="h-3.5 w-3.5" />
             </button>
-            <div className={showInsights ? "block" : "hidden lg:block"}>
+            <div className={showInsights ? "block space-y-4" : "hidden space-y-4 lg:block"}>
+              <RefreshStatusPanel
+                status={refreshQ.data ?? undefined}
+                isLoading={refreshQ.isLoading}
+                isRunning={ingest.isPending || refreshQ.data?.status === "running"}
+                onRefresh={() => ingest.mutate()}
+                runs={runsQ.data ?? []}
+              />
               <Sidebar leads={filtered.length ? filtered : visibleLeads} />
             </div>
+
           </div>
         </div>
 
