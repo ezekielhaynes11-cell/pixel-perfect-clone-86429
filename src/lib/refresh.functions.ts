@@ -175,7 +175,7 @@ export const completeRefresh = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const now = new Date().toISOString();
-    const update: Record<string, unknown> = {
+    const update = {
       status: data.ok ? "succeeded" : "failed",
       records_scanned: data.recordsScanned,
       records_updated: data.recordsUpdated,
@@ -183,8 +183,8 @@ export const completeRefresh = createServerFn({ method: "POST" })
       sources_failed: data.sourcesFailed,
       error_message: data.errorMessage ? safeMessage(data.errorMessage) : null,
       updated_at: now,
+      ...(data.ok ? { last_succeeded_at: now } : {}),
     };
-    if (data.ok) update.last_succeeded_at = now;
     const { data: row, error } = await supabaseAdmin
       .from("refresh_state")
       .update(update)
