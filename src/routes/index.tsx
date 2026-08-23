@@ -386,29 +386,33 @@ function Dashboard() {
           </div>
           <div className="flex-1" />
           {(() => {
-            const last = (runsQ.data ?? [])[0];
-            if (!last) {
-              return (
-                <div className="hidden items-center gap-1.5 text-xs text-muted-foreground md:flex">
-                  <RefreshCw className="h-3.5 w-3.5 text-success" />
-                  Awaiting first sync…
-                </div>
-              );
-            }
-            const when = new Date(last.started_at);
-            const mins = Math.max(0, Math.round((Date.now() - when.getTime()) / 60000));
-            const ago =
-              mins < 1 ? "just now" : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
+            const rs = refreshQ.data;
+            const running = ingest.isPending || rs?.status === "running";
+            const failed = !running && rs?.status === "failed";
+            const label = running
+              ? "Refreshing…"
+              : failed
+                ? "Last refresh failed"
+                : rs?.isLive
+                  ? `Live monitoring · updated ${formatWhen(rs.lastSucceededAt)}`
+                  : rs?.lastSucceededAt
+                    ? `Manual refresh required · last synced ${formatWhen(rs.lastSucceededAt)}`
+                    : "Never refreshed · manual refresh required";
+            const color = running
+              ? "text-primary"
+              : failed
+                ? "text-destructive"
+                : rs?.isLive
+                  ? "text-success"
+                  : "text-warning";
             return (
               <div className="hidden items-center gap-1.5 text-xs text-muted-foreground md:flex">
-                <RefreshCw
-                  className={`h-3.5 w-3.5 ${last.status === "running" ? "animate-spin text-primary" : "text-success"}`}
-                />
-                Daily sync · {ago}
-                {last.status === "error" ? " · failed" : ""}
+                <RefreshCw className={`h-3.5 w-3.5 ${color} ${running ? "animate-spin" : ""}`} />
+                {label}
               </div>
             );
           })()}
+
           <button
             onClick={() => setCopilotOpen(true)}
             className="flex items-center gap-1.5 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20"
