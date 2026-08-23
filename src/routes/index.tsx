@@ -705,9 +705,17 @@ function Dashboard() {
               {showInsights ? "Hide insights" : "Show insights"}
               <BarChart3 className="h-3.5 w-3.5" />
             </button>
-            <div className={showInsights ? "block" : "hidden lg:block"}>
+            <div className={showInsights ? "block space-y-4" : "hidden space-y-4 lg:block"}>
+              <RefreshStatusPanel
+                status={refreshQ.data ?? undefined}
+                isLoading={refreshQ.isLoading}
+                isRunning={ingest.isPending || refreshQ.data?.status === "running"}
+                onRefresh={() => ingest.mutate()}
+                runs={runsQ.data ?? []}
+              />
               <Sidebar leads={filtered.length ? filtered : visibleLeads} />
             </div>
+
           </div>
         </div>
 
