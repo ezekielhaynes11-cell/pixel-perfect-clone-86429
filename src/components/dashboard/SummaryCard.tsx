@@ -19,7 +19,30 @@ function CountUp({ value, className }: { value: number; className?: string }) {
   return <span className={className}>{n}</span>;
 }
 
-export function SummaryCard({ total, highPriority }: { total: number; highPriority: number }) {
+function formatWhen(iso: string | null): string {
+  if (!iso) return "never";
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  return hrs < 48 ? `${hrs}h ago` : `${Math.round(hrs / 24)}d ago`;
+}
+
+export function SummaryCard({
+  total,
+  highPriority,
+  isLive,
+  lastSucceededAt,
+  refreshFailed,
+  isRefreshing,
+}: {
+  total: number;
+  highPriority: number;
+  isLive: boolean;
+  lastSucceededAt: string | null;
+  refreshFailed: boolean;
+  isRefreshing: boolean;
+}) {
   return (
     <div
       className="fade-up grid grid-cols-1 gap-6 rounded-md border-l-4 border-primary bg-gradient-to-r from-surface-2 to-surface px-6 py-6 md:grid-cols-3"
