@@ -72,15 +72,43 @@ export function SummaryCard({
       </div>
 
       <div className="md:border-l md:border-border md:pl-6">
-        <div className="flex items-center gap-2 text-success">
-          <span className="pulse-dot inline-block h-2 w-2 rounded-full bg-success" />
-          <span className="text-sm font-medium">Live monitoring</span>
-        </div>
-        <div className="mt-2 text-[11px] text-muted-foreground">Sync status shown in header</div>
+        {(() => {
+          const tone = isRefreshing
+            ? { color: "text-primary", dot: "bg-primary", label: "Refreshing sources…" }
+            : refreshFailed
+              ? { color: "text-destructive", dot: "bg-destructive", label: "Last refresh failed" }
+              : isLive
+                ? { color: "text-success", dot: "bg-success", label: "Live monitoring" }
+                : lastSucceededAt
+                  ? {
+                      color: "text-warning",
+                      dot: "bg-warning",
+                      label: "Manual refresh required",
+                    }
+                  : { color: "text-warning", dot: "bg-warning", label: "Never refreshed" };
+          return (
+            <>
+              <div className={`flex items-center gap-2 ${tone.color}`}>
+                <span
+                  className={`inline-block h-2 w-2 rounded-full ${tone.dot} ${isLive && !isRefreshing && !refreshFailed ? "pulse-dot" : ""}`}
+                />
+                <span className="text-sm font-medium">{tone.label}</span>
+              </div>
+              <div className="mt-2 text-[11px] text-muted-foreground">
+                {isLive
+                  ? `Public sources synced ${formatWhen(lastSucceededAt)}`
+                  : lastSucceededAt
+                    ? `Showing stored data · last synced ${formatWhen(lastSucceededAt)}`
+                    : "Showing stored data · run Refresh Intelligence to pull live sources"}
+              </div>
+            </>
+          );
+        })()}
         <div className="mt-1 text-[11px] uppercase tracking-wider text-muted-foreground">
           Territory: OK · AR · LA · TX
         </div>
       </div>
+
     </div>
   );
 }
