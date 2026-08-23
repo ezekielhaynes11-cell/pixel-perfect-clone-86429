@@ -95,11 +95,15 @@ export function SummaryCard({
                 <span className="text-sm font-medium">{tone.label}</span>
               </div>
               <div className="mt-2 text-[11px] text-muted-foreground">
-                {isLive
-                  ? `Public sources synced ${formatWhen(lastSucceededAt)}`
-                  : lastSucceededAt
-                    ? `Showing stored data · last synced ${formatWhen(lastSucceededAt)}`
-                    : "Showing stored data · run Refresh Intelligence to pull live sources"}
+                {refreshFailed
+                  ? lastSucceededAt
+                    ? `Last successful sync ${formatWhen(lastSucceededAt)} · see Refresh Status`
+                    : "No successful sync yet · see Refresh Status"
+                  : isLive
+                    ? `Public sources synced ${formatWhen(lastSucceededAt)}`
+                    : lastSucceededAt
+                      ? `Showing stored data · last synced ${formatWhen(lastSucceededAt)}`
+                      : "Showing stored data · run Refresh Intelligence to pull live sources"}
               </div>
             </>
           );
