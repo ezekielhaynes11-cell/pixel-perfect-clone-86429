@@ -1,3 +1,4 @@
+import { useOperatorSession } from "@/hooks/use-operator-session";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -28,6 +29,7 @@ export const Route = createFileRoute("/_authenticated/settings/keywords")({
 });
 
 function KeywordsPage() {
+  const operatorSignedIn = useOperatorSession();
   const qc = useQueryClient();
   const list = useServerFn(listKeywords);
   const upsert = useServerFn(upsertKeyword);
@@ -180,7 +182,8 @@ function KeywordsPage() {
           />
           <button
             onClick={() => url.trim() && doScrape.mutate()}
-            disabled={doScrape.isPending || !url.trim()}
+            disabled={!operatorSignedIn || doScrape.isPending || !url.trim()}
+            title={!operatorSignedIn ? "Operator sign-in required for AI page extraction" : undefined}
             className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
           >
             {doScrape.isPending ? "Scraping…" : "Scrape"}
