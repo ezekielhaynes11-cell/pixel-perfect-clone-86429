@@ -36,4 +36,19 @@ describe("Apollo durable quota reservation", () => {
     await tryConsumeApolloCall();
     expect(rpc).toHaveBeenLastCalledWith("consume_apollo_call", { p_cap: 150 });
   });
+
+  it("enforces daily cap in-memory when consume_apollo_call RPC is absent from schema cache (PGRST202)", async () => {
+    vi.stubEnv("APOLLO_DAILY_CAP", "2");
+    rpc.mockResolvedValue({
+      data: null,
+      error: {
+        code: "PGRST202",
+        message:
+          "Could not find the function public.consume_apollo_call(p_cap) in the schema cache",
+      },
+    });
+    expect(await tryConsumeApolloCall()).toBe(true);
+    expect(await tryConsumeApolloCall()).toBe(true);
+    expect(await tryConsumeApolloCall()).toBe(false);
+  });
 });

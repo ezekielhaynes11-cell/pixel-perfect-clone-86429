@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import {
   UserRound,
   Mail,
@@ -16,8 +17,14 @@ import {
   Sparkles,
 } from "lucide-react";
 import type { LeadContact } from "@/data/leads";
-import type { LeadPhysician, ManualContact } from "@/lib/leads.functions";
-import { fetchContactEnrichment, listLeadContacts } from "@/lib/leads.functions";
+import {
+  fetchContactEnrichment,
+  getCachedContactEnrichment,
+  listLeadContacts,
+  type ContactEnrichmentRow,
+  type LeadPhysician,
+  type ManualContact,
+} from "@/lib/leads.functions";
 
 interface UnifiedContact {
   key: string;
@@ -29,12 +36,7 @@ interface UnifiedContact {
   address: string | null;
   linkedin_url?: string | null;
   origin: string;
-  // True when this record should surface an "Enrich with Apollo" CTA:
-  // it was flagged for manual sourcing, or it has no institutional email yet.
   needsApollo?: boolean;
-  // True when `email` actually holds a standardized domain (e.g. "@ochsner.org")
-  // used as a fallback because no concrete email is on file. Rendered as plain
-  // text rather than a mailto: link.
   emailIsFallback?: boolean;
 }
 
@@ -70,9 +72,7 @@ function sourceToContact(c: LeadContact, idx: number): UnifiedContact {
 }
 
 function manualToContact(c: ManualContact): UnifiedContact {
-  const hasEmail = !!(c.email && c.email.trim().length > 0);
-  // Guardrail: institutional emails are preferred; the personal/alt email is
-  // intentionally NOT surfaced for outreach here — it is backup-only.
+  const hasEmail = Boolean(c.email && c.email.trim().length > 0);
   const emailValue = hasEmail ? c.email : (c.email_domain_standard ?? null);
   return {
     key: `manual:${c.id}`,
@@ -82,9 +82,9 @@ function manualToContact(c: ManualContact): UnifiedContact {
     phone: c.direct_phone ?? c.department_phone,
     email: emailValue,
     address: c.facility_address,
-    origin: "Manual seed",
-    needsApollo: c.needs_manual_sourcing || !hasEmail,
-    emailIsFallback: !hasEmail && !!c.email_domain_standard,
+    origin: "Verified seed",
+    needsApollo: c.needs_manual_sourcing || !hasEmail || !c.contact_name,
+    emailIsFallback: !hasEmail && Boolean(c.email_domain_standard),
   };
 }
 
@@ -138,63 +138,183 @@ function ApolloCTA({ onClick, loading }: { onClick: () => void; loading?: boolea
   );
 }
 
+function renderStatusBadge(
+  enrichLoading: boolean,
+  enrichError: boolean,
+  enrichFound: boolean,
+  errorMessage: string,
+) {
+  if (enrichLoading) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Enriching…
+      </span>
+    );
+  }
+  if (enrichError) {
+    return (
+      <span
+        title={errorMessage}
+        className="inline-flex items-center gap-1 rounded-full border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive"
+      >
+        <XCircle className="h-3 w-3" />
+        Enrichment failed
+      </span>
+    );
+  }
+  if (enrichFound) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-success/40 bg-success/10 px-2 py-0.5 text-[10px] font-medium text-success">
+        <CheckCircle2 className="h-3 w-3" />
+        Contact found
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">
+      <AlertCircle className="h-3 w-3" />
+      No contact on file
+    </span>
+  );
+}
+
+function mergeContacts(
+  manualContacts: ManualContact[],
+  sourceContacts: LeadContact[],
+  physicians: LeadPhysician[],
+  enrich: ContactEnrichmentRow | null | undefined,
+): UnifiedContact[] {
+  const rawList: UnifiedContact[] = [
+    ...manualContacts.map(manualToContact),
+    ...sourceContacts.map(sourceToContact),
+    ...physicians.map(physicianToContact),
+  ];
+
+  // If we have an enriched decision-maker, fill in any unnamed manual seed row
+  // and deduplicate by name so the user never sees duplicate cards.
+  if (enrich && enrich.status === "found" && enrich.name) {
+    for (const item of rawList) {
+      if (!item.name) {
+        item.name = enrich.name;
+        item.title = enrich.title ?? item.title;
+        item.phone = enrich.phone ?? item.phone;
+        if (enrich.email) {
+          item.email = enrich.email;
+          item.emailIsFallback = false;
+        }
+        item.linkedin_url = enrich.linkedin_url ?? item.linkedin_url;
+        item.needsApollo = false;
+        item.origin = "Enriched";
+      }
+    }
+  }
+
+  const seenNames = new Set<string>();
+  const deduped: UnifiedContact[] = [];
+  for (const c of rawList) {
+    const normKey = c.name
+      ? c.name.toLowerCase().trim()
+      : `${c.organization ?? ""}:${c.title ?? ""}`.toLowerCase();
+    if (normKey && seenNames.has(normKey)) continue;
+    if (normKey) seenNames.add(normKey);
+    deduped.push(c);
+  }
+  return deduped;
+}
+
 export function ContactSection({
   sourceContacts,
   physicians,
   leadId,
+  autoEnrichOnOpen = false,
 }: {
   sourceContacts: LeadContact[];
   physicians: LeadPhysician[];
   leadId?: string;
+  autoEnrichOnOpen?: boolean;
 }) {
   const qc = useQueryClient();
+  const fetchManualContacts = useServerFn(listLeadContacts);
+  const fetchCachedEnrichment = useServerFn(getCachedContactEnrichment);
+  const triggerEnrichment = useServerFn(fetchContactEnrichment);
 
   const manualQ = useQuery({
     queryKey: ["lead_contacts", leadId],
-    queryFn: () => listLeadContacts({ data: { lead_id: leadId! } }),
-    enabled: !!leadId,
+    queryFn: () => fetchManualContacts({ data: { lead_id: leadId! } }),
+    enabled: Boolean(leadId),
     staleTime: 60_000,
   });
 
-  const unified: UnifiedContact[] = [
-    ...(manualQ.data ?? []).map(manualToContact),
-    ...sourceContacts.map(sourceToContact),
-    ...physicians.map(physicianToContact),
-  ];
-  const empty = unified.length === 0;
-  const [expanded, setExpanded] = useState(0);
+  const cachedEnrichQ = useQuery({
+    queryKey: ["cached_contact_enrichment", leadId],
+    queryFn: () => fetchCachedEnrichment({ data: { lead_id: leadId! } }),
+    enabled: Boolean(leadId),
+    staleTime: 60_000,
+  });
 
-  // Contact enrichment runs the paid Apollo waterfall, so it is NEVER fired
-  // automatically on mount — it only runs when the rep clicks "Enrich with
-  // Apollo" (runApollo -> refetch). enabled:false keeps the query idle until then.
   const enrichQ = useQuery({
     queryKey: ["contact_enrichment", leadId],
-    queryFn: () => fetchContactEnrichment({ data: { lead_id: leadId! } }),
+    queryFn: () => triggerEnrichment({ data: { lead_id: leadId! } }),
     enabled: false,
     staleTime: Infinity,
     retry: false,
   });
 
-  const enrich = enrichQ.data;
-  const enrichLoading = !!(leadId && (enrichQ.isLoading || enrichQ.isFetching));
-  const enrichError = !!(leadId && enrichQ.isError);
+  const enrich = enrichQ.data ?? cachedEnrichQ.data ?? null;
+  const unified = mergeContacts(manualQ.data ?? [], sourceContacts, physicians, enrich);
+  const empty = unified.length === 0;
+  const [expanded, setExpanded] = useState(0);
+
+  const enrichLoading = Boolean(
+    leadId && (enrichQ.isLoading || enrichQ.isFetching || manualQ.isLoading),
+  );
+  const enrichError = Boolean(leadId && enrichQ.isError);
   const enrichFound = enrich?.status === "found" || unified.length > 0;
 
-  // Trigger the Apollo decision-maker waterfall on demand (user-initiated only).
   const runApollo = () => {
     if (!leadId) return;
-    enrichQ.refetch();
+    void enrichQ.refetch();
   };
 
+  // When the user explicitly opens "Show contact & enrich decision-maker" and no
+  // named contact is cached yet, automatically run the enrichment waterfall once.
+  const autoTriggeredRef = useRef(false);
   useEffect(() => {
-    if (enrichFound) {
-      qc.invalidateQueries({ queryKey: ["contact_enrichment_count"] });
+    if (!autoEnrichOnOpen || !leadId || autoTriggeredRef.current) return;
+    if (manualQ.isLoading || cachedEnrichQ.isLoading) return;
+    const hasNamedContact =
+      (cachedEnrichQ.data?.status === "found" && Boolean(cachedEnrichQ.data.name)) ||
+      unified.some((c) => Boolean(c.name && (c.phone || c.email)));
+    if (!hasNamedContact) {
+      autoTriggeredRef.current = true;
+      void enrichQ.refetch();
     }
-  }, [enrichFound, qc]);
+  }, [
+    autoEnrichOnOpen,
+    leadId,
+    manualQ.isLoading,
+    cachedEnrichQ.isLoading,
+    cachedEnrichQ.data,
+    unified,
+    enrichQ,
+  ]);
+
+  useEffect(() => {
+    if (enrichQ.data?.status === "found") {
+      qc.invalidateQueries({ queryKey: ["contact_enrichment_count"] });
+      qc.invalidateQueries({ queryKey: ["cached_contact_enrichment", leadId] });
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    }
+  }, [enrichQ.data, leadId, qc]);
 
   const errorMessage = enrichQ.error
     ? ((enrichQ.error as { message?: string }).message ?? "Unknown error")
     : "";
+
+  const enrichAlreadyInUnified =
+    Boolean(enrich?.name) &&
+    unified.some((c) => c.name?.toLowerCase().trim() === enrich?.name?.toLowerCase().trim());
 
   return (
     <section className="mb-3 rounded-md border border-border/60 bg-surface/60 p-3">
@@ -204,40 +324,15 @@ export function ContactSection({
           Contact
         </h4>
 
-        {leadId &&
-          (enrichLoading ? (
-            <span className="inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Enriching…
-            </span>
-          ) : enrichError ? (
-            <span
-              title={errorMessage}
-              className="inline-flex items-center gap-1 rounded-full border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive"
-            >
-              <XCircle className="h-3 w-3" />
-              Enrichment failed
-            </span>
-          ) : enrichFound ? (
-            <span className="inline-flex items-center gap-1 rounded-full border border-success/40 bg-success/10 px-2 py-0.5 text-[10px] font-medium text-success">
-              <CheckCircle2 className="h-3 w-3" />
-              Contact found
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">
-              <AlertCircle className="h-3 w-3" />
-              No contact on file
-            </span>
-          ))}
+        {leadId && renderStatusBadge(enrichLoading, enrichError, enrichFound, errorMessage)}
 
-        {empty ? (
-          !leadId && (
-            <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">
-              <AlertCircle className="h-3 w-3" />
-              No contact on file
-            </span>
-          )
-        ) : (
+        {empty && !leadId && (
+          <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">
+            <AlertCircle className="h-3 w-3" />
+            No contact on file
+          </span>
+        )}
+        {!empty && (
           <span className="ml-auto text-[10px] text-muted-foreground">
             {unified.length} contact{unified.length > 1 ? "s" : ""}
           </span>
@@ -251,7 +346,7 @@ export function ContactSection({
         </div>
       )}
 
-      {enrichFound && enrich && enrich.status === "found" && (
+      {enrichFound && enrich && enrich.status === "found" && !enrichAlreadyInUnified && (
         <div className="mb-2 rounded border border-success/30 bg-success/5 px-2 py-2">
           <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-success">
             Decision-maker
@@ -266,20 +361,22 @@ export function ContactSection({
               email: enrich.email,
               address: null,
               linkedin_url: enrich.linkedin_url,
-              origin: "Apollo",
+              origin: "Enriched",
             }}
           />
         </div>
       )}
 
-      {empty && !enrichFound ? (
+      {empty && !enrichFound && (
         <div className="space-y-2 px-1 py-1">
           <p className="text-xs text-muted-foreground">
             No decision-maker on file yet for this account.
           </p>
           {leadId && <ApolloCTA onClick={runApollo} loading={enrichLoading} />}
         </div>
-      ) : !empty ? (
+      )}
+
+      {!empty && (
         <ul className="space-y-2">
           {unified.map((c, i) => {
             const isOpen = i === expanded;
@@ -320,7 +417,7 @@ export function ContactSection({
             );
           })}
         </ul>
-      ) : null}
+      )}
     </section>
   );
 }
@@ -334,9 +431,6 @@ function ContactCard({
   onEnrich?: () => void;
   enriching?: boolean;
 }) {
-  // Only render rows that actually have a value — never a stack of
-  // "Not available" placeholders. Missing details are surfaced via the
-  // "Enrich with Apollo" CTA instead.
   return (
     <div className="space-y-1.5">
       {contact?.name && <Row icon={<UserRound />} label="Name" value={contact.name} />}

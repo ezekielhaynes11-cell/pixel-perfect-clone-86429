@@ -8,6 +8,7 @@ import {
   rowToLead,
   type LeadRow,
 } from "@/data/leads";
+import { fetchClinicalTrialContacts, hospitalsMatch } from "@/lib/apollo/public-enrichment.server";
 import { buildBlueskySearchQuery } from "./bluesky.server";
 import { passesMedicalGate, sanitizeErrorText } from "./medical-gate";
 import { fetchSamGov } from "./sam-gov.server";
@@ -349,5 +350,59 @@ describe("historical lead archiving, high-priority qualification, and territory 
 
     expect(leadInTerritoryScope(nationwideRecall, territoryStates)).toBe(true);
     expect(leadInTerritoryScope(iowaRecall, territoryStates)).toBe(false);
+  });
+
+  it("matches hospital aliases across ClinicalTrials.gov and seeded account names", () => {
+    expect(
+      hospitalsMatch("The University of Texas Southwestern", "UT Southwestern Medical Center"),
+    ).toBe(true);
+    expect(
+      hospitalsMatch(
+        "The University of Texas Health Science Center at Houston",
+        "UTHealth Houston McGovern Medical School",
+      ),
+    ).toBe(true);
+    expect(hospitalsMatch("Methodist Dallas Medical Center", "University of Iowa Hospitals")).toBe(
+      false,
+    );
+  });
+
+  it("extracts territory contacts and principal investigators from ClinicalTrials.gov v2 studies", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      return new Response(
+        JSON.stringify({
+          protocolSection: {
+            contactsLocationsModule: {
+              locations: [
+                {
+                  facility: "The University of Texas Southwestern",
+                  city: "Dallas",
+                  state: "Texas",
+                  zip: "75390",
+                  contacts: [
+                    {
+                      name: "Riley Martin",
+                      role: "CONTACT",
+                      phone: "214-648-2147",
+                      email: "riley.martin@utsouthwestern.edu",
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+
+    const contacts = await fetchClinicalTrialContacts(
+      "NCT07853768",
+      "The University of Texas Southwestern",
+    );
+    expect(contacts).toHaveLength(1);
+    expect(contacts[0].name).toBe("Riley Martin");
+    expect(contacts[0].email).toBe("riley.martin@utsouthwestern.edu");
+    expect(contacts[0].phone).toBe("214-648-2147");
   });
 });

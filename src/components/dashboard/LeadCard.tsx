@@ -83,7 +83,8 @@ export function LeadCard({
     cls: "bg-surface-3 text-foreground border-border",
   };
   const conf = confidenceColor(lead.confidence);
-  const [contactOpen, setContactOpen] = useState(false);
+  const hasContacts = (lead.sourceContacts?.length ?? 0) > 0 || physicians.length > 0;
+  const [contactOpen, setContactOpen] = useState(hasContacts);
 
   return (
     <article
@@ -177,12 +178,13 @@ export function LeadCard({
         ))}
       </div>
 
-      {/* Contact — lazy: mounts and fires enrichment only on explicit click */}
-      {contactOpen ? (
+      {/* Contact — visible immediately when contacts exist on file; otherwise enriches on click */}
+      {contactOpen || hasContacts ? (
         <ContactSection
           sourceContacts={lead.sourceContacts ?? []}
           physicians={physicians}
           leadId={lead.id}
+          autoEnrichOnOpen={!hasContacts}
         />
       ) : (
         <button

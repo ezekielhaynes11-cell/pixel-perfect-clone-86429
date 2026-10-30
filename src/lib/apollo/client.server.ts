@@ -1,14 +1,12 @@
 // Thin wrapper around the Apollo.io REST API.
 // Docs: https://docs.apollo.io/reference
 
+import { logWarn } from "../logger.server";
 import { tryConsumeApolloCall } from "./quota.server";
 
 const APOLLO_BASE = "https://api.apollo.io/api/v1";
-const TIMEOUT_MS = 30_000;
+const TIMEOUT_MS = 15_000;
 
-// Thrown when the daily Apollo cap is reached. Callers that loop over many
-// contacts (backfill, NPPES auto-enrich) can catch this to stop early instead of
-// hammering the metered endpoint.
 export class ApolloCapError extends Error {
   constructor() {
     super(
@@ -18,51 +16,63 @@ export class ApolloCapError extends Error {
   }
 }
 
+export function hasApolloApiKey(): boolean {
+  return Boolean(process.env.APOLLO_API_KEY && process.env.APOLLO_API_KEY.trim().length > 0);
+}
+
 function key(): string {
-  const k = process.env.APOLLO_API_KEY;
-  if (!k) throw new Error("APOLLO_API_KEY is not configured");
-  return k;
+  const apiKey = process.env.APOLLO_API_KEY?.trim();
+  if (!apiKey) throw new Error("APOLLO_API_KEY is not configured");
+  return apiKey;
+}
+
+function extractApolloErrorDetail(rawText: string): string {
+  const fallback = rawText.slice(0, 200);
+  if (!rawText.trim().startsWith("{")) {
+    return fallback;
+  }
+  try {
+    const parsed = JSON.parse(rawText) as { message?: string; error?: string };
+    return parsed.message ?? parsed.error ?? fallback;
+  } catch (err) {
+    logWarn("apollo.client", "Non-JSON error body from Apollo", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return fallback;
+  }
 }
 
 async function call<T>(path: string, body: Record<string, unknown>): Promise<T> {
-  // Central metering: every Apollo request goes through here, so this is the one
-  // place the daily cap is enforced. Consume a unit before spending a credit.
+  const apiKey = key();
   if (!(await tryConsumeApolloCall())) throw new ApolloCapError();
 
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
-  try {
-    const res = await fetch(`${APOLLO_BASE}${path}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        accept: "application/json",
-        "x-api-key": key(),
-      },
-      body: JSON.stringify(body),
-      signal: ctrl.signal,
+  const response = await fetch(`${APOLLO_BASE}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      accept: "application/json",
+      "x-api-key": apiKey,
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    logWarn("apollo.client", "Apollo endpoint returned non-OK status", {
+      path,
+      status: response.status,
+      detail: text.slice(0, 300),
     });
-    if (!res.ok) {
-      const text = await res.text();
-      console.error(`[apollo] ${path} ${res.status} ${res.statusText}: ${text.slice(0, 500)}`);
-      if (res.status === 429) throw new Error("Apollo rate limit hit — try again in a minute.");
-      if (res.status === 402) throw new Error("Apollo credits exhausted.");
-      if (res.status === 401) throw new Error("Apollo API key rejected.");
-      if (res.status === 403)
-        throw new Error(`Apollo 403 forbidden on ${path} — endpoint may require a paid plan.`);
-      let detail = text.slice(0, 200);
-      try {
-        const j = JSON.parse(text) as { message?: string; error?: string };
-        detail = j.message ?? j.error ?? detail;
-      } catch {
-        /* not json */
-      }
-      throw new Error(`Apollo ${path} ${res.status}: ${detail}`);
+    if (response.status === 429) throw new Error("Apollo rate limit hit — try again in a minute.");
+    if (response.status === 402) throw new Error("Apollo credits exhausted.");
+    if (response.status === 401) throw new Error("Apollo API key rejected.");
+    if (response.status === 403) {
+      throw new Error(`Apollo 403 forbidden on ${path} — endpoint may require a paid plan.`);
     }
-    return (await res.json()) as T;
-  } finally {
-    clearTimeout(timer);
+    const detail = extractApolloErrorDetail(text);
+    throw new Error(`Apollo ${path} ${response.status}: ${detail}`);
   }
+  return (await response.json()) as T;
 }
 
 export interface ApolloPerson {
@@ -102,7 +112,7 @@ export async function apolloPeopleSearch(input: {
   page?: number;
   per_page?: number;
 }): Promise<{ people: ApolloPerson[]; pagination?: { total_entries?: number } }> {
-  return call("/mixed_people/search", {
+  const payload = {
     page: input.page ?? 1,
     per_page: Math.min(input.per_page ?? 25, 100),
     person_titles: input.person_titles,
@@ -110,7 +120,16 @@ export async function apolloPeopleSearch(input: {
     person_locations: input.person_locations,
     organization_locations: input.organization_locations,
     organization_name: input.organization_name,
-  });
+  };
+  try {
+    return await call("/mixed_people/search", payload);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("403") || msg.includes("404") || msg.includes("422")) {
+      return call("/mixed_people/api_search", payload);
+    }
+    throw err;
+  }
 }
 
 export async function apolloPersonMatch(input: {

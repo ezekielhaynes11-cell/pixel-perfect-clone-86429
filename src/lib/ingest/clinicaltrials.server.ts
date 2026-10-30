@@ -1,4 +1,4 @@
-import type { RawLead } from "./types";
+import type { LeadContact, RawLead } from "./types";
 import { PHILLIPS_KEYWORDS } from "./types";
 
 // ClinicalTrials.gov v2 API — public, no key required
@@ -30,15 +30,15 @@ export async function fetchClinicalTrials(
     pageSize: String(limit),
     format: "json",
     fields:
-      "NCTId,BriefTitle,OfficialTitle,StudyFirstPostDate,OverallStatus,LeadSponsorName,LocationFacility,LocationCity,LocationState,Condition,InterventionName,BriefSummary",
+      "NCTId,BriefTitle,OfficialTitle,StudyFirstPostDate,OverallStatus,LeadSponsorName,ResponsiblePartyInvestigatorFullName,ResponsiblePartyInvestigatorTitle,ResponsiblePartyInvestigatorAffiliation,CentralContactName,CentralContactRole,CentralContactPhone,CentralContactEMail,OverallOfficialName,OverallOfficialRole,OverallOfficialAffiliation,LocationFacility,LocationCity,LocationState,LocationZip,LocationContactName,LocationContactRole,LocationContactPhone,LocationContactEMail,Condition,InterventionName,BriefSummary",
   });
 
-  const res = await fetch(`${BASE}?${params}`);
-  if (!res.ok) {
-    if (res.status === 404) return [];
-    throw new Error(`ClinicalTrials.gov ${res.status}: ${await res.text()}`);
+  const response = await fetch(`${BASE}?${params}`);
+  if (!response.ok) {
+    if (response.status === 404) return [];
+    throw new Error(`ClinicalTrials.gov ${response.status}: ${await response.text()}`);
   }
-  const json = (await res.json()) as { studies?: CtStudy[] };
+  const json = (await response.json()) as { studies?: CtStudy[] };
   const rows = json.studies ?? [];
   const kwLower = PHILLIPS_KEYWORDS.map((k) => k.toLowerCase());
 
@@ -72,23 +72,131 @@ export async function fetchClinicalTrials(
           ].join("\n"),
           date_discovered: f.posted ?? new Date().toISOString(),
           raw_payload: f.raw as unknown as Record<string, unknown>,
+          source_contacts: f.contacts,
         };
       })
   );
+}
+
+interface CtContactItem {
+  name?: string;
+  role?: string;
+  phone?: string;
+  email?: string;
+  affiliation?: string;
 }
 
 interface CtStudy {
   protocolSection?: {
     identificationModule?: { nctId?: string; briefTitle?: string; officialTitle?: string };
     statusModule?: { overallStatus?: string; studyFirstPostDateStruct?: { date?: string } };
-    sponsorCollaboratorsModule?: { leadSponsor?: { name?: string } };
+    sponsorCollaboratorsModule?: {
+      leadSponsor?: { name?: string };
+      responsibleParty?: {
+        investigatorFullName?: string;
+        investigatorTitle?: string;
+        investigatorAffiliation?: string;
+      };
+    };
     contactsLocationsModule?: {
-      locations?: { facility?: string; city?: string; state?: string }[];
+      centralContacts?: CtContactItem[];
+      overallOfficials?: CtContactItem[];
+      locations?: {
+        facility?: string;
+        city?: string;
+        state?: string;
+        zip?: string;
+        contacts?: CtContactItem[];
+      }[];
     };
     conditionsModule?: { conditions?: string[] };
     armsInterventionsModule?: { interventions?: { name?: string }[] };
     descriptionModule?: { briefSummary?: string };
   };
+}
+
+function extractStudyContacts(
+  s: CtStudy,
+  territorySites: NonNullable<
+    NonNullable<CtStudy["protocolSection"]>["contactsLocationsModule"]
+  >["locations"],
+  sponsor: string,
+): LeadContact[] {
+  const clm = s.protocolSection?.contactsLocationsModule;
+  const resp = s.protocolSection?.sponsorCollaboratorsModule?.responsibleParty;
+  const primarySite = territorySites?.[0];
+  const defaultOrg = primarySite?.facility ?? (sponsor || null);
+  const defaultAddr = primarySite
+    ? [primarySite.facility, primarySite.city, primarySite.state, primarySite.zip]
+        .filter(Boolean)
+        .join(", ")
+    : null;
+
+  const list: LeadContact[] = [];
+  const seen = new Set<string>();
+  const add = (c: LeadContact) => {
+    const k = `${(c.name ?? "").toLowerCase()}|${(c.email ?? "").toLowerCase()}`;
+    if (!c.name || seen.has(k)) return;
+    seen.add(k);
+    list.push(c);
+  };
+
+  for (const loc of territorySites ?? []) {
+    const locAddr = [loc.facility, loc.city, loc.state, loc.zip].filter(Boolean).join(", ") || null;
+    for (const c of loc.contacts ?? []) {
+      add({
+        name: c.name ?? null,
+        title: c.role ?? "Site Contact",
+        organization: loc.facility ?? defaultOrg,
+        phone: c.phone ?? null,
+        email: c.email ?? null,
+        address: locAddr,
+        type: "site",
+        source_origin: "clinicaltrials",
+      });
+    }
+  }
+
+  for (const official of clm?.overallOfficials ?? []) {
+    add({
+      name: official.name ?? null,
+      title: official.role ?? "Principal Investigator",
+      organization: official.affiliation ?? defaultOrg,
+      phone: null,
+      email: null,
+      address: defaultAddr,
+      type: "investigator",
+      source_origin: "clinicaltrials",
+    });
+  }
+
+  if (resp?.investigatorFullName) {
+    add({
+      name: resp.investigatorFullName,
+      title: resp.investigatorTitle ?? "Principal Investigator",
+      organization: resp.investigatorAffiliation ?? defaultOrg,
+      phone: null,
+      email: null,
+      address: defaultAddr,
+      type: "investigator",
+      source_origin: "clinicaltrials",
+    });
+  }
+
+  for (const central of clm?.centralContacts ?? []) {
+    add({
+      name: central.name ?? null,
+      title: central.role ?? "Central Study Contact",
+      organization: defaultOrg,
+      phone: central.phone ?? null,
+      email: central.email ?? null,
+      address: defaultAddr,
+      type: "central",
+      source_origin: "clinicaltrials",
+    });
+  }
+
+  return list;
 }
 
 function flatten(s: CtStudy) {
@@ -137,6 +245,7 @@ function flatten(s: CtStudy) {
     interventions,
     summary,
     blob,
+    contacts: extractStudyContacts(s, territorySites, sponsor),
     raw: s,
   };
 }

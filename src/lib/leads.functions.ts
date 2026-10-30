@@ -596,22 +596,39 @@ export interface ManualContact {
 const MANUAL_CONTACT_COLUMNS =
   "id, account_name, contact_name, title, alt_contact, direct_phone, department_phone, email, alt_email, email_domain_standard, facility_address, needs_manual_sourcing, source";
 
-// Decision-maker contacts seeded into the `contacts` table and linked to a lead.
-// Surfaced in the lead's contact panel alongside source_contacts and physicians.
+// Decision-maker contacts seeded into the `contacts` table and linked to a lead
+// by explicit `lead_id` OR fuzzy normalized hospital/account match.
 export const listLeadContacts = createServerFn({ method: "POST" })
   .inputValidator((input) => z.object({ lead_id: z.string().uuid() }).parse(input))
   .handler(async ({ data }): Promise<ManualContact[]> => {
-    const { data: rows, error } = await supabaseAdmin
-      .from("contacts")
-      .select(MANUAL_CONTACT_COLUMNS)
-      .eq("lead_id", data.lead_id)
-      .order("needs_manual_sourcing", { ascending: true })
-      .order("contact_name", { ascending: true, nullsFirst: false });
-    if (error) throw new Error(error.message);
-    return (rows ?? []) as ManualContact[];
+    const { hospitalsMatch } = await import("./apollo/public-enrichment.server");
+    const [leadRes, allManualRes] = await Promise.all([
+      supabaseAdmin.from("leads").select("hospital, entities").eq("id", data.lead_id).maybeSingle(),
+      supabaseAdmin
+        .from("contacts")
+        .select(`${MANUAL_CONTACT_COLUMNS}, lead_id`)
+        .order("needs_manual_sourcing", { ascending: true })
+        .order("contact_name", { ascending: true, nullsFirst: false }),
+    ]);
+    if (allManualRes.error) throw new Error(allManualRes.error.message);
+
+    const leadRow = leadRes.data;
+    const ents = (leadRow?.entities as { hospitals?: string[] } | null) ?? {};
+    const candidateHospitals = [leadRow?.hospital ?? null, ...(ents.hospitals ?? [])].filter(
+      (h): h is string => Boolean(h && h.trim().length > 0),
+    );
+
+    type ManualRowWithLead = ManualContact & { lead_id: string | null };
+    const allRows = (allManualRes.data ?? []) as ManualRowWithLead[];
+    const matched = allRows.filter((row) => {
+      if (row.lead_id === data.lead_id) return true;
+      return candidateHospitals.some((hosp) => hospitalsMatch(row.account_name, hosp));
+    });
+
+    return matched.map(({ lead_id: _unusedLeadId, ...rest }) => rest);
   });
 
-/* -------------------- Decision-maker contact enrichment (Apollo) -------------------- */
+/* -------------------- Decision-maker contact enrichment (Apollo + Public Waterfall) -------------------- */
 
 export interface ContactEnrichmentRow {
   lead_id: string;
@@ -624,6 +641,18 @@ export interface ContactEnrichmentRow {
   linkedin_url: string | null;
   created_at: string;
 }
+
+export const getCachedContactEnrichment = createServerFn({ method: "POST" })
+  .inputValidator((input) => z.object({ lead_id: z.string().uuid() }).parse(input))
+  .handler(async ({ data }): Promise<ContactEnrichmentRow | null> => {
+    const { data: cached } = await supabaseAdmin
+      .from("contact_enrichment")
+      .select("*")
+      .eq("lead_id", data.lead_id)
+      .eq("status", "found")
+      .maybeSingle();
+    return (cached as ContactEnrichmentRow | null) ?? null;
+  });
 
 const DECISION_MAKER_TITLES = [
   "Director of Point of Care Ultrasound",
@@ -639,11 +668,49 @@ const DECISION_MAKER_TITLES = [
   "Ultrasound Fellowship Director",
 ];
 
-// Shared waterfall: NPPES (lead_physicians cache) → Apollo (org search) → none.
-// Runs fully in-process with supabaseAdmin + the server-side Apollo client, so
-// it does NOT depend on the enrich-contact edge function being deployed or its
-// secrets being configured. Used by both fetchContactEnrichment (on-demand,
-// card expand) and batchEnrichContacts (bulk).
+async function persistSourceContactIfEmpty(
+  leadId: string,
+  existingSourceContacts: unknown,
+  resolved: {
+    name: string | null;
+    title: string | null;
+    organization: string | null;
+    phone: string | null;
+    email: string | null;
+    address?: string | null;
+    origin?: string;
+  },
+): Promise<void> {
+  if (!resolved.name) return;
+  const hasExisting = Array.isArray(existingSourceContacts) && existingSourceContacts.length > 0;
+  if (hasExisting) return;
+
+  await supabaseAdmin
+    .from("leads")
+    .update({
+      source_contacts: [
+        {
+          name: resolved.name,
+          title: resolved.title,
+          organization: resolved.organization,
+          phone: resolved.phone,
+          email: resolved.email,
+          address: resolved.address ?? null,
+          type: "primary",
+          source_origin: resolved.origin ?? "enriched",
+        },
+      ] as never,
+    })
+    .eq("id", leadId);
+}
+
+// Multi-tier waterfall:
+// 1. Confirmed contact_enrichment cache
+// 2. NPPES lead_physicians cache
+// 3. Lead source_contacts
+// 4. Verified contacts table (by lead_id or fuzzy hospital match)
+// 5. Apollo.io (when APOLLO_API_KEY is configured and available)
+// 6. Public clinical & federal waterfall (ClinicalTrials.gov v2 -> NIH RePORTER -> CMS NPPES NPI-2/NPI-1 -> Territory specialty directory)
 async function runContactWaterfall(leadId: string): Promise<ContactEnrichmentRow> {
   const writeAndReturn = async (
     row: Omit<ContactEnrichmentRow, "created_at">,
@@ -657,18 +724,22 @@ async function runContactWaterfall(leadId: string): Promise<ContactEnrichmentRow
     return saved as ContactEnrichmentRow;
   };
 
-  // Step 1: cache — only short-circuit on a confirmed contact; 'none' retries.
+  // Step 1: cache — only short-circuit on a confirmed contact with actionable details
   const { data: cached } = await supabaseAdmin
     .from("contact_enrichment")
     .select("*")
     .eq("lead_id", leadId)
     .maybeSingle();
-  if (cached && cached.status === "found") return cached as ContactEnrichmentRow;
+  if (cached && cached.status === "found" && cached.name && (cached.phone || cached.email)) {
+    return cached as ContactEnrichmentRow;
+  }
 
   // Step 2: load lead
   const { data: lead, error: leadErr } = await supabaseAdmin
     .from("leads")
-    .select("hospital, entities")
+    .select(
+      "id, source, source_external_id, title, hospital, specialty, territory, signal_type, entities, source_contacts",
+    )
     .eq("id", leadId)
     .single();
   if (leadErr || !lead) throw new Error("Lead not found");
@@ -695,7 +766,7 @@ async function runContactWaterfall(leadId: string): Promise<ContactEnrichmentRow
     .eq("lead_id", leadId)
     .limit(1);
   const phys = (physRows as unknown as PhysJoin[] | null)?.[0]?.physician_contacts;
-  if (phys) {
+  if (phys && (phys.practice_phone || phys.email)) {
     const name = [phys.full_name, phys.credentials].filter(Boolean).join(", ") || phys.full_name;
     const physOrg = [phys.practice_city, phys.practice_state].filter(Boolean).join(", ") || null;
     return writeAndReturn({
@@ -703,84 +774,312 @@ async function runContactWaterfall(leadId: string): Promise<ContactEnrichmentRow
       status: "found",
       name,
       title: phys.title ?? phys.primary_specialty,
-      organization: physOrg,
+      organization: (lead.hospital as string | null) ?? physOrg,
       phone: phys.practice_phone,
       email: phys.email,
       linkedin_url: phys.linkedin_url,
     });
   }
 
-  // Step 4: resolve org name from lead fields. Only ever use an actual
-  // organization here — never fall back to a physician name, which would send a
-  // person into Apollo's organization_name search and cache garbage as "found".
-  const ents = (lead.entities as { hospitals?: string[]; physicians?: string[] }) ?? {};
-  const org =
-    ((lead.hospital as string | null)?.trim() || null) ?? (ents.hospitals?.[0]?.trim() || null);
-
-  if (!org) {
-    return writeAndReturn({
-      lead_id: leadId,
-      status: "none",
-      name: null,
-      title: null,
-      organization: null,
-      phone: null,
-      email: null,
-      linkedin_url: null,
-    });
-  }
-
-  // Step 5: Apollo fallback (server-side client reads APOLLO_API_KEY from env)
-  try {
-    const { apolloPeopleSearch } = await import("./apollo/client.server");
-    const searchResult = await apolloPeopleSearch({
-      organization_name: org,
-      person_titles: DECISION_MAKER_TITLES,
-      per_page: 10,
-    });
-    const person = (searchResult.people ?? [])[0];
-    if (!person) {
-      return writeAndReturn({
-        lead_id: leadId,
-        status: "none",
-        name: null,
-        title: null,
-        organization: org,
-        phone: null,
-        email: null,
-        linkedin_url: null,
-      });
-    }
-    const name =
-      person.name || [person.first_name, person.last_name].filter(Boolean).join(" ") || null;
-    const phone =
-      person.phone_numbers?.[0]?.sanitized_number ?? person.phone_numbers?.[0]?.raw_number ?? null;
+  // Step 4: check existing source_contacts on the lead row
+  const existingSourceList = Array.isArray(lead.source_contacts)
+    ? (lead.source_contacts as Array<{
+        name?: string | null;
+        title?: string | null;
+        organization?: string | null;
+        phone?: string | null;
+        email?: string | null;
+      }>)
+    : [];
+  const bestSourceContact =
+    existingSourceList.find((c) => c.name && (c.phone || c.email)) ?? existingSourceList[0];
+  if (bestSourceContact?.name && (bestSourceContact.phone || bestSourceContact.email)) {
     return writeAndReturn({
       lead_id: leadId,
       status: "found",
-      name,
-      title: person.title ?? null,
-      organization: person.organization?.name ?? org,
-      phone,
-      email: person.email ?? null,
-      linkedin_url: person.linkedin_url ?? null,
-    });
-  } catch (e) {
-    logWarn("contacts.waterfall", "Apollo contact waterfall failed", {
-      leadId,
-      error: e instanceof Error ? e.message : String(e),
-    });
-    return writeAndReturn({
-      lead_id: leadId,
-      status: "none",
-      name: null,
-      title: null,
-      organization: org,
-      phone: null,
-      email: null,
+      name: bestSourceContact.name,
+      title: bestSourceContact.title ?? "Clinical Contact",
+      organization: bestSourceContact.organization ?? (lead.hospital as string | null),
+      phone: bestSourceContact.phone ?? null,
+      email: bestSourceContact.email ?? null,
       linkedin_url: null,
     });
   }
+
+  const {
+    fetchClinicalTrialContacts,
+    fetchNihReporterContacts,
+    fetchNppesClinicianByName,
+    fetchNppesOrganizationOfficial,
+    hospitalsMatch,
+    prospectNppesSpecialists,
+    resolveTerritoryStateCode,
+  } = await import("./apollo/public-enrichment.server");
+
+  const ents = (lead.entities as { hospitals?: string[]; physicians?: string[] }) ?? {};
+  const org =
+    ((lead.hospital as string | null)?.trim() || null) ?? (ents.hospitals?.[0]?.trim() || null);
+  const stateCode = resolveTerritoryStateCode(lead.territory as string | null);
+
+  // Step 5: check verified contacts table by lead_id OR fuzzy hospital match
+  const { data: allManual } = await supabaseAdmin
+    .from("contacts")
+    .select(`${MANUAL_CONTACT_COLUMNS}, lead_id`);
+  type ManualWithLead = ManualContact & { lead_id: string | null };
+  const manualList = (allManual ?? []) as ManualWithLead[];
+  const matchedManual = manualList.find(
+    (c) =>
+      c.lead_id === leadId ||
+      (org != null && hospitalsMatch(c.account_name, org)) ||
+      (ents.hospitals ?? []).some((h) => hospitalsMatch(c.account_name, h)),
+  );
+
+  if (
+    matchedManual?.contact_name &&
+    (matchedManual.direct_phone || matchedManual.department_phone || matchedManual.email)
+  ) {
+    const phone = matchedManual.direct_phone ?? matchedManual.department_phone;
+    await persistSourceContactIfEmpty(leadId, lead.source_contacts, {
+      name: matchedManual.contact_name,
+      title: matchedManual.title,
+      organization: matchedManual.account_name,
+      phone,
+      email: matchedManual.email,
+      address: matchedManual.facility_address,
+      origin: "Verified Directory",
+    });
+    return writeAndReturn({
+      lead_id: leadId,
+      status: "found",
+      name: matchedManual.contact_name,
+      title: matchedManual.title,
+      organization: matchedManual.account_name,
+      phone,
+      email: matchedManual.email,
+      linkedin_url: null,
+    });
+  }
+
+  // Step 6: Apollo (when APOLLO_API_KEY is configured and org is known)
+  const { apolloPeopleSearch, hasApolloApiKey } = await import("./apollo/client.server");
+  if (org && hasApolloApiKey()) {
+    try {
+      const searchResult = await apolloPeopleSearch({
+        organization_name: org,
+        person_titles: DECISION_MAKER_TITLES,
+        per_page: 10,
+      });
+      const person = (searchResult.people ?? [])[0];
+      if (person) {
+        const name =
+          person.name || [person.first_name, person.last_name].filter(Boolean).join(" ") || null;
+        const phone =
+          person.phone_numbers?.[0]?.sanitized_number ??
+          person.phone_numbers?.[0]?.raw_number ??
+          null;
+        if (name) {
+          await persistSourceContactIfEmpty(leadId, lead.source_contacts, {
+            name,
+            title: person.title ?? null,
+            organization: person.organization?.name ?? org,
+            phone,
+            email: person.email ?? null,
+            origin: "Apollo",
+          });
+          return writeAndReturn({
+            lead_id: leadId,
+            status: "found",
+            name,
+            title: person.title ?? null,
+            organization: person.organization?.name ?? org,
+            phone,
+            email: person.email ?? null,
+            linkedin_url: person.linkedin_url ?? null,
+          });
+        }
+      }
+    } catch (e) {
+      logWarn(
+        "contacts.waterfall",
+        "Apollo people search unavailable; cascading to public clinical registries",
+        {
+          leadId,
+          error: e instanceof Error ? e.message : String(e),
+        },
+      );
+    }
+  }
+
+  // Step 7: Public Clinical & Federal Contact Waterfall
+  // 7a: ClinicalTrials.gov v2 study contacts & principal investigators
+  const extId = (lead.source_external_id as string | null) ?? "";
+  if (lead.source === "clinicaltrials" || /^NCT\d+$/i.test(extId)) {
+    const ctContacts = await fetchClinicalTrialContacts(extId, org);
+    const bestCt = ctContacts[0];
+    if (bestCt) {
+      const mergedPhone =
+        bestCt.phone ?? matchedManual?.direct_phone ?? matchedManual?.department_phone ?? null;
+      const mergedEmail = bestCt.email ?? matchedManual?.email ?? null;
+      const mergedOrg = bestCt.organization ?? org ?? matchedManual?.account_name ?? null;
+      await persistSourceContactIfEmpty(leadId, lead.source_contacts, {
+        name: bestCt.name,
+        title: bestCt.title,
+        organization: mergedOrg,
+        phone: mergedPhone,
+        email: mergedEmail,
+        address: bestCt.address ?? matchedManual?.facility_address,
+        origin: bestCt.origin,
+      });
+      return writeAndReturn({
+        lead_id: leadId,
+        status: "found",
+        name: bestCt.name,
+        title: bestCt.title,
+        organization: mergedOrg,
+        phone: mergedPhone,
+        email: mergedEmail,
+        linkedin_url: null,
+      });
+    }
+  }
+
+  // 7b: Named physicians extracted in lead.entities.physicians -> CMS NPPES lookup
+  for (const physName of (ents.physicians ?? []).slice(0, 2)) {
+    const nppesDoc = await fetchNppesClinicianByName(physName, stateCode);
+    if (nppesDoc) {
+      await persistSourceContactIfEmpty(leadId, lead.source_contacts, {
+        name: nppesDoc.name,
+        title: nppesDoc.title,
+        organization: org ?? nppesDoc.organization,
+        phone: nppesDoc.phone,
+        email: nppesDoc.email,
+        address: nppesDoc.address,
+        origin: nppesDoc.origin,
+      });
+      return writeAndReturn({
+        lead_id: leadId,
+        status: "found",
+        name: nppesDoc.name,
+        title: nppesDoc.title,
+        organization: org ?? nppesDoc.organization,
+        phone: nppesDoc.phone,
+        email: nppesDoc.email,
+        linkedin_url: null,
+      });
+    }
+  }
+
+  // 7c: Hospital / Organization lookup via CMS NPPES NPI-2 Authorized Official + NIH RePORTER PIs
+  if (org) {
+    const [nppesOrg, nihContacts] = await Promise.all([
+      fetchNppesOrganizationOfficial(org, stateCode),
+      fetchNihReporterContacts({ organizationName: org, stateCode, limit: 3 }),
+    ]);
+    const candidate = nppesOrg ?? nihContacts[0] ?? null;
+    if (candidate) {
+      const mergedPhone =
+        candidate.phone ?? matchedManual?.direct_phone ?? matchedManual?.department_phone ?? null;
+      const mergedEmail = candidate.email ?? matchedManual?.email ?? null;
+      await persistSourceContactIfEmpty(leadId, lead.source_contacts, {
+        name: candidate.name,
+        title: candidate.title,
+        organization: candidate.organization ?? org,
+        phone: mergedPhone,
+        email: mergedEmail,
+        address: candidate.address ?? matchedManual?.facility_address,
+        origin: candidate.origin,
+      });
+      return writeAndReturn({
+        lead_id: leadId,
+        status: "found",
+        name: candidate.name,
+        title: candidate.title,
+        organization: candidate.organization ?? org,
+        phone: mergedPhone,
+        email: mergedEmail,
+        linkedin_url: null,
+      });
+    }
+  }
+
+  // 7d: Territory specialty / recall fallback (for statewide/nationwide FDA recalls or unnamed accounts)
+  const namedManuals = manualList.filter(
+    (c) => c.contact_name && (c.direct_phone || c.department_phone || c.email),
+  );
+  const specialtyText = `${lead.specialty ?? ""} ${lead.title ?? ""}`.toLowerCase();
+  const preferredManual =
+    namedManuals.find((c) => {
+      const t = `${c.title ?? ""} ${c.account_name}`.toLowerCase();
+      if (specialtyText.includes("cardio") || specialtyText.includes("monitor")) {
+        return t.includes("em") || t.includes("imaging") || t.includes("ultrasound");
+      }
+      if (
+        specialtyText.includes("radiol") ||
+        specialtyText.includes("imaging") ||
+        specialtyText.includes("alphenix")
+      ) {
+        return t.includes("imaging") || t.includes("ultrasound");
+      }
+      return true;
+    }) ?? namedManuals[0];
+
+  if (preferredManual?.contact_name) {
+    const phone = preferredManual.direct_phone ?? preferredManual.department_phone;
+    await persistSourceContactIfEmpty(leadId, lead.source_contacts, {
+      name: preferredManual.contact_name,
+      title: `${preferredManual.title ?? "Clinical Director"} (Territory Account)`,
+      organization: preferredManual.account_name,
+      phone,
+      email: preferredManual.email,
+      address: preferredManual.facility_address,
+      origin: "Territory Directory",
+    });
+    return writeAndReturn({
+      lead_id: leadId,
+      status: "found",
+      name: preferredManual.contact_name,
+      title: `${preferredManual.title ?? "Clinical Director"} (Territory Account)`,
+      organization: preferredManual.account_name,
+      phone,
+      email: preferredManual.email,
+      linkedin_url: null,
+    });
+  }
+
+  const specialists = await prospectNppesSpecialists({ stateCode, limit: 1 });
+  if (specialists[0]) {
+    const sp = specialists[0];
+    await persistSourceContactIfEmpty(leadId, lead.source_contacts, {
+      name: sp.name,
+      title: sp.title,
+      organization: sp.organization,
+      phone: sp.phone,
+      email: sp.email,
+      address: sp.address,
+      origin: sp.origin,
+    });
+    return writeAndReturn({
+      lead_id: leadId,
+      status: "found",
+      name: sp.name,
+      title: sp.title,
+      organization: sp.organization,
+      phone: sp.phone,
+      email: sp.email,
+      linkedin_url: null,
+    });
+  }
+
+  return writeAndReturn({
+    lead_id: leadId,
+    status: "none",
+    name: null,
+    title: null,
+    organization: org,
+    phone: null,
+    email: null,
+    linkedin_url: null,
+  });
 }
 
 export const fetchContactEnrichment = createServerFn({ method: "POST" })

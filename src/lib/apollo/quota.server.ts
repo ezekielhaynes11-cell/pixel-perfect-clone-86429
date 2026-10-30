@@ -7,8 +7,12 @@
 // the durable daily spending cap during a database outage.
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { logWarn } from "../logger.server";
 
 const DEFAULT_CAP = 150;
+
+let memoryDayKey = "";
+let memoryUsedCount = 0;
 
 function currentCap(): number {
   const raw = process.env.APOLLO_DAILY_CAP;
@@ -20,6 +24,31 @@ function todayKey(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function isMissingRpcInSchema(error: { code?: string; message?: string }): boolean {
+  const code = error.code ?? "";
+  const msg = (error.message ?? "").toLowerCase();
+  return (
+    code === "PGRST202" ||
+    code === "PGRST205" ||
+    code === "42883" ||
+    msg.includes("could not find the function") ||
+    msg.includes("schema cache")
+  );
+}
+
+function tryConsumeInMemoryFallback(cap: number): boolean {
+  const today = todayKey();
+  if (memoryDayKey !== today) {
+    memoryDayKey = today;
+    memoryUsedCount = 0;
+  }
+  if (memoryUsedCount >= cap) {
+    return false;
+  }
+  memoryUsedCount += 1;
+  return true;
+}
+
 // Atomically consume one call. Only an explicit successful reservation allows spend.
 export async function tryConsumeApolloCall(): Promise<boolean> {
   const cap = currentCap();
@@ -29,15 +58,24 @@ export async function tryConsumeApolloCall(): Promise<boolean> {
       { p_cap: cap } as never,
     );
     if (error) {
-      console.error("[apollo quota] consume_apollo_call failed, blocking request:", error.message);
+      if (isMissingRpcInSchema(error as { code?: string; message?: string })) {
+        logWarn(
+          "apollo.quota",
+          "consume_apollo_call RPC not present in schema; enforcing daily cap in-memory",
+          { cap },
+        );
+        return tryConsumeInMemoryFallback(cap);
+      }
+      logWarn("apollo.quota", "consume_apollo_call failed, blocking request", {
+        error: error.message,
+      });
       return false;
     }
     return data === true;
   } catch (e) {
-    console.error(
-      "[apollo quota] consume_apollo_call threw, blocking request:",
-      e instanceof Error ? e.message : e,
-    );
+    logWarn("apollo.quota", "consume_apollo_call threw, blocking request", {
+      error: e instanceof Error ? e.message : String(e),
+    });
     return false;
   }
 }
@@ -45,24 +83,29 @@ export async function tryConsumeApolloCall(): Promise<boolean> {
 export async function getApolloUsage(): Promise<{ used: number; cap: number; dayKey: string }> {
   const cap = currentCap();
   const dayKey = todayKey();
-  // apollo_usage is created by migration 20260718010000 but isn't in the
-  // committed generated types yet, so the query builder is accessed through a
-  // minimal structural cast rather than `any`.
   type LooseTable = {
     select: (columns: string) => {
       eq: (
         col: string,
         val: string,
       ) => {
-        maybeSingle: () => Promise<{ data: { count?: number } | null }>;
+        maybeSingle: () => Promise<{
+          data: { count?: number } | null;
+          error?: { code?: string; message?: string } | null;
+        }>;
       };
     };
   };
   try {
     const table = supabaseAdmin.from("apollo_usage" as never) as unknown as LooseTable;
-    const { data } = await table.select("count").eq("day", dayKey).maybeSingle();
+    const { data, error } = await table.select("count").eq("day", dayKey).maybeSingle();
+    if (error && isMissingRpcInSchema(error)) {
+      const used = memoryDayKey === dayKey ? memoryUsedCount : 0;
+      return { used, cap, dayKey };
+    }
     return { used: data?.count ?? 0, cap, dayKey };
   } catch {
-    return { used: 0, cap, dayKey };
+    const used = memoryDayKey === dayKey ? memoryUsedCount : 0;
+    return { used, cap, dayKey };
   }
 }

@@ -108,6 +108,7 @@ export function LeadDetailModal({
             sourceContacts={lead.sourceContacts ?? []}
             physicians={physicians}
             leadId={lead.id}
+            autoEnrichOnOpen={true}
           />
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
