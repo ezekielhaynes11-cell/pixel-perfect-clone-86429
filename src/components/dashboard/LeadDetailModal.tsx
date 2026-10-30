@@ -1,3 +1,4 @@
+import { useOperatorSession } from "@/hooks/use-operator-session";
 import { useEffect, useState } from "react";
 import { X, ExternalLink, Building2, User2, Wrench, Tag, Loader2, Check } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -24,6 +25,7 @@ export function LeadDetailModal({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
+  const operatorSignedIn = useOperatorSession();
   const fetchNote = useServerFn(getLeadNote);
   const storeNote = useServerFn(saveLeadNote);
   const pushCrm = useServerFn(pushLeadToCrm);
@@ -164,7 +166,8 @@ export function LeadDetailModal({
         <div className="flex flex-col gap-2 border-t border-border p-5 sm:flex-row">
           <button
             onClick={() => crm.mutate()}
-            disabled={crm.isPending || pushed}
+            disabled={!operatorSignedIn || crm.isPending || pushed}
+            title={!operatorSignedIn ? "Operator sign-in required for CRM updates" : undefined}
             className="flex h-10 w-full items-center justify-center gap-1.5 rounded-md bg-primary text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60 sm:flex-1"
           >
             {crm.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
