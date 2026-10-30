@@ -1,47 +1,54 @@
-## Goal
+# Updated Dashboard Audit and Repair Plan
 
-Patch 7 existing leads with the strategic decision-maker contacts, titles, emails, phones, LinkedIn URLs, and clinical/procurement analysis you provided. Store contacts in `source_contacts` JSONB and the strategic context in `raw_payload.strategic_brief`. Bypass Apollo entirely — these are flagged as manually verified.
+I checked each finding from the old review against the current code. Live database checks didn't run because the backend was unreachable during this pass. Step 0 re-checks the database parts.
 
-## Lead → Existing Row Mapping
+## Already fixed (confirmed in code)
 
-All 7 accounts already exist in `leads`, so this is an UPDATE pass (no new lead rows, no duplicates):
+- C2: Scheduled sync endpoints now require a server-only `CRON_SECRET` and refuse requests when it isn't set.
+- C3: The lead pop-up's Notes save, Mark Contacted and CRM push buttons now work.
+- C4/H9: Dismissed leads are filtered in the browser, so Restore works and no long URLs are built.
+- H1: The `enrich-contact` edge function is gone.
+- H2/H3: Apollo use is counted in one place and stored in the database (`consume_apollo_call`). It allows calls if the database check fails, which is a cost risk.
+- H5: Contact enrichment only runs when the rep clicks for it.
+- H6: Saved-search state alerts convert between "TX" and "texas".
+- H7: Bulk actions upsert with `ignoreDuplicates`.
+- H8: The pipeline forecast uses the same ordering as the feed.
+- H12: The email link fills in the recipient.
+- H13: No more changing the copilot's message text in place.
+- Fake 7-day trend and fake Header component are removed. `sendOutreachEmail` records `contacted`.
 
-| # | Account | lead_id | Notes |
-|---|---|---|---|
-| 1 | Medical City Heart Hospital | `b9b0e538…` | Already has Mahr/Schwade/Daniels stubs from earlier patch — replace with full enriched contacts |
-| 2 | Texas Health Presbyterian Plano | `55a9aa3e…` | Add Modak, Peterman + exec table (Abernathy, Massey, Hadzima) |
-| 3 | Augusta University Medical Center (MCG) | `c9856ad6…` | Henson, Vale, Munn. **Also fix `territory` from `louisiana` → `georgia`** (existing row is mis-tagged) |
-| 4 | UTSW — PJI Bubble Study | `0a11057d…` | Chen, Tatara, Estrera |
-| 5 | UTSW Clements — NSICU Neuromonitoring | `e35c8365…` | Jouett, Olson (+ monitoring matrix in brief) |
-| 6 | Arkansas Health Group / Baptist Heart | `ce55d622…` | Mego |
-| 7 | Texas Mobile Stroke Unit Network | `93c63b7f…` (Memorial Hermann / UTHealth Houston) | Grotta + Parker. **Your message was truncated mid-Stephanie Parker** — see Open Question below |
+## Still broken (ranked)
 
-## Per-Contact Fields Written into `source_contacts[]`
+1. **Security, critical: no sign-in and open server functions.** There is no login page. Every function except the Apollo ones uses the admin client, which skips row-level security, and has no auth check. The rep/admin row-level rules added recently therefore protect nothing. Anyone with the URL can read lead and physician PII, change data, spend AI credits, push to CRM, and send Gmail as the owner (`sendOutreachEmail`).
+2. **Broken flow and cost: Apollo buttons can't succeed.** `apollo.functions.ts` (5 functions) requires a signed-in user, and no one can sign in. Enrich, Prospect and Bulk enrich always fail. The old "Bulk enrich ≤100 calls" can also run past the 60-second server time limit.
+3. **Security: page scraping can be pointed at internal addresses (SSRF).** `scrape-url.server.ts` fetches any URL with no http(s) or host check, no private-IP block, no timeout and no size limit, and anyone can call it.
+4. **Mobile: navigation is limited.** The sync status is hidden on phones. Pipeline and Saved show up, but `/settings/keywords` still has no link anywhere.
+5. **Reliability: no timeouts.** No outside call (AI gateway, Apollo, SAM.gov, scraper) uses `AbortSignal.timeout`, so a stuck service can tie up a server worker.
+6. **Data accuracy: leftover duplicate-detection string checks.** `run.server.ts:296`, `nppes.server.ts:205` and `admin.functions.ts:47` still look for the word "duplicate" in error text instead of using `isUniqueViolation`.
+7. **Security, medium: copilot filter injection.** Search text chosen by the AI model goes into `.or()` filters (`copilot-tools.server.ts:319,342`) without removing `,()`.
+8. **Trust: missing error states.** Only the ingest action and the account page handle errors. When the feed or pipeline query fails, users see the "No leads" empty state instead.
+9. **Ops: SAM.gov key returns 401**, and the scheduled sync jobs haven't succeeded in weeks (from the last session).
+10. **Quality: no tests at all**, and there is no `test` script.
 
-Each object: `{ name, title, email, phone, linkedin, role_tag, verified: true, source: "manual_curation_2026_06" }` where `role_tag` is the "Target Profile" label (e.g. `Clinical Decision-Maker`, `Capital Purchasing Authority`).
+## Top 5 safe fixes to do first
 
-Existing unmatched contacts on each lead are preserved (same pattern as the previous patch).
+1. **Add one sign-in model.** Add a sign-in page (email plus Google), put the dashboard behind a protected layout, and run every server function through `requireSupabaseAuth`. Replace `OWNER_ID` with the signed-in user's ID, and use `context.supabase` so the existing rep/admin row-level rules actually apply. Keep the admin client only in the scheduled sync and ingestion code. This also fixes #2.
+2. **Make the scraper safe.** Allow only http and https, refuse private, loopback and link-local addresses and redirects, add a 15-second timeout, and cap pages at 2 MB.
+3. **Add a shared `fetchWithTimeout` helper** (30 seconds, one retry on 429 or 5xx) and use it for the AI gateway, Apollo, the ingestion sources and Gmail/HubSpot.
+4. **Lower Apollo cost risk.** Stop allowing calls when the usage check fails during bulk paths (allowing them on single clicks is still OK). Process bulk enrich in groups of 20 or fewer, with a "continue" step.
+5. **Fix rep-facing trust gaps.** Add error and retry states to the feed and pipeline. Add a mobile menu with Settings and sync status. Switch the three duplicate checks to `isUniqueViolation`, and clean up the copilot search text.
 
-## Per-Lead Fields Written
+## Technical details
 
-- `source_contacts` — rebuilt array (preserves unmatched, upserts named contacts)
-- `confidence` — bumped to `90` (manual high-confidence verification)
-- `enriched` → `true`
-- `raw_payload.strategic_brief` — JSON object with `target_profile`, `why_them` per contact, `clinical_procurement_analysis` paragraph, and (where given) `org_chart` / `integration_matrix`
-- `raw_payload.manual_verified_at` — timestamp
-- `raw_payload.skip_apollo_sync` → `true`
+- Step 0 (before coding): run queries on `pg_policies`, `user_roles` rows, `apollo_usage`, `refresh_state`, the `cron.job` run history, and check `CRON_SECRET` is set on the cron side. If no user has the `rep` or `admin` role, the first login will see an empty feed: seed the owner's role in a migration.
+- Auth wiring: `src/start.ts` already registers `attachSupabaseAuth`. Add `src/routes/auth.tsx` and `src/routes/_authenticated.tsx`, and move `index`, `pipeline`, `accounts.$id` and `settings.keywords` under it.
+- Integration risks: after the auth change, the scheduled sync must keep working through `CRON_SECRET` and the admin client. Existing `lead_actions` and notes are stored under `OWNER_ID`, so map the owner account to that ID or migrate the rows. Gmail sending stays owner-only.
+- Data risks: tighter row-level rules could hide leads from users without a role, so check the role seeding first.
 
-No schema changes; no Apollo calls; no new lead rows.
+## Checks after implementation
 
-## Execution
-
-One `UPDATE … FROM (VALUES …)` statement against `public.leads`, scoped to the 7 ids above, using `jsonb_set` to merge `source_contacts` and `raw_payload.strategic_brief`. Then a `SELECT` to verify all 7 rows show the new contacts and brief, plus a quick check of the dashboard feed in the preview.
-
-## Open Question — Lead 7 truncation
-
-Your message cuts off at **Stephanie Parker, RN** (title/email/phone/why not provided) and may have had additional leads after her. Please confirm:
-
-1. Stephanie Parker's title + email + phone (and LinkedIn if known), OR tell me to insert her as `{ name: "Stephanie Parker, RN", role_tag: "Mobile Stroke Program Operations Lead" }` with contact fields `null` and `needs_manual_sourcing: true`.
-2. Whether there are more leads beyond #7 I should wait for, or proceed with the 7 above now.
-
-I'll wait for your answer before running the inserts.
+- Build log is clean and `tsgo` typecheck passes.
+- Add vitest with tests for: cron auth refuses requests when no secret is set or the secret is wrong; the scraper refuses `http://127.0.0.1`, `169.254.169.254` and `file://`; the Apollo usage check stops calls at the cap; the "TX"↔"texas" conversion; `isUniqueViolation`.
+- Playwright: signed-out visitors are sent to /auth; after signing in, the feed loads, Mark Contacted and Notes still show after reload, Apollo Enrich succeeds once, the mobile (390px) menu reaches Settings, and a forced feed error shows Retry.
+- curl: a server function call without a token returns 401, and `/api/public/ingest` without the secret returns 401.
+- Run the security scan again after the auth change.
