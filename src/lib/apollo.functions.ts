@@ -43,6 +43,7 @@ export const bulkEnrichApollo = createServerFn({ method: "POST" })
         const result = await apolloEnrichPhysician({ npi: row.npi });
         if (result && (result as { exists?: boolean }).exists) matched++;
       } catch (e) {
+        if (e instanceof Error && e.name === "ApolloCapError") break; // daily cap hit: stop spending
         console.error("bulkEnrichApollo failed for", row.npi, e instanceof Error ? e.message : e);
         errors++;
       }
