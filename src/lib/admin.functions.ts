@@ -1,4 +1,3 @@
-import { requireRep } from "./rep-auth";
 import { createServerFn } from "@tanstack/react-start";
 import { throwUnlessDuplicate } from "./supabase-errors";
 import { z } from "zod";
@@ -67,7 +66,7 @@ export const listAccounts = createServerFn({ method: "GET" }).handler(async () =
   return data ?? [];
 });
 
-export const scrapePageForAccount = createServerFn({ method: "POST" }).middleware([requireRep])
+export const scrapePageForAccount = createServerFn({ method: "POST" })
   .inputValidator((input) =>
     z
       .object({
