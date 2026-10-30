@@ -1,6 +1,6 @@
 name: Dashboard checks
 
-on:
+"on":
   pull_request:
 
 permissions:
