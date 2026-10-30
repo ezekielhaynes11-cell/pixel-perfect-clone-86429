@@ -1,3 +1,4 @@
+import { useOperatorSession } from "@/hooks/use-operator-session";
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -18,6 +19,7 @@ function timeAgo(iso: string): string {
 }
 
 export function AccountBrief({ accountId }: { accountId: string }) {
+  const operatorSignedIn = useOperatorSession();
   const qc = useQueryClient();
   const list = useServerFn(listAccountBriefs);
   const research = useServerFn(researchAccount);
@@ -97,10 +99,10 @@ export function AccountBrief({ accountId }: { accountId: string }) {
           </button>
           <button
             onClick={() => run.mutate()}
-            disabled={run.isPending}
+            disabled={!operatorSignedIn || run.isPending}
             className="flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
             title={
-              isFresh
+              !operatorSignedIn ? "Operator sign-in required for AI research" : isFresh
                 ? "A recent brief exists — re-running will create a new one"
                 : "Run deep-dive research"
             }
