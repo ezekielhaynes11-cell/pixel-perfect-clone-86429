@@ -72,7 +72,7 @@ function toStatus(row: {
 const SELECT_COLS =
   "status, trigger, last_attempted_at, last_succeeded_at, records_scanned, records_updated, sources_ok, sources_failed, error_message, updated_at";
 
-export const getRefreshStatus = createServerFn({ method: "GET" }).middleware([requireRep]).handler(async () => {
+export const getRefreshStatus = createServerFn({ method: "GET" }).handler(async () => {
   const { data, error } = await supabaseAdmin
     .from("refresh_state")
     .select(SELECT_COLS)
