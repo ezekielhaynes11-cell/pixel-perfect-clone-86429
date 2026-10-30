@@ -1,3 +1,4 @@
+import { isUniqueViolation } from "../supabase-errors";
 // NPPES NPI Registry enrichment.
 // Free public API — no key required. Resolves physician names to NPI + practice contact.
 // Docs: https://npiregistry.cms.hhs.gov/api-page
@@ -202,7 +203,7 @@ export async function attachPhysiciansToLead(
         match_confidence: confidence,
       });
       if (!linkErr) linked++;
-      else if (!linkErr.message?.includes("duplicate")) {
+      else if (!isUniqueViolation(linkErr)) {
         console.error("lead_physicians insert:", linkErr.message);
       }
 

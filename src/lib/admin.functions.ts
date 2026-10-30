@@ -1,9 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
+import { throwUnlessDuplicate } from "./supabase-errors";
+import { requireRep } from "./rep-auth";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { scrapeUrlForAccount } from "./ingest/scrape-url.server";
 
-export const listKeywords = createServerFn({ method: "GET" }).handler(async () => {
+export const listKeywords = createServerFn({ method: "GET" }).middleware([requireRep]).handler(async () => {
   const { data, error } = await supabaseAdmin
     .from("keyword_lists")
     .select("id, kind, value, active, notes, created_at")
@@ -13,7 +15,7 @@ export const listKeywords = createServerFn({ method: "GET" }).handler(async () =
   return data ?? [];
 });
 
-export const upsertKeyword = createServerFn({ method: "POST" })
+export const upsertKeyword = createServerFn({ method: "POST" }).middleware([requireRep])
   .inputValidator((input) =>
     z
       .object({
@@ -44,11 +46,11 @@ export const upsertKeyword = createServerFn({ method: "POST" })
       .insert({ kind: data.kind, value: data.value, active: data.active })
       .select("id")
       .single();
-    if (error && !error.message.includes("duplicate")) throw new Error(error.message);
+    throwUnlessDuplicate(error);
     return { id: row?.id ?? null };
   });
 
-export const deleteKeyword = createServerFn({ method: "POST" })
+export const deleteKeyword = createServerFn({ method: "POST" }).middleware([requireRep])
   .inputValidator((input) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => {
     const { error } = await supabaseAdmin.from("keyword_lists").delete().eq("id", data.id);
@@ -56,7 +58,7 @@ export const deleteKeyword = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-export const listAccounts = createServerFn({ method: "GET" }).handler(async () => {
+export const listAccounts = createServerFn({ method: "GET" }).middleware([requireRep]).handler(async () => {
   const { data, error } = await supabaseAdmin
     .from("accounts")
     .select("id, name, state, account_type, system, is_va, notes")
@@ -65,7 +67,7 @@ export const listAccounts = createServerFn({ method: "GET" }).handler(async () =
   return data ?? [];
 });
 
-export const scrapePageForAccount = createServerFn({ method: "POST" })
+export const scrapePageForAccount = createServerFn({ method: "POST" }).middleware([requireRep])
   .inputValidator((input) =>
     z
       .object({
@@ -78,7 +80,7 @@ export const scrapePageForAccount = createServerFn({ method: "POST" })
     return await scrapeUrlForAccount({ url: data.url, accountId: data.accountId ?? null });
   });
 
-export const listScrapedPages = createServerFn({ method: "GET" }).handler(async () => {
+export const listScrapedPages = createServerFn({ method: "GET" }).middleware([requireRep]).handler(async () => {
   const { data, error } = await supabaseAdmin
     .from("scraped_pages")
     .select("id, account_id, url, title, extracted, fetched_at")

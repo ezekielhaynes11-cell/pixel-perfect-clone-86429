@@ -22,7 +22,7 @@ import { enrichPhysicianApollo, prospectContactsApollo } from "@/lib/apollo.func
 import { AccountBrief } from "@/components/dashboard/AccountBrief";
 import { timeAgo, formatUsd } from "@/data/leads";
 
-export const Route = createFileRoute("/accounts/$id")({
+export const Route = createFileRoute("/_authenticated/accounts/$id")({
   head: () => ({
     meta: [{ title: "Account — Yield Architect" }],
   }),

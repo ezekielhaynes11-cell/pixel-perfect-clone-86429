@@ -1,4 +1,5 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { supabase } from "@/integrations/supabase/client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -12,6 +13,8 @@ import {
   Sparkles,
   SlidersHorizontal,
   MoreHorizontal,
+  Settings,
+  LogOut,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -57,7 +60,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-export const Route = createFileRoute("/")({
+export const Route = createFileRoute("/_authenticated/")({
   head: () => ({
     meta: [
       { title: "Yield Architect — Philips Sales Intelligence" },
@@ -85,6 +88,7 @@ function Dashboard() {
   const [showInsights, setShowInsights] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const fetchLeads = useServerFn(listLeads);
   const fetchActions = useServerFn(listLeadActions);
   const fetchRuns = useServerFn(getRecentIngestionRuns);
@@ -207,7 +211,7 @@ function Dashboard() {
   const autoRanRef = useRef(false);
   useEffect(() => {
     if (autoRanRef.current) return;
-    if (leadsQ.isLoading || runsQ.isLoading) return;
+    if (leadsQ.isLoading || runsQ.isLoading || leadsQ.isError) return;
     const noLeads = (leadsQ.data ?? []).length === 0;
     const noRuns = (runsQ.data ?? []).length === 0;
     if (noLeads && noRuns && !ingest.isPending) {
@@ -406,9 +410,12 @@ function Dashboard() {
                   ? "text-success"
                   : "text-warning";
             return (
-              <div className="hidden items-center gap-1.5 text-xs text-muted-foreground md:flex">
+              <div
+                className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                title={label}
+              >
                 <RefreshCw className={`h-3.5 w-3.5 ${color} ${running ? "animate-spin" : ""}`} />
-                {label}
+                <span className="hidden sm:inline">{label}</span>
               </div>
             );
           })()}
@@ -454,6 +461,23 @@ function Dashboard() {
               <DropdownMenuItem onSelect={() => setSearchesOpen(true)}>
                 <Bookmark className="h-4 w-4" />
                 Saved
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link to="/settings/keywords">
+                  <Settings className="h-4 w-4" />
+                  Settings
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={async () => {
+                  await qc.cancelQueries();
+                  qc.clear();
+                  await supabase.auth.signOut();
+                  navigate({ to: "/auth", replace: true });
+                }}
+              >
+                <LogOut className="h-4 w-4" />
+                Sign out
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -623,7 +647,12 @@ function Dashboard() {
               )}
             </div>
 
-            {leadsQ.isLoading ? (
+            {leadsQ.isError ? (
+              <div className="rounded-md border border-destructive/40 bg-destructive/5 p-8 text-center text-sm">
+                <p className="text-destructive">Couldn't load leads: {leadsQ.error instanceof Error ? leadsQ.error.message : "unknown error"}</p>
+                <button onClick={() => leadsQ.refetch()} className="mt-3 h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">Retry</button>
+              </div>
+            ) : leadsQ.isLoading ? (
               <div className="space-y-3" aria-busy="true" aria-label="Loading leads">
                 {Array.from({ length: 4 }).map((_, i) => (
                   <div

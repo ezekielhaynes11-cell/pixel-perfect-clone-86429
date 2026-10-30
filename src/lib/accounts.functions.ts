@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { requireRep } from "./rep-auth";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { OWNER_ID } from "./owner.server";
@@ -24,7 +25,7 @@ export interface AccountBriefRow {
   created_at: string;
 }
 
-export const listAccountBriefs = createServerFn({ method: "POST" })
+export const listAccountBriefs = createServerFn({ method: "POST" }).middleware([requireRep])
   .inputValidator((input) => z.object({ account_id: z.string().uuid() }).parse(input))
   .handler(async ({ data }): Promise<AccountBriefRow[]> => {
     const { data: rows, error } = await supabaseAdmin
@@ -37,7 +38,7 @@ export const listAccountBriefs = createServerFn({ method: "POST" })
     return (rows ?? []) as unknown as AccountBriefRow[];
   });
 
-export const researchAccount = createServerFn({ method: "POST" })
+export const researchAccount = createServerFn({ method: "POST" }).middleware([requireRep])
   .inputValidator((input) => z.object({ account_id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => {
     const result = await runAccountResearch(data.account_id);
@@ -104,7 +105,7 @@ export interface AccountDetail {
   vendorFootprint: Array<{ vendor: string; mentions: number }>;
 }
 
-export const getAccountDetail = createServerFn({ method: "POST" })
+export const getAccountDetail = createServerFn({ method: "POST" }).middleware([requireRep])
   .inputValidator((input) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ data }): Promise<AccountDetail> => {
     const { data: account, error: accErr } = await supabaseAdmin

@@ -314,7 +314,7 @@ export async function runCopilotTool(
         if (code) q = q.or(`territory.ilike.%${stateName}%,territory.ilike.%${code}%`);
       }
       if (a.text_search) {
-        const needle = a.text_search.replace(/[%,]/g, " ").trim();
+        const needle = a.text_search.replace(/[%,().*\\]/g, " ").trim();
         if (needle) {
           q = q.or(`title.ilike.%${needle}%,summary.ilike.%${needle}%,hospital.ilike.%${needle}%`);
         }
@@ -339,7 +339,7 @@ export async function runCopilotTool(
         .limit(Math.min(a.limit ?? 15, 25));
       if (a.state) q = q.eq("state", a.state.toUpperCase());
       if (a.is_va != null) q = q.eq("is_va", a.is_va);
-      if (a.name_contains) q = q.ilike("name", `%${a.name_contains}%`);
+      if (a.name_contains) q = q.ilike("name", `%${a.name_contains.replace(/[%_\\]/g, " ")}%`);
       const { data, error } = await q;
       if (error) return friendlyToolError(name, error);
       return { count: data?.length ?? 0, accounts: data ?? [] };

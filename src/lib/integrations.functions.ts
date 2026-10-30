@@ -1,6 +1,7 @@
 // CRM + email server functions for one-click "Push to HubSpot" and "Send via Gmail".
 
 import { createServerFn } from "@tanstack/react-start";
+import { requireRep } from "./rep-auth";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { OWNER_ID } from "./owner.server";
@@ -9,7 +10,7 @@ import { sendGmail } from "./integrations/gmail.server";
 
 /* -------------------- HubSpot -------------------- */
 
-export const pushLeadToCrm = createServerFn({ method: "POST" })
+export const pushLeadToCrm = createServerFn({ method: "POST" }).middleware([requireRep])
   .inputValidator((input) =>
     z.object({ lead_id: z.string().uuid(), draft_id: z.string().uuid().optional() }).parse(input),
   )
@@ -59,7 +60,7 @@ export const pushLeadToCrm = createServerFn({ method: "POST" })
 
 /* -------------------- Gmail send + follow-up scheduling -------------------- */
 
-export const sendOutreachEmail = createServerFn({ method: "POST" })
+export const sendOutreachEmail = createServerFn({ method: "POST" }).middleware([requireRep])
   .inputValidator((input) =>
     z
       .object({
