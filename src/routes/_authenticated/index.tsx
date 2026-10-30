@@ -1,4 +1,5 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { supabase } from "@/integrations/supabase/client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -11,7 +12,9 @@ import {
   RotateCcw,
   Sparkles,
   SlidersHorizontal,
-  MoreHorizontal,
+  MoreHorizontal,,
+  Settings,
+  LogOut
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -85,6 +88,7 @@ function Dashboard() {
   const [showInsights, setShowInsights] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const fetchLeads = useServerFn(listLeads);
   const fetchActions = useServerFn(listLeadActions);
   const fetchRuns = useServerFn(getRecentIngestionRuns);
@@ -207,7 +211,7 @@ function Dashboard() {
   const autoRanRef = useRef(false);
   useEffect(() => {
     if (autoRanRef.current) return;
-    if (leadsQ.isLoading || runsQ.isLoading) return;
+    if (leadsQ.isLoading || runsQ.isLoading || leadsQ.isError) return;
     const noLeads = (leadsQ.data ?? []).length === 0;
     const noRuns = (runsQ.data ?? []).length === 0;
     if (noLeads && noRuns && !ingest.isPending) {
@@ -411,7 +415,7 @@ function Dashboard() {
                 title={label}
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${color} ${running ? "animate-spin" : ""}`} />
-                {label}
+                <span className="hidden sm:inline">{label}</span>
               </div>
             );
           })()}
@@ -466,8 +470,8 @@ function Dashboard() {
               </DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={async () => {
-                  await queryClient.cancelQueries();
-                  queryClient.clear();
+                  await qc.cancelQueries();
+                  qc.clear();
                   await supabase.auth.signOut();
                   navigate({ to: "/auth", replace: true });
                 }}
