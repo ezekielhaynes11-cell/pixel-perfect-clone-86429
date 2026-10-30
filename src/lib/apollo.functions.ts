@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { requireRep } from "./rep-auth";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
   apolloEnrichAccount,
@@ -9,7 +9,7 @@ import {
 } from "./apollo/service.server";
 
 export const countUnenrichedPhysicians = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireRep])
   .handler(async () => {
     const { count, error } = await supabaseAdmin
       .from("physician_contacts")
@@ -21,7 +21,7 @@ export const countUnenrichedPhysicians = createServerFn({ method: "GET" })
   });
 
 export const bulkEnrichApollo = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireRep])
   .inputValidator((input) =>
     z.object({ limit: z.number().int().min(1).max(100).optional() }).parse(input),
   )
@@ -52,17 +52,17 @@ export const bulkEnrichApollo = createServerFn({ method: "POST" })
   });
 
 export const enrichAccountApollo = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireRep])
   .inputValidator((input) => z.object({ account_id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => apolloEnrichAccount({ account_id: data.account_id }));
 
 export const enrichPhysicianApollo = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireRep])
   .inputValidator((input) => z.object({ npi: z.string().min(1).max(64) }).parse(input))
   .handler(async ({ data }) => apolloEnrichPhysician({ npi: data.npi }));
 
 export const prospectContactsApollo = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
+  .middleware([requireRep])
   .inputValidator((input) =>
     z
       .object({

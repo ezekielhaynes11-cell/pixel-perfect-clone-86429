@@ -4,6 +4,7 @@
 // (triggerIngestionForSource → runIngestionForSource). These functions only
 // own the *state machine* around it so the UI never fabricates a sync.
 import { createServerFn } from "@tanstack/react-start";
+import { requireRep } from "./rep-auth";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { throwIfError } from "./supabase-errors";
@@ -71,7 +72,7 @@ function toStatus(row: {
 const SELECT_COLS =
   "status, trigger, last_attempted_at, last_succeeded_at, records_scanned, records_updated, sources_ok, sources_failed, error_message, updated_at";
 
-export const getRefreshStatus = createServerFn({ method: "GET" }).handler(async () => {
+export const getRefreshStatus = createServerFn({ method: "GET" }).middleware([requireRep]).handler(async () => {
   const { data, error } = await supabaseAdmin
     .from("refresh_state")
     .select(SELECT_COLS)
@@ -114,7 +115,7 @@ export const getRefreshStatus = createServerFn({ method: "GET" }).handler(async 
 });
 
 /** Claim the refresh lock. Throws if another run is already in flight. */
-export const beginRefresh = createServerFn({ method: "POST" })
+export const beginRefresh = createServerFn({ method: "POST" }).middleware([requireRep])
   .inputValidator((input) =>
     z
       .object({ trigger: z.enum(["manual", "auto"]).default("manual") })
@@ -160,7 +161,7 @@ export const beginRefresh = createServerFn({ method: "POST" })
   });
 
 /** Record the outcome of a refresh run. */
-export const completeRefresh = createServerFn({ method: "POST" })
+export const completeRefresh = createServerFn({ method: "POST" }).middleware([requireRep])
   .inputValidator((input) =>
     z
       .object({
