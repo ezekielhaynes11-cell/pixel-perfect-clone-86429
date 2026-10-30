@@ -22,7 +22,7 @@ const KINDS = [
 ] as const;
 type Kind = (typeof KINDS)[number];
 
-export const Route = createFileRoute("/settings/keywords")({
+export const Route = createFileRoute("/_authenticated/settings/keywords")({
   head: () => ({ meta: [{ title: "Keywords & Scraping — Yield Architect" }] }),
   component: KeywordsPage,
 });

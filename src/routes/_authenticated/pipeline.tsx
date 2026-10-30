@@ -7,7 +7,7 @@ import { getPipelineForecast } from "@/lib/leads.functions";
 import { formatUsd } from "@/data/leads";
 import { cleanLeadTitle, cleanHospital } from "@/lib/lead-clean";
 
-export const Route = createFileRoute("/pipeline")({
+export const Route = createFileRoute("/_authenticated/pipeline")({
   head: () => ({ meta: [{ title: "Pipeline forecast — Yield Architect" }] }),
   component: PipelinePage,
 });
