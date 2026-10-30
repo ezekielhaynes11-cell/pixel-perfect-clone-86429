@@ -1,3 +1,4 @@
+import { assertSafePublicUrl, readCapped } from "../safe-url";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { loadKeywords, matchesAnyKeyword } from "./keywords.server";
 
@@ -72,14 +73,18 @@ export async function scrapeUrlForAccount(args: {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) throw new Error("LOVABLE_API_KEY not configured");
 
-  const res = await fetch(args.url, {
+  const safe = assertSafePublicUrl(args.url);
+  const res = await fetch(safe.toString(), {
+    redirect: "manual",
+    signal: AbortSignal.timeout(15_000),
     headers: {
       "User-Agent": "PhilipsLeadRadar/1.0 (+contact: sales-intel)",
       Accept: "text/html,application/xhtml+xml",
     },
   });
-  if (!res.ok) throw new Error(`fetch ${args.url}: ${res.status}`);
-  const html = await res.text();
+  if (res.status >= 300 && res.status < 400) throw new Error("Redirects are not followed; paste the final page URL");
+  if (!res.ok) throw new Error(`fetch ${safe.hostname}: ${res.status}`);
+  const html = await readCapped(res);
   const { text, title } = stripHtml(html);
 
   const kw = await loadKeywords();
