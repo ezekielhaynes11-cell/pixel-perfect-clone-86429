@@ -1,7 +1,6 @@
 // CRM + email server functions for one-click "Push to HubSpot" and "Send via Gmail".
 
 import { createServerFn } from "@tanstack/react-start";
-import { requireRep } from "./rep-auth";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { OWNER_ID } from "./owner.server";
@@ -10,7 +9,7 @@ import { sendGmail } from "./integrations/gmail.server";
 
 /* -------------------- HubSpot -------------------- */
 
-export const pushLeadToCrm = createServerFn({ method: "POST" }).middleware([requireRep])
+export const pushLeadToCrm = createServerFn({ method: "POST" })
   .inputValidator((input) =>
     z.object({ lead_id: z.string().uuid(), draft_id: z.string().uuid().optional() }).parse(input),
   )
@@ -26,12 +25,12 @@ export const pushLeadToCrm = createServerFn({ method: "POST" }).middleware([requ
 
     let draft: { subject: string; body: string } | null = null;
     if (data.draft_id) {
-      const { data: d } = await supabaseAdmin
+      const { data: draftRow } = await supabaseAdmin
         .from("outreach_drafts")
         .select("subject, body")
         .eq("id", data.draft_id)
         .maybeSingle();
-      if (d) draft = d;
+      if (draftRow) draft = draftRow;
     }
 
     const result = await pushLeadToHubspot({
@@ -60,7 +59,7 @@ export const pushLeadToCrm = createServerFn({ method: "POST" }).middleware([requ
 
 /* -------------------- Gmail send + follow-up scheduling -------------------- */
 
-export const sendOutreachEmail = createServerFn({ method: "POST" }).middleware([requireRep])
+export const sendOutreachEmail = createServerFn({ method: "POST" })
   .inputValidator((input) =>
     z
       .object({
@@ -78,13 +77,13 @@ export const sendOutreachEmail = createServerFn({ method: "POST" }).middleware([
       .single();
     if (error || !draft) throw new Error("Draft not found");
 
-    const res = await sendGmail({
+    const gmailResult = await sendGmail({
       to: data.to,
       cc: data.cc,
       subject: draft.subject,
       body: draft.body,
     });
-    if (!res.ok) return res;
+    if (!gmailResult.ok) return gmailResult;
 
     // Record the send as a real 'contacted' action so the lead shows as contacted.
     // (Previously mislabelled 'saved', which polluted the saved/bookmark list.)
@@ -93,10 +92,10 @@ export const sendOutreachEmail = createServerFn({ method: "POST" }).middleware([
         lead_id: draft.lead_id,
         user_id: OWNER_ID,
         action: "contacted",
-        note: `Sent via Gmail to ${data.to}${res.messageId ? ` · message ${res.messageId}` : ""}`,
+        note: `Sent via Gmail to ${data.to}${gmailResult.messageId ? ` · message ${gmailResult.messageId}` : ""}`,
       },
       { onConflict: "lead_id,user_id,action" },
     );
 
-    return { ok: true, messageId: res.messageId, threadId: res.threadId };
+    return { ok: true, messageId: gmailResult.messageId, threadId: gmailResult.threadId };
   });

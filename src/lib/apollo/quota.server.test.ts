@@ -10,7 +10,8 @@ describe("Apollo durable quota reservation", () => {
   afterEach(() => vi.unstubAllEnvs());
 
   it("permits a request only after a successful reservation", async () => {
-    rpc.mockResolvedValueOnce({ data: true, error: null })
+    rpc
+      .mockResolvedValueOnce({ data: true, error: null })
       .mockResolvedValueOnce({ data: false, error: null })
       .mockResolvedValueOnce({ data: null, error: null });
     expect(await tryConsumeApolloCall()).toBe(true);
@@ -19,7 +20,8 @@ describe("Apollo durable quota reservation", () => {
   });
 
   it("blocks requests when the quota database fails", async () => {
-    rpc.mockResolvedValueOnce({ data: null, error: { message: "database unavailable" } })
+    rpc
+      .mockResolvedValueOnce({ data: null, error: { message: "database unavailable" } })
       .mockRejectedValueOnce(new Error("connection failed"));
     expect(await tryConsumeApolloCall()).toBe(false);
     expect(await tryConsumeApolloCall()).toBe(false);

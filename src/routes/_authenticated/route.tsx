@@ -1,6 +1,6 @@
 import { createFileRoute, Outlet } from "@tanstack/react-router";
 
-// Public dashboard pages; paid AI and integration actions enforce their own role checks.
+// Single-user dashboard route group: all pages load directly without sign-in.
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
   component: () => <Outlet />,

@@ -57,7 +57,11 @@ export function RefreshStatusPanel({
         : status?.isLive
           ? { text: "text-success", dot: "bg-success", label: "Live monitoring" }
           : neverRefreshed
-            ? { text: "text-muted-foreground", dot: "bg-muted-foreground", label: "Never refreshed" }
+            ? {
+                text: "text-muted-foreground",
+                dot: "bg-muted-foreground",
+                label: "Never refreshed",
+              }
             : {
                 text: "text-warning",
                 dot: "bg-warning",
@@ -116,7 +120,6 @@ export function RefreshStatusPanel({
           type="button"
           onClick={onRefresh}
           disabled={!onRefresh || isRunning || isLoading}
-          title={!onRefresh ? "Operator sign-in required to refresh intelligence" : undefined}
           className="flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
         >
           <RefreshCw className={`h-3.5 w-3.5 ${isRunning ? "animate-spin" : ""}`} />

@@ -2,6 +2,7 @@
 // Connector must be linked: standard_connectors--connect with connector_id "google_mail"
 
 const GATEWAY_URL = "https://connector-gateway.lovable.dev/google_mail";
+const CONNECTOR_TIMEOUT_MS = 30_000;
 
 export interface GmailSendInput {
   to: string;
@@ -45,22 +46,29 @@ export async function sendGmail(input: GmailSendInput): Promise<GmailSendResult>
   // Gmail expects URL-safe base64
   const raw = base64Url(rfc822);
 
-  const res = await fetch(`${GATEWAY_URL}/gmail/v1/users/me/messages/send`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${LOVABLE_API_KEY}`,
-      "X-Connection-Api-Key": GMAIL_API_KEY,
-    },
-    body: JSON.stringify({ raw }),
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    return { ok: false, error: `Gmail send failed [${res.status}]: ${text.slice(0, 300)}` };
+  let response: Response;
+  try {
+    response = await fetch(`${GATEWAY_URL}/gmail/v1/users/me/messages/send`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "X-Connection-Api-Key": GMAIL_API_KEY,
+      },
+      body: JSON.stringify({ raw }),
+      signal: AbortSignal.timeout(CONNECTOR_TIMEOUT_MS),
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return { ok: false, error: `Gmail gateway request failed: ${detail}` };
   }
-  const data = (await res.json()) as { id?: string; threadId?: string };
-  return { ok: true, messageId: data.id, threadId: data.threadId };
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    return { ok: false, error: `Gmail send failed [${response.status}]: ${text.slice(0, 300)}` };
+  }
+  const payload = (await response.json()) as { id?: string; threadId?: string };
+  return { ok: true, messageId: payload.id, threadId: payload.threadId };
 }
 
 function base64Url(s: string): string {

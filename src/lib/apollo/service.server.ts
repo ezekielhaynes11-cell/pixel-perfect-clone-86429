@@ -3,6 +3,7 @@
 // apollo.functions.ts (for direct UI button calls).
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { logInfo } from "../logger.server";
 import {
   apolloOrgSearch,
   apolloPeopleSearch,
@@ -54,9 +55,11 @@ export async function backfillApolloForLinkedPhysicians(args: { limit?: number }
     }
     await new Promise((r) => setTimeout(r, 300));
   }
-  console.log(
-    `apollo backfill: attempted=${attempted} matched=${matched} skippedCap=${skippedCap}`,
-  );
+  logInfo("apollo-backfill", "Completed physician backfill batch", {
+    attempted,
+    matched,
+    skippedCap,
+  });
   return { attempted, matched, skippedCap };
 }
 

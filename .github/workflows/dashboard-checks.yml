@@ -1,6 +1,9 @@
 name: Dashboard checks
 
-"on":
+on:
+  push:
+    branches:
+      - main
   pull_request:
 
 permissions:
@@ -26,10 +29,10 @@ jobs:
         run: rm -f .env
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: "22"
           cache: npm
       - run: npm ci
       - run: npm test
-      - run: npm run build
       - run: npx tsc --noEmit
       - run: npm run lint
+      - run: npm run build

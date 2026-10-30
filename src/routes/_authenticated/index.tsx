@@ -1,6 +1,4 @@
-import { useOperatorSession } from "@/hooks/use-operator-session";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { supabase } from "@/integrations/supabase/client";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -15,7 +13,6 @@ import {
   SlidersHorizontal,
   MoreHorizontal,
   Settings,
-  LogOut,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -77,7 +74,6 @@ const AGE_FILTER_MS = 365 * 24 * 60 * 60 * 1000;
 const TERRITORY_STATES = new Set(["TX", "OK", "AR", "LA"]);
 
 function Dashboard() {
-  const operatorSignedIn = useOperatorSession();
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [active, setActive] = useState<Lead | null>(null);
   const [draftFor, setDraftFor] = useState<Lead | null>(null);
@@ -90,7 +86,6 @@ function Dashboard() {
   const [showInsights, setShowInsights] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const qc = useQueryClient();
-  const navigate = useNavigate();
   const fetchLeads = useServerFn(listLeads);
   const fetchActions = useServerFn(listLeadActions);
   const fetchRuns = useServerFn(getRecentIngestionRuns);
@@ -220,7 +215,7 @@ function Dashboard() {
       autoRanRef.current = true;
       ingest.mutate();
     }
-  }, [leadsQ.isLoading, leadsQ.data, runsQ.isLoading, runsQ.data, ingest]);
+  }, [leadsQ.isLoading, leadsQ.isError, leadsQ.data, runsQ.isLoading, runsQ.data, ingest]);
 
   const act = useMutation({
     mutationFn: (input: {
@@ -380,6 +375,28 @@ function Dashboard() {
       ? "Discovered today"
       : "Recent leads";
 
+  const toggleSelectMode = () => {
+    setSelectMode((currentMode) => {
+      const nextMode = !currentMode;
+      if (!nextMode) {
+        setSelected(new Set());
+      }
+      return nextMode;
+    });
+  };
+
+  const toggleLeadSelection = (leadId: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(leadId)) {
+        next.delete(leadId);
+      } else {
+        next.add(leadId);
+      }
+      return next;
+    });
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-40 h-16 border-b border-border bg-background/95 backdrop-blur">
@@ -470,23 +487,6 @@ function Dashboard() {
                   Settings
                 </Link>
               </DropdownMenuItem>
-              {operatorSignedIn ? (
-                <DropdownMenuItem
-                  onSelect={async () => {
-                    await qc.cancelQueries();
-                    qc.clear();
-                    await supabase.auth.signOut();
-                    navigate({ to: "/", replace: true });
-                  }}
-                >
-                  <LogOut className="h-4 w-4" />
-                  Sign out
-                </DropdownMenuItem>
-              ) : (
-                <DropdownMenuItem asChild>
-                  <Link to="/auth">Operator sign in</Link>
-                </DropdownMenuItem>
-              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -596,13 +596,7 @@ function Dashboard() {
                   <DropdownMenuSeparator />
                   <DropdownMenuCheckboxItem
                     checked={selectMode}
-                    onCheckedChange={() =>
-                      setSelectMode((v) => {
-                        const next = !v;
-                        if (!next) setSelected(new Set());
-                        return next;
-                      })
-                    }
+                    onCheckedChange={toggleSelectMode}
                     onSelect={(e) => e.preventDefault()}
                   >
                     Select leads
@@ -657,8 +651,16 @@ function Dashboard() {
 
             {leadsQ.isError ? (
               <div className="rounded-md border border-destructive/40 bg-destructive/5 p-8 text-center text-sm">
-                <p className="text-destructive">Couldn't load leads: {leadsQ.error instanceof Error ? leadsQ.error.message : "unknown error"}</p>
-                <button onClick={() => leadsQ.refetch()} className="mt-3 h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">Retry</button>
+                <p className="text-destructive">
+                  Couldn't load leads:{" "}
+                  {leadsQ.error instanceof Error ? leadsQ.error.message : "unknown error"}
+                </p>
+                <button
+                  onClick={() => leadsQ.refetch()}
+                  className="mt-3 h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground"
+                >
+                  Retry
+                </button>
               </div>
             ) : leadsQ.isLoading ? (
               <div className="space-y-3" aria-busy="true" aria-label="Loading leads">
@@ -713,14 +715,7 @@ function Dashboard() {
                       onDraft={() => setDraftFor(lead)}
                       selectMode={selectMode}
                       selected={selected.has(lead.id)}
-                      onToggleSelect={() =>
-                        setSelected((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(lead.id)) next.delete(lead.id);
-                          else next.add(lead.id);
-                          return next;
-                        })
-                      }
+                      onToggleSelect={() => toggleLeadSelection(lead.id)}
                       dismissed={showDismissed}
                       onRestore={() =>
                         act.mutate({ lead_id: lead.id, action: "dismissed", remove: true })
@@ -752,7 +747,6 @@ function Dashboard() {
               />
               <Sidebar leads={filtered.length ? filtered : visibleLeads} />
             </div>
-
           </div>
         </div>
 

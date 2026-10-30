@@ -112,7 +112,6 @@ export function SummaryCard({
           Territory: OK · AR · LA · TX
         </div>
       </div>
-
     </div>
   );
 }

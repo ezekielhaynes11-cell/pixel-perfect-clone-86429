@@ -130,11 +130,7 @@ export const beginRefresh = createServerFn({ method: "POST" })
       .eq("id", ROW_ID)
       .maybeSingle();
 
-    if (
-      current?.status === "running" &&
-      current.updated_at &&
-      current.updated_at > staleBefore
-    ) {
+    if (current?.status === "running" && current.updated_at && current.updated_at > staleBefore) {
       throw new Error("A refresh is already running. Please wait for it to finish.");
     }
 

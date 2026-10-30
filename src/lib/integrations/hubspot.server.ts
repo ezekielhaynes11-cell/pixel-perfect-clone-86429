@@ -2,6 +2,7 @@
 // Connector must be linked: standard_connectors--connect with connector_id "hubspot"
 
 const GATEWAY_URL = "https://connector-gateway.lovable.dev/hubspot";
+const CONNECTOR_TIMEOUT_MS = 30_000;
 
 export interface HubSpotPushInput {
   title: string;
@@ -39,34 +40,41 @@ export async function pushLeadToHubspot(input: HubSpotPushInput): Promise<HubSpo
   const amount = (input.estimated_value_usd ?? 0) * (input.win_probability ?? 0);
 
   // Create a deal
-  const dealRes = await fetch(`${GATEWAY_URL}/crm/v3/objects/deals`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${LOVABLE_API_KEY}`,
-      "X-Connection-Api-Key": HUBSPOT_API_KEY,
-    },
-    body: JSON.stringify({
-      properties: {
-        dealname: input.title.slice(0, 250),
-        amount: amount > 0 ? Math.round(amount).toString() : undefined,
-        dealstage: "appointmentscheduled",
-        pipeline: "default",
-        description: [
-          input.summary,
-          "",
-          `Source: ${input.source}${input.source_url ? ` (${input.source_url})` : ""}`,
-          `Hospital: ${input.hospital ?? "n/a"}`,
-          `Confidence: ${input.confidence}%`,
-          input.estimated_value_usd
-            ? `Est. value: $${input.estimated_value_usd.toLocaleString()} · Win prob: ${Math.round((input.win_probability ?? 0) * 100)}%`
-            : "",
-        ]
-          .filter(Boolean)
-          .join("\n"),
+  let dealRes: Response;
+  try {
+    dealRes = await fetch(`${GATEWAY_URL}/crm/v3/objects/deals`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "X-Connection-Api-Key": HUBSPOT_API_KEY,
       },
-    }),
-  });
+      body: JSON.stringify({
+        properties: {
+          dealname: input.title.slice(0, 250),
+          amount: amount > 0 ? Math.round(amount).toString() : undefined,
+          dealstage: "appointmentscheduled",
+          pipeline: "default",
+          description: [
+            input.summary,
+            "",
+            `Source: ${input.source}${input.source_url ? ` (${input.source_url})` : ""}`,
+            `Hospital: ${input.hospital ?? "n/a"}`,
+            `Confidence: ${input.confidence}%`,
+            input.estimated_value_usd
+              ? `Est. value: $${input.estimated_value_usd.toLocaleString()} · Win prob: ${Math.round((input.win_probability ?? 0) * 100)}%`
+              : "",
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        },
+      }),
+      signal: AbortSignal.timeout(CONNECTOR_TIMEOUT_MS),
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return { ok: false, error: `HubSpot gateway request failed: ${detail}` };
+  }
 
   if (!dealRes.ok) {
     const text = await dealRes.text().catch(() => "");
@@ -81,29 +89,37 @@ export async function pushLeadToHubspot(input: HubSpotPushInput): Promise<HubSpo
   // Optionally attach the AI-drafted outreach as a note
   let noteId: string | undefined;
   if (input.outreach_subject && input.outreach_body && dealId) {
-    const noteRes = await fetch(`${GATEWAY_URL}/crm/v3/objects/notes`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "X-Connection-Api-Key": HUBSPOT_API_KEY,
-      },
-      body: JSON.stringify({
-        properties: {
-          hs_note_body: `<p><strong>${input.outreach_subject}</strong></p><pre style="white-space:pre-wrap">${input.outreach_body}</pre>`,
-          hs_timestamp: Date.now().toString(),
+    try {
+      const noteRes = await fetch(`${GATEWAY_URL}/crm/v3/objects/notes`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          "X-Connection-Api-Key": HUBSPOT_API_KEY,
         },
-        associations: [
-          {
-            to: { id: dealId },
-            types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 214 }],
+        body: JSON.stringify({
+          properties: {
+            hs_note_body: `<p><strong>${input.outreach_subject}</strong></p><pre style="white-space:pre-wrap">${input.outreach_body}</pre>`,
+            hs_timestamp: Date.now().toString(),
           },
-        ],
-      }),
-    });
-    if (noteRes.ok) {
-      const n = (await noteRes.json()) as { id?: string };
-      noteId = n.id;
+          associations: [
+            {
+              to: { id: dealId },
+              types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 214 }],
+            },
+          ],
+        }),
+        signal: AbortSignal.timeout(CONNECTOR_TIMEOUT_MS),
+      });
+      if (noteRes.ok) {
+        const notePayload = (await noteRes.json()) as { id?: string };
+        noteId = notePayload.id;
+      }
+    } catch (error) {
+      console.warn(
+        "[hubspot] Deal created cleanly, but outreach note attachment timed out or failed:",
+        error instanceof Error ? error.message : error,
+      );
     }
   }
 

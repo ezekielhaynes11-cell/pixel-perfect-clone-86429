@@ -7,20 +7,17 @@ import {
   apolloProspectContacts,
 } from "./apollo/service.server";
 
-export const countUnenrichedPhysicians = createServerFn({ method: "GET" })
-  
-  .handler(async () => {
-    const { count, error } = await supabaseAdmin
-      .from("physician_contacts")
-      .select("npi", { count: "exact", head: true })
-      .is("apollo_id", null)
-      .is("apollo_enriched_at", null);
-    if (error) throw new Error(error.message);
-    return { count: count ?? 0 };
-  });
+export const countUnenrichedPhysicians = createServerFn({ method: "GET" }).handler(async () => {
+  const { count, error } = await supabaseAdmin
+    .from("physician_contacts")
+    .select("npi", { count: "exact", head: true })
+    .is("apollo_id", null)
+    .is("apollo_enriched_at", null);
+  if (error) throw new Error(error.message);
+  return { count: count ?? 0 };
+});
 
 export const bulkEnrichApollo = createServerFn({ method: "POST" })
-  
   .inputValidator((input) =>
     z.object({ limit: z.number().int().min(1).max(20).optional() }).parse(input),
   )
@@ -57,17 +54,14 @@ export const bulkEnrichApollo = createServerFn({ method: "POST" })
   });
 
 export const enrichAccountApollo = createServerFn({ method: "POST" })
-  
   .inputValidator((input) => z.object({ account_id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => apolloEnrichAccount({ account_id: data.account_id }));
 
 export const enrichPhysicianApollo = createServerFn({ method: "POST" })
-  
   .inputValidator((input) => z.object({ npi: z.string().min(1).max(64) }).parse(input))
   .handler(async ({ data }) => apolloEnrichPhysician({ npi: data.npi }));
 
 export const prospectContactsApollo = createServerFn({ method: "POST" })
-  
   .inputValidator((input) =>
     z
       .object({
