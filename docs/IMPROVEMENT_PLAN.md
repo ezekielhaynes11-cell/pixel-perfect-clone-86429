@@ -22,3 +22,5 @@ AI gateway operations, ingestion/refresh mutations, and Gmail/CRM integration ac
 Three mocked checks of the actual Apollo quota function passed: only an explicit reservation permits spending, database errors/throws block spending, and the configured cap/default are passed to the database RPC. Changed non-JSX TypeScript files were parsed with Node's TypeScript transformer.
 
 A complete application build and signed-in/out browser walkthrough still require the repository dependencies and deployment access. No production database writes, Apollo calls, Gmail sends, or CRM mutations were performed during these checks.
+
+GitHub Actions was configured for the PR with placeholder credentials and the tracked `.env` removed before installation. Two runs ended in `startup_failure` before any jobs were created; GitHub did not provide a job-level diagnostic. The committed Vitest quota tests and full build therefore have not yet run in CI.
