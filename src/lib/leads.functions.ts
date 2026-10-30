@@ -1,5 +1,4 @@
 import { createServerFn } from "@tanstack/react-start";
-import { requireRep } from "./rep-auth";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { OWNER_ID } from "./owner.server";
@@ -36,11 +35,11 @@ export const listLeads = createServerFn({ method: "GET" }).handler(async () => {
   return data ?? [];
 });
 
-export const triggerIngestion = createServerFn({ method: "POST" }).middleware([requireRep]).handler(async () => {
+export const triggerIngestion = createServerFn({ method: "POST" }).handler(async () => {
   return await runIngestion(OWNER_ID);
 });
 
-export const triggerIngestionForSource = createServerFn({ method: "POST" }).middleware([requireRep])
+export const triggerIngestionForSource = createServerFn({ method: "POST" })
   .inputValidator((input) => z.object({ source: z.enum(INGESTION_SOURCE_NAMES) }).parse(input))
   .handler(async ({ data }) => {
     return await runIngestionForSource(data.source as IngestionSourceName, OWNER_ID);
@@ -172,7 +171,7 @@ export const listDraftsForLead = createServerFn({ method: "POST" })
     return rows ?? [];
   });
 
-export const generateOutreachDraft = createServerFn({ method: "POST" }).middleware([requireRep])
+export const generateOutreachDraft = createServerFn({ method: "POST" })
   .inputValidator((input) =>
     z
       .object({
