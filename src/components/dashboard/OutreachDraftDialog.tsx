@@ -1,4 +1,3 @@
-import { useOperatorSession } from "@/hooks/use-operator-session";
 import { useState, useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -29,7 +28,6 @@ export function OutreachDraftDialog({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
-  const operatorSignedIn = useOperatorSession();
   const fetchDrafts = useServerFn(listDraftsForLead);
   const generate = useServerFn(generateOutreachDraft);
   const update = useServerFn(updateOutreachDraft);
@@ -143,8 +141,7 @@ export function OutreachDraftDialog({
             ))}
             <button
               onClick={() => gen.mutate()}
-              disabled={!operatorSignedIn || gen.isPending}
-              title={!operatorSignedIn ? "Operator sign-in required for AI generation" : undefined}
+              disabled={gen.isPending}
               className="ml-auto flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
             >
               {gen.isPending ? (
