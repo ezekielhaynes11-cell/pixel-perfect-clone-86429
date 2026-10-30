@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { isDiscoveredToday, rowToLead, type LeadRow } from "@/data/leads";
+import {
+  compareLeadsByPriorityAndRecency,
+  isArchivedLead,
+  isDiscoveredToday,
+  leadInTerritoryScope,
+  leadIsHighPriority,
+  rowToLead,
+  type LeadRow,
+} from "@/data/leads";
 import { buildBlueskySearchQuery } from "./bluesky.server";
 import { passesMedicalGate, sanitizeErrorText } from "./medical-gate";
 import { fetchSamGov } from "./sam-gov.server";
@@ -97,6 +105,58 @@ describe("SAM.gov resilient ingestion", () => {
       "SAM.gov 503 (NAICS 339112): Service Unavailable",
     );
   });
+
+  it("cascades to NIH RePORTER federal awards when USASpending.gov times out on Worker egress", async () => {
+    const nihPayload = {
+      results: [
+        {
+          appl_id: 11203945,
+          project_num: "1R01HL172001-01",
+          project_title: "Point-of-Care Cardiac Ultrasound and Hemodynamic Monitoring in ICU",
+          abstract_text: "Deploying bedside echocardiography and telemetry across Houston ICUs.",
+          award_amount: 685000,
+          award_notice_date: "2026-10-25T00:00:00Z",
+          organization: {
+            org_name: "METHODIST HOSPITAL RESEARCH INSTITUTE",
+            org_city: "HOUSTON",
+            org_state: "TX",
+          },
+          principal_investigators: [
+            {
+              full_name: "Elena Vance, MD",
+              title: "Director of Critical Care Echocardiography",
+              is_contact_pi: true,
+            },
+          ],
+        },
+      ],
+    };
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url === "https://api.usaspending.gov/api/v2/search/spending_by_award/") {
+        const timeoutErr = new Error("The operation was aborted due to timeout");
+        timeoutErr.name = "TimeoutError";
+        throw timeoutErr;
+      }
+      if (url === "https://api.reporter.nih.gov/v2/projects/search") {
+        return new Response(JSON.stringify(nihPayload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      throw new Error(`Unexpected URL in test: ${url}`);
+    });
+
+    const leads = await fetchSamGov({});
+
+    expect(leads).toHaveLength(1);
+    expect(leads[0].source).toBe("sam_gov");
+    expect(leads[0].source_external_id).toBe("nih:11203945");
+    expect(leads[0].title).toContain("METHODIST HOSPITAL RESEARCH INSTITUTE (TX)");
+    expect(leads[0].raw_text).toContain("Texas (TX)");
+    expect(leads[0].source_contacts?.[0]?.name).toBe("Elena Vance, MD");
+  });
 });
 
 describe("medical pre-enrichment gate and Bluesky query scoping", () => {
@@ -188,5 +248,106 @@ describe("today discovery accounting and error sanitization", () => {
     expect(clean).not.toContain("abc123");
     expect(clean).toContain("API_KEY_INVALID");
     expect(clean).toContain("api_key=***");
+  });
+});
+
+describe("historical lead archiving, high-priority qualification, and territory scoping", () => {
+  const territoryStates = new Set(["TX", "OK", "AR", "LA"]);
+
+  function buildLeadRow(overrides: Partial<LeadRow>): LeadRow {
+    return {
+      id: "lead-1",
+      title: "Diagnostic Imaging Fleet Upgrade",
+      summary: "Hospital evaluating ultrasound and patient monitoring replacement.",
+      source: "openfda",
+      source_url: "https://example.com/lead",
+      confidence: 75,
+      date_discovered: "2026-10-30T12:00:00Z",
+      date_ingested: "2026-10-30T15:00:00Z",
+      hospital: "UT Southwestern Medical Center",
+      specialty: "Cardiology",
+      territory: "texas",
+      estimated_value_usd: 500_000,
+      win_probability: 0.45,
+      competitor_incumbent: "Nihon Kohden",
+      signal_type: "recall",
+      priority: "high",
+      entities: {},
+      ...overrides,
+    };
+  }
+
+  it("archives leads from the original historical pulls (>30 days old) while keeping recent leads active", () => {
+    const nowMs = new Date("2026-10-30T18:00:00Z").getTime();
+    const originalPullLead = rowToLead(
+      buildLeadRow({
+        id: "old-may-lead",
+        date_discovered: "2026-05-24T10:00:00Z",
+        date_ingested: "2026-06-02T10:00:00Z",
+      }),
+    );
+    const freshLead = rowToLead(
+      buildLeadRow({
+        id: "fresh-october-lead",
+        date_discovered: "2026-10-29T10:00:00Z",
+        date_ingested: "2026-10-30T14:00:00Z",
+      }),
+    );
+
+    expect(isArchivedLead(originalPullLead, nowMs)).toBe(true);
+    expect(isArchivedLead(freshLead, nowMs)).toBe(false);
+  });
+
+  it("qualifies actionable newer recalls, RFPs, and expansions as high priority and sorts them first", () => {
+    const newerHighPriorityRecall = rowToLead(
+      buildLeadRow({
+        id: "recall-high",
+        confidence: 75,
+        signal_type: "recall",
+        estimated_value_usd: 500_000,
+        priority: "medium",
+        date_ingested: "2026-10-30T16:00:00Z",
+      }),
+    );
+    const routineSentimentLead = rowToLead(
+      buildLeadRow({
+        id: "sentiment-low",
+        confidence: 78,
+        signal_type: "sentiment",
+        estimated_value_usd: 50_000,
+        priority: "low",
+        date_ingested: "2026-10-30T17:00:00Z",
+      }),
+    );
+
+    expect(leadIsHighPriority(newerHighPriorityRecall)).toBe(true);
+    expect(leadIsHighPriority(routineSentimentLead)).toBe(false);
+
+    const sorted = [routineSentimentLead, newerHighPriorityRecall].sort(
+      compareLeadsByPriorityAndRecency,
+    );
+    expect(sorted[0].id).toBe("recall-high");
+  });
+
+  it("includes nationwide competitor recalls in territory scope while excluding explicit out-of-territory states", () => {
+    const nationwideRecall = rowToLead(
+      buildLeadRow({
+        id: "nationwide-recall",
+        signal_type: "recall",
+        territory: null,
+        hospital: "Canon Medical Systems",
+      }),
+    );
+    const iowaRecall = rowToLead(
+      buildLeadRow({
+        id: "iowa-recall",
+        signal_type: "recall",
+        territory: "iowa",
+        hospital: "University of Iowa Hospitals",
+      }),
+    );
+
+    expect(leadInTerritoryScope(nationwideRecall, territoryStates)).toBe(true);
+    expect(leadInTerritoryScope(iowaRecall, territoryStates)).toBe(false);
   });
 });

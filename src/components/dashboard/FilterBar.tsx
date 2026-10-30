@@ -10,6 +10,8 @@ import {
   Flag,
   MapPin,
   Factory,
+  AlertTriangle,
+  CalendarClock,
 } from "lucide-react";
 import { sources } from "@/data/leads";
 import {
@@ -188,11 +190,15 @@ export function FilterBar({
   onChange,
   hospitals,
   specialties,
+  todayCount = 0,
+  highPriorityCount = 0,
 }: {
   filters: Filters;
   onChange: (f: Filters) => void;
   hospitals: string[];
   specialties: string[];
+  todayCount?: number;
+  highPriorityCount?: number;
 }) {
   const [open, setOpen] = useState<string | null>(null);
 
@@ -207,7 +213,10 @@ export function FilterBar({
 
   // Clear-all appears only when a real facet is active. minConfidence is
   // intentionally excluded — it has no UI control here and defaults to 0.
-  const anyActive = filters.states.length + filters.signalTypes.length + moreCount > 0;
+  const anyActive =
+    filters.onlyToday ||
+    filters.onlyHighPriority ||
+    filters.states.length + filters.signalTypes.length + moreCount > 0;
 
   const toggle = <K extends keyof Filters>(
     key: K,
@@ -221,6 +230,51 @@ export function FilterBar({
   return (
     <div className="sticky top-16 z-30 -mx-6 mb-6 border-b border-border bg-background/90 px-6 py-3 backdrop-blur">
       <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          aria-pressed={filters.onlyToday}
+          onClick={() => onChange({ ...filters, onlyToday: !filters.onlyToday })}
+          className={`flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium transition-colors ${
+            filters.onlyToday
+              ? "border-primary bg-primary/15 text-primary"
+              : "border-border bg-surface-2 text-foreground hover:bg-surface-3"
+          }`}
+        >
+          <CalendarClock className="h-3.5 w-3.5" />
+          <span>Leads Today</span>
+          <span
+            className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+              filters.onlyToday
+                ? "bg-primary text-primary-foreground"
+                : "bg-surface text-muted-foreground"
+            }`}
+          >
+            {todayCount}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          aria-pressed={filters.onlyHighPriority}
+          onClick={() => onChange({ ...filters, onlyHighPriority: !filters.onlyHighPriority })}
+          className={`flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium transition-colors ${
+            filters.onlyHighPriority
+              ? "border-danger/70 bg-danger/15 text-danger"
+              : "border-border bg-surface-2 text-foreground hover:bg-surface-3"
+          }`}
+        >
+          <AlertTriangle className="h-3.5 w-3.5" />
+          <span>Priority Leads</span>
+          <span
+            className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+              filters.onlyHighPriority ? "bg-danger text-white" : "bg-surface text-muted-foreground"
+            }`}
+          >
+            {highPriorityCount}
+          </span>
+        </button>
+
+        <div className="mx-1 hidden h-5 w-px bg-border sm:block" />
         <FilterButton
           icon={<MapPin className="h-3.5 w-3.5" />}
           label="State"

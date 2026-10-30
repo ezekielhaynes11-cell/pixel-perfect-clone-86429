@@ -17,6 +17,7 @@ import {
 import { toast } from "sonner";
 import {
   listLeads,
+  getArchivedLeadCount,
   triggerIngestionForSource,
   setLeadAction,
   listLeadActions,
@@ -30,8 +31,11 @@ import {
 import {
   rowToLead,
   leadStateCode,
+  leadInTerritoryScope,
   leadIsHighPriority,
+  isArchivedLead,
   isDiscoveredToday,
+  compareLeadsByPriorityAndRecency,
   type Lead,
   type LeadRow,
 } from "@/data/leads";
@@ -70,7 +74,6 @@ export const Route = createFileRoute("/_authenticated/")({
 
 // Module-scope constants (stable identities) so the feed useMemo doesn't need
 // them in its dependency array and doesn't reallocate them every render.
-const AGE_FILTER_MS = 365 * 24 * 60 * 60 * 1000;
 const TERRITORY_STATES = new Set(["TX", "OK", "AR", "LA"]);
 const MIN_HEADLINE_CONFIDENCE = 35;
 
@@ -86,6 +89,25 @@ function extractFailedSourceNames(errorMessage: string | null | undefined): stri
   return names;
 }
 
+function resolveFeedLabel(filters: Filters, filtered: Lead[], showArchived: boolean): string {
+  if (filters.onlyHighPriority && filters.onlyToday) {
+    return "High priority leads today";
+  }
+  if (filters.onlyHighPriority) {
+    return "High priority leads";
+  }
+  const allFilteredToday =
+    filtered.length > 0 &&
+    filtered.every((l) => isDiscoveredToday(l.dateDiscovered, l.dateIngested));
+  if (filters.onlyToday || allFilteredToday) {
+    return "Discovered today";
+  }
+  if (showArchived) {
+    return "Active + archived leads";
+  }
+  return "Active leads";
+}
+
 function Dashboard() {
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [active, setActive] = useState<Lead | null>(null);
@@ -93,13 +115,14 @@ function Dashboard() {
   const [searchesOpen, setSearchesOpen] = useState(false);
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [showDismissed, setShowDismissed] = useState(false);
-  const [showOld, setShowOld] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const [showAllTerritories, setShowAllTerritories] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [showInsights, setShowInsights] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const qc = useQueryClient();
   const fetchLeads = useServerFn(listLeads);
+  const fetchArchivedCount = useServerFn(getArchivedLeadCount);
   const fetchActions = useServerFn(listLeadActions);
   const fetchRuns = useServerFn(getRecentIngestionRuns);
   const fetchPhysicians = useServerFn(listLeadPhysicians);
@@ -108,8 +131,12 @@ function Dashboard() {
   const bulkActionFn = useServerFn(bulkSetLeadAction);
 
   const leadsQ = useQuery({
-    queryKey: ["leads"],
-    queryFn: () => fetchLeads(),
+    queryKey: ["leads", showArchived],
+    queryFn: () => fetchLeads({ data: { includeArchived: showArchived } }),
+  });
+  const archivedCountQ = useQuery({
+    queryKey: ["archived_lead_count"],
+    queryFn: () => fetchArchivedCount(),
   });
   const actionsQ = useQuery({
     queryKey: ["lead_actions"],
@@ -325,79 +352,100 @@ function Dashboard() {
   );
   const visibleLeads = showDismissed ? dismissedLeads : activeLeads;
 
+  const scopedActiveLeads = useMemo(
+    () =>
+      activeLeads.filter((l) => {
+        if (!showArchived && isArchivedLead(l)) return false;
+        if (!showAllTerritories && !leadInTerritoryScope(l, TERRITORY_STATES)) return false;
+        return true;
+      }),
+    [activeLeads, showArchived, showAllTerritories],
+  );
+
+  const facetSourceLeads = showDismissed ? dismissedLeads : scopedActiveLeads;
   const hospitals = useMemo(
     () =>
       Array.from(
-        new Set(visibleLeads.map((l) => l.hospital).filter((x): x is string => !!x)),
+        new Set(facetSourceLeads.map((l) => l.hospital).filter((x): x is string => !!x)),
       ).sort(),
-    [visibleLeads],
+    [facetSourceLeads],
   );
   const specialties = useMemo(
     () =>
       Array.from(
-        new Set(visibleLeads.map((l) => l.specialty).filter((x): x is string => !!x)),
+        new Set(facetSourceLeads.map((l) => l.specialty).filter((x): x is string => !!x)),
       ).sort(),
-    [visibleLeads],
+    [facetSourceLeads],
   );
 
   const filtered = useMemo(
     () =>
-      visibleLeads.filter((l) => {
-        if (!showOld) {
-          const discoveredTs = new Date(l.dateDiscovered).getTime() || 0;
-          const ingestedTs = l.dateIngested ? new Date(l.dateIngested).getTime() || 0 : 0;
-          if (Date.now() - Math.max(discoveredTs, ingestedTs) > AGE_FILTER_MS) return false;
-        }
-        if (!showAllTerritories && filters.states.length === 0) {
-          const code = leadStateCode(l);
-          if (!code || !TERRITORY_STATES.has(code)) return false;
-        }
-        if (filters.hospitals.length && (!l.hospital || !filters.hospitals.includes(l.hospital)))
-          return false;
-        if (
-          filters.specialties.length &&
-          (!l.specialty || !filters.specialties.includes(l.specialty))
-        )
-          return false;
-        if (filters.sources.length && !filters.sources.includes(l.source)) return false;
-        if (l.confidence < filters.minConfidence) return false;
-        if (
-          filters.signalTypes.length &&
-          (!l.signalType || !filters.signalTypes.includes(l.signalType as never))
-        )
-          return false;
-        if (
-          filters.accountTypes.length &&
-          (!l.accountType || !filters.accountTypes.includes(l.accountType as never))
-        )
-          return false;
-        if (filters.vendors.length) {
-          const hay = [...l.vendorMentions, l.competitorIncumbent ?? ""].join(" ").toLowerCase();
-          if (!filters.vendors.some((v) => hay.includes(v.toLowerCase()))) return false;
-        }
-        if (filters.states.length) {
-          const code = leadStateCode(l);
-          if (!code || !filters.states.includes(code)) return false;
-        }
-        return true;
-      }),
-    [visibleLeads, filters, showOld, showAllTerritories],
+      visibleLeads
+        .filter((l) => {
+          if (!showArchived && isArchivedLead(l)) return false;
+          if (!showAllTerritories && filters.states.length === 0) {
+            if (!leadInTerritoryScope(l, TERRITORY_STATES)) return false;
+          }
+          if (filters.onlyToday) {
+            if (
+              l.confidence < MIN_HEADLINE_CONFIDENCE ||
+              !isDiscoveredToday(l.dateDiscovered, l.dateIngested)
+            ) {
+              return false;
+            }
+          }
+          if (filters.onlyHighPriority && !leadIsHighPriority(l)) return false;
+          if (filters.hospitals.length && (!l.hospital || !filters.hospitals.includes(l.hospital)))
+            return false;
+          if (
+            filters.specialties.length &&
+            (!l.specialty || !filters.specialties.includes(l.specialty))
+          )
+            return false;
+          if (filters.sources.length && !filters.sources.includes(l.source)) return false;
+          if (l.confidence < filters.minConfidence) return false;
+          if (
+            filters.signalTypes.length &&
+            (!l.signalType || !filters.signalTypes.includes(l.signalType as never))
+          )
+            return false;
+          if (
+            filters.accountTypes.length &&
+            (!l.accountType || !filters.accountTypes.includes(l.accountType as never))
+          )
+            return false;
+          if (filters.vendors.length) {
+            const hay = [...l.vendorMentions, l.competitorIncumbent ?? ""].join(" ").toLowerCase();
+            if (!filters.vendors.some((v) => hay.includes(v.toLowerCase()))) return false;
+          }
+          if (filters.states.length) {
+            const code = leadStateCode(l);
+            if (!code || !filters.states.includes(code)) return false;
+          }
+          return true;
+        })
+        .sort(compareLeadsByPriorityAndRecency),
+    [visibleLeads, filters, showArchived, showAllTerritories],
   );
 
-  const discoveredToday = activeLeads.filter(
+  const discoveredToday = scopedActiveLeads.filter(
     (l) =>
       l.confidence >= MIN_HEADLINE_CONFIDENCE &&
       isDiscoveredToday(l.dateDiscovered, l.dateIngested),
   ).length;
-  const highPriority = activeLeads.filter(leadIsHighPriority).length;
+  const highPriority = scopedActiveLeads.filter(leadIsHighPriority).length;
 
-  // Honest label for the feed section: only call it "Discovered today" when
-  // every shown lead is actually dated today, otherwise describe the real range.
-  const feedLabel =
-    filtered.length > 0 &&
-    filtered.every((l) => isDiscoveredToday(l.dateDiscovered, l.dateIngested))
-      ? "Discovered today"
-      : "Recent leads";
+  const feedLabel = resolveFeedLabel(filters, filtered, showArchived);
+
+  const toggleTodayFilter = () => {
+    setShowDismissed(false);
+    setFilters((prev) => ({ ...prev, onlyToday: !prev.onlyToday }));
+  };
+
+  const toggleHighPriorityFilter = () => {
+    setShowDismissed(false);
+    setFilters((prev) => ({ ...prev, onlyHighPriority: !prev.onlyHighPriority }));
+  };
 
   const toggleSelectMode = () => {
     setSelectMode((currentMode) => {
@@ -524,6 +572,10 @@ function Dashboard() {
           lastSucceededAt={refreshQ.data?.lastSucceededAt ?? null}
           refreshFailed={refreshQ.data?.status === "failed"}
           isRefreshing={ingest.isPending || refreshQ.data?.status === "running"}
+          todayActive={filters.onlyToday}
+          highPriorityActive={filters.onlyHighPriority}
+          onToggleToday={toggleTodayFilter}
+          onToggleHighPriority={toggleHighPriorityFilter}
         />
 
         {(() => {
@@ -573,6 +625,8 @@ function Dashboard() {
               onChange={setFilters}
               hospitals={hospitals}
               specialties={specialties}
+              todayCount={discoveredToday}
+              highPriorityCount={highPriority}
             />
 
             <div className="mb-3 flex flex-wrap items-center gap-3">
@@ -610,11 +664,11 @@ function Dashboard() {
                     Show dismissed ({dismissedLeads.length})
                   </DropdownMenuCheckboxItem>
                   <DropdownMenuCheckboxItem
-                    checked={showOld}
-                    onCheckedChange={() => setShowOld((v) => !v)}
+                    checked={showArchived}
+                    onCheckedChange={() => setShowArchived((v) => !v)}
                     onSelect={(e) => e.preventDefault()}
                   >
-                    Show older leads
+                    Show archived leads ({archivedCountQ.data?.count ?? 0})
                   </DropdownMenuCheckboxItem>
                   <DropdownMenuCheckboxItem
                     checked={showAllTerritories}
@@ -723,35 +777,32 @@ function Dashboard() {
               </div>
             ) : (
               <div className="space-y-3">
-                {filtered
-                  .slice()
-                  .sort((a, b) => b.confidence - a.confidence)
-                  .map((lead, i) => (
-                    <LeadCard
-                      key={lead.id}
-                      lead={lead}
-                      index={i}
-                      physicians={physiciansByLead.get(lead.id) ?? []}
-                      onView={setActive}
-                      saved={savedIds.has(lead.id)}
-                      onSave={() =>
-                        act.mutate({
-                          lead_id: lead.id,
-                          action: "saved",
-                          remove: savedIds.has(lead.id),
-                        })
-                      }
-                      onDismiss={() => act.mutate({ lead_id: lead.id, action: "dismissed" })}
-                      onDraft={() => setDraftFor(lead)}
-                      selectMode={selectMode}
-                      selected={selected.has(lead.id)}
-                      onToggleSelect={() => toggleLeadSelection(lead.id)}
-                      dismissed={showDismissed}
-                      onRestore={() =>
-                        act.mutate({ lead_id: lead.id, action: "dismissed", remove: true })
-                      }
-                    />
-                  ))}
+                {filtered.map((lead, i) => (
+                  <LeadCard
+                    key={lead.id}
+                    lead={lead}
+                    index={i}
+                    physicians={physiciansByLead.get(lead.id) ?? []}
+                    onView={setActive}
+                    saved={savedIds.has(lead.id)}
+                    onSave={() =>
+                      act.mutate({
+                        lead_id: lead.id,
+                        action: "saved",
+                        remove: savedIds.has(lead.id),
+                      })
+                    }
+                    onDismiss={() => act.mutate({ lead_id: lead.id, action: "dismissed" })}
+                    onDraft={() => setDraftFor(lead)}
+                    selectMode={selectMode}
+                    selected={selected.has(lead.id)}
+                    onToggleSelect={() => toggleLeadSelection(lead.id)}
+                    dismissed={showDismissed}
+                    onRestore={() =>
+                      act.mutate({ lead_id: lead.id, action: "dismissed", remove: true })
+                    }
+                  />
+                ))}
               </div>
             )}
           </div>
@@ -775,7 +826,7 @@ function Dashboard() {
                 onRefresh={() => ingest.mutate()}
                 runs={runsQ.data ?? []}
               />
-              <Sidebar leads={filtered.length ? filtered : visibleLeads} />
+              <Sidebar leads={filtered.length ? filtered : scopedActiveLeads} />
             </div>
           </div>
         </div>

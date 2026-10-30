@@ -3,6 +3,9 @@
 // longer ships mock data.
 
 import { cleanLeadTitle, cleanHospital } from "@/lib/lead-clean";
+import { territoryToCode } from "@/lib/territory";
+
+export const ACTIVE_LEAD_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 export type LeadSource =
   | "sam_gov"
@@ -143,14 +146,60 @@ export function leadStateCode(lead: Lead): "TX" | "OK" | "AR" | "LA" | null {
   return null;
 }
 
-// High priority is a deliberately tight subset: high-confidence leads that also
-// carry a concrete buying signal (recall/RFP) or material estimated value. This
-// keeps the "High Priority" headline meaningful instead of flagging ~all leads.
-export function leadIsHighPriority(l: Lead): boolean {
-  if (l.confidence < 85) return false;
-  if (l.signalType === "recall" || l.signalType === "rfp") return true;
-  if ((l.estimatedValueUsd ?? 0) >= 250_000) return true;
+export function leadInTerritoryScope(lead: Lead, territoryStates: ReadonlySet<string>): boolean {
+  const matchedTerritory = leadStateCode(lead);
+  if (matchedTerritory && territoryStates.has(matchedTerritory)) {
+    return true;
+  }
+  // Nationwide competitor recalls without a single non-territory state apply to TX/OK/AR/LA accounts.
+  if (lead.signalType === "recall") {
+    const explicitState = territoryToCode(lead.territory);
+    return explicitState === null || territoryStates.has(explicitState);
+  }
   return false;
+}
+
+export function leadFreshnessTimestamp(lead: Lead): number {
+  const ingestedTs = lead.dateIngested ? new Date(lead.dateIngested).getTime() : Number.NaN;
+  if (!Number.isNaN(ingestedTs)) return ingestedTs;
+  const discoveredTs = new Date(lead.dateDiscovered).getTime();
+  return Number.isNaN(discoveredTs) ? 0 : discoveredTs;
+}
+
+// Archives leads older than the active 30-day window (including the original May–September pulls)
+// without deleting any underlying database records.
+export function isArchivedLead(lead: Lead, nowMs = Date.now()): boolean {
+  const ts = leadFreshnessTimestamp(lead);
+  if (ts <= 0) return true;
+  return nowMs - ts > ACTIVE_LEAD_WINDOW_MS;
+}
+
+const ACTIONABLE_HIGH_PRIORITY_SIGNALS = new Set<string>(["recall", "rfp", "funding", "expansion"]);
+
+// High priority surfaces concrete buying signals (recalls, RFPs, funding, expansions)
+// with material estimated value (>= $250k) or top-tier confidence (>= 85).
+export function leadIsHighPriority(l: Lead): boolean {
+  const materialValue = (l.estimatedValueUsd ?? 0) >= 250_000;
+  const actionableSignal =
+    l.signalType != null && ACTIONABLE_HIGH_PRIORITY_SIGNALS.has(l.signalType);
+
+  if (l.confidence >= 85) {
+    return actionableSignal || materialValue;
+  }
+  if (l.priority === "high" && l.confidence >= 65) {
+    return true;
+  }
+  if (l.confidence >= 65 && actionableSignal && materialValue) {
+    return true;
+  }
+  return false;
+}
+
+export function compareLeadsByPriorityAndRecency(a: Lead, b: Lead): number {
+  const prioDiff = Number(leadIsHighPriority(b)) - Number(leadIsHighPriority(a));
+  if (prioDiff !== 0) return prioDiff;
+  if (b.confidence !== a.confidence) return b.confidence - a.confidence;
+  return leadFreshnessTimestamp(b) - leadFreshnessTimestamp(a);
 }
 
 function isSameLocalCalendarDay(iso: string | null | undefined, now: Date): boolean {

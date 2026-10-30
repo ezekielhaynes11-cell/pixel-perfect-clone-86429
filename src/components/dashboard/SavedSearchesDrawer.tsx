@@ -188,6 +188,8 @@ export function SavedSearchesDrawer({
 
 function FilterSummary({ filter }: { filter: Filters }) {
   const bits: string[] = [];
+  if (filter.onlyToday) bits.push("Today");
+  if (filter.onlyHighPriority) bits.push("Priority");
   if (filter.hospitals?.length)
     bits.push(`${filter.hospitals.length} hospital${filter.hospitals.length === 1 ? "" : "s"}`);
   if (filter.specialties?.length) bits.push(`${filter.specialties.length} specialty`);

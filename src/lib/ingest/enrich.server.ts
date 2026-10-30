@@ -6,14 +6,13 @@ const GATEWAY_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
 const BASE_SYSTEM = `You are a senior sales intelligence analyst for Philips Medical (medical imaging, patient monitoring, cardiac, respiratory). You evaluate raw signals and produce structured leads for field reps covering Texas, Oklahoma, Arkansas, and Louisiana.
 
 Confidence rubric (0-100):
-- 95+: Explicit RFQ / RFP / solicitation with budget or deadline at a named US hospital
-- 90-94: FDA recall affecting a competitor at named accounts — replacement opportunity
-- 85-89: Publicly announced capital budget, new program, expansion, or grant
-- 70-84: News article about hospital expansion / fellowship / leadership change
-- 60-69: Practitioner forum discussion mentioning vendor or equipment frustration (Reddit/Bluesky chatter)
+- 92-98: Explicit RFQ / RFP / federal contract award at a named hospital or VA facility
+- 85-91: Class I or Class II FDA recall on competitor imaging/monitoring/cardiac/respiratory equipment (including nationwide US recalls that impact TX/OK/AR/LA hospitals), or federal hospital grant/capital award >= $200k at a named TX/OK/AR/LA institution
+- 72-84: Active clinical trial, hospital expansion, or new fellowship/imaging program at a named TX/OK/AR/LA hospital
+- 60-71: Practitioner forum discussion mentioning vendor or equipment frustration (Reddit/Bluesky chatter)
 - Below 60: Weak signal, low specificity
 
-Priority: high (>=85), medium (70-84), low (<70).
+Priority: high (>=85, or >=70 with recall/rfp/funding signal and >=$250k pipeline value), medium (65-84), low (<65).
 
 Estimated value: realistic USD pipeline value for Philips if won. Ultrasound RFQ $400k-$1.2M; cath lab $1.5M-$4M; MRI $1.5M-$3M; ventilator fleet $300k-$1.5M; infusion pump replacement $200k-$800k; ECMO $250k-$600k per unit.
 
@@ -127,7 +126,7 @@ ${hintBlock}
 
 ${raw.raw_text}`;
 
-  const res = await fetch(GATEWAY_URL, {
+  const response = await fetch(GATEWAY_URL, {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -139,13 +138,14 @@ ${raw.raw_text}`;
       tools: [TOOL_SCHEMA],
       tool_choice: { type: "function", function: { name: "extract_lead" } },
     }),
+    signal: AbortSignal.timeout(25_000),
   });
 
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`AI gateway ${res.status}: ${body}`);
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`AI gateway ${response.status}: ${body}`);
   }
-  const json = (await res.json()) as {
+  const json = (await response.json()) as {
     choices?: { message?: { tool_calls?: { function?: { arguments?: string } }[] } }[];
   };
   const argsStr = json.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
@@ -153,6 +153,14 @@ ${raw.raw_text}`;
   const parsed = JSON.parse(argsStr) as EnrichmentResult;
 
   parsed.confidence = Math.max(0, Math.min(100, Math.round(parsed.confidence ?? 0)));
+  if (
+    parsed.confidence >= 85 ||
+    (parsed.confidence >= 70 &&
+      ["recall", "rfp", "funding"].includes(parsed.signal_type) &&
+      (parsed.estimated_value_usd ?? 0) >= 250_000)
+  ) {
+    parsed.priority = "high";
+  }
   if (parsed.win_probability != null) {
     parsed.win_probability = Math.max(0, Math.min(1, parsed.win_probability));
   }

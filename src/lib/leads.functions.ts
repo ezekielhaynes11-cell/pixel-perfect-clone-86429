@@ -11,6 +11,7 @@ import {
   type IngestionSourceName,
 } from "./ingest/run.server";
 import { draftOutreachEmail } from "./outreach.server";
+import { ACTIVE_LEAD_WINDOW_MS } from "@/data/leads";
 import { throwIfError, throwUnlessDuplicate } from "./supabase-errors";
 
 export const INGESTION_SOURCES = INGESTION_SOURCE_NAMES;
@@ -20,47 +21,63 @@ export const INGESTION_SOURCES = INGESTION_SOURCE_NAMES;
 const LEAD_LIST_COLUMNS =
   "id, source, source_external_id, source_url, title, summary, confidence, priority, hospital, specialty, territory, entities, estimated_value_usd, win_probability, competitor_incumbent, date_discovered, date_ingested, enriched, vendor_mentions, account_type, signal_type, account_id, source_contacts";
 
-const RECENT_INGEST_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_QUALIFIED_CONFIDENCE = 35;
 
-// Returns ALL top-confidence enriched leads PLUS recently ingested qualified leads
-// so newly discovered opportunities never get crowded out behind older all-time rows.
-export const listLeads = createServerFn({ method: "GET" }).handler(async () => {
-  const recentSince = new Date(Date.now() - RECENT_INGEST_WINDOW_MS).toISOString();
-  const [topRes, recentRes] = await Promise.all([
-    supabaseAdmin
+function getActiveCutoffIso(): string {
+  return new Date(Date.now() - ACTIVE_LEAD_WINDOW_MS).toISOString();
+}
+
+// Active leads exclude historical pulls older than ACTIVE_LEAD_WINDOW_MS (archiving
+// the original May–September batches without deleting rows). Passing includeArchived=true
+// appends historical archived leads on demand.
+export const listLeads = createServerFn({ method: "GET" })
+  .inputValidator((input) =>
+    z.object({ includeArchived: z.boolean().default(false) }).parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const activeCutoff = getActiveCutoffIso();
+    const activePromise = supabaseAdmin
       .from("leads")
       .select(LEAD_LIST_COLUMNS)
       .eq("enriched", true)
-      .order("confidence", { ascending: false })
-      .order("date_discovered", { ascending: false })
-      .limit(500),
-    supabaseAdmin
-      .from("leads")
-      .select(LEAD_LIST_COLUMNS)
-      .eq("enriched", true)
-      .gte("date_ingested", recentSince)
+      .gte("date_ingested", activeCutoff)
       .gte("confidence", MIN_QUALIFIED_CONFIDENCE)
+      .order("confidence", { ascending: false })
       .order("date_ingested", { ascending: false })
-      .limit(200),
-  ]);
-  throwIfError(topRes.error);
-  throwIfError(recentRes.error);
+      .limit(500);
 
-  const byId = new Map<string, NonNullable<typeof topRes.data>[number]>();
-  for (const row of topRes.data ?? []) {
-    byId.set(row.id, row);
-  }
-  for (const row of recentRes.data ?? []) {
-    if (!byId.has(row.id)) {
-      byId.set(row.id, row);
+    if (!data.includeArchived) {
+      const activeRes = await activePromise;
+      throwIfError(activeRes.error);
+      return activeRes.data ?? [];
     }
-  }
 
-  return Array.from(byId.values()).sort((a, b) => {
-    if (b.confidence !== a.confidence) return b.confidence - a.confidence;
-    return new Date(b.date_discovered).getTime() - new Date(a.date_discovered).getTime();
+    const [activeRes, archivedRes] = await Promise.all([
+      activePromise,
+      supabaseAdmin
+        .from("leads")
+        .select(LEAD_LIST_COLUMNS)
+        .eq("enriched", true)
+        .lt("date_ingested", activeCutoff)
+        .order("confidence", { ascending: false })
+        .order("date_discovered", { ascending: false })
+        .limit(500),
+    ]);
+    throwIfError(activeRes.error);
+    throwIfError(archivedRes.error);
+
+    return [...(activeRes.data ?? []), ...(archivedRes.data ?? [])];
   });
+
+export const getArchivedLeadCount = createServerFn({ method: "GET" }).handler(async () => {
+  const activeCutoff = getActiveCutoffIso();
+  const { count, error } = await supabaseAdmin
+    .from("leads")
+    .select("id", { count: "exact", head: true })
+    .eq("enriched", true)
+    .lt("date_ingested", activeCutoff);
+  throwIfError(error);
+  return { count: count ?? 0 };
 });
 
 export const triggerIngestion = createServerFn({ method: "POST" }).handler(async () => {
@@ -288,6 +305,8 @@ const FilterSchema = z.object({
   vendors: z.array(z.string()).default([]),
   states: z.array(z.string()).default([]),
   minConfidence: z.number().min(0).max(100).default(0),
+  onlyToday: z.boolean().default(false),
+  onlyHighPriority: z.boolean().default(false),
 });
 
 export const listSavedSearches = createServerFn({ method: "GET" }).handler(async () => {
@@ -392,18 +411,18 @@ export const markAllAlertsRead = createServerFn({ method: "POST" }).handler(asyn
 /* -------------------- Pipeline forecast -------------------- */
 
 export const getPipelineForecast = createServerFn({ method: "GET" }).handler(async () => {
+  const activeCutoff = getActiveCutoffIso();
   const [leadsRes, actionsRes] = await Promise.all([
     supabaseAdmin
       .from("leads")
       .select(
         "id, title, hospital, specialty, confidence, estimated_value_usd, win_probability, date_discovered, source",
       )
-      // Same base set AND ordering as the dashboard feed (listLeads): enriched
-      // leads, top 500 by confidence then recency. Without the ORDER BY the 500-row
-      // window was arbitrary, so the forecast didn't reconcile with the feed.
       .eq("enriched", true)
+      .gte("date_ingested", activeCutoff)
+      .gte("confidence", MIN_QUALIFIED_CONFIDENCE)
       .order("confidence", { ascending: false })
-      .order("date_discovered", { ascending: false })
+      .order("date_ingested", { ascending: false })
       .limit(500),
     supabaseAdmin.from("lead_actions").select("lead_id, action").eq("user_id", OWNER_ID),
   ]);

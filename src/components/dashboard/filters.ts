@@ -21,6 +21,8 @@ export interface Filters {
   vendors: string[];
   states: TerritoryState[];
   minConfidence: number;
+  onlyToday: boolean;
+  onlyHighPriority: boolean;
 }
 
 export const emptyFilters: Filters = {
@@ -36,6 +38,8 @@ export const emptyFilters: Filters = {
   // hide sub-threshold leads with no way to reveal them. (minConfidence stays in
   // the type because saved-search alerting can still set it.)
   minConfidence: 0,
+  onlyToday: false,
+  onlyHighPriority: false,
 };
 
 export const signalTypeOptions: SignalType[] = [

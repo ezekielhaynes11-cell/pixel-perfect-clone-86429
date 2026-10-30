@@ -6,7 +6,11 @@ import { PHILLIPS_KEYWORDS } from "./types";
 
 const SAM_BASE = "https://api.sam.gov/opportunities/v2/search";
 const USASPENDING_BASE = "https://api.usaspending.gov/api/v2/search/spending_by_award/";
-const REQUEST_TIMEOUT_MS = 25_000;
+const NIH_REPORTER_BASE = "https://api.reporter.nih.gov/v2/projects/search";
+
+const SAM_TIMEOUT_MS = 8_000;
+const FALLBACK_TIMEOUT_MS = 10_000;
+const USER_AGENT = "YieldArchitect/1.0 (PhilipsMedicalSalesIntelligence)";
 
 const TERRITORY_STATE_CODES = ["TX", "OK", "AR", "LA"] as const;
 
@@ -28,7 +32,8 @@ const STATE_CODE_TO_NAME: Record<string, string> = {
 const USASPENDING_MEDICAL_SIGNAL_RX =
   /\b(ultrasound|sonograph|doppler|echocard|imaging|radiolog|mri|pet\/ct|ct\s+scan|x-ray|fluoroscop|cath|ivus|avvigo|ecg|ekg|monitor|ventilator|defibrillator|transducer|pacs|ge\s+precision|ge\s+healthcare|siemens\s+medical|siemens\s+healthineers|mindray|sonosite|fujifilm|canon\s+medical|samsung\s+medison|philips)\b/i;
 
-const USASPENDING_NOISE_RX = /\b(stair\s*lift|elevator|wheelchair|prosthetic|scooter|mattress)\b/i;
+const NON_CLINICAL_NOISE_RX =
+  /\b(stair\s*lift|elevator|wheelchair|prosthetic|scooter|mattress|small\s+animal|animal\s+core)\b/i;
 
 class SamAuthError extends Error {
   readonly status: number;
@@ -114,6 +119,41 @@ const usaSpendingResponseSchema = z.object({
   results: z.array(usaSpendingAwardSchema).default([]),
 });
 
+const nihInvestigatorSchema = z
+  .object({
+    full_name: z.string().nullish(),
+    first_name: z.string().nullish(),
+    last_name: z.string().nullish(),
+    title: z.string().nullish(),
+    is_contact_pi: z.boolean().nullish(),
+  })
+  .passthrough();
+
+const nihProjectSchema = z
+  .object({
+    appl_id: z.number().nullish(),
+    project_num: z.string().nullish(),
+    project_title: z.string().nullish(),
+    abstract_text: z.string().nullish(),
+    award_amount: z.number().nullish(),
+    award_notice_date: z.string().nullish(),
+    project_start_date: z.string().nullish(),
+    project_end_date: z.string().nullish(),
+    organization: z
+      .object({
+        org_name: z.string().nullish(),
+        org_city: z.string().nullish(),
+        org_state: z.string().nullish(),
+      })
+      .nullish(),
+    principal_investigators: z.array(nihInvestigatorSchema).nullish(),
+  })
+  .passthrough();
+
+const nihResponseSchema = z.object({
+  results: z.array(nihProjectSchema).default([]),
+});
+
 type SamAddress = z.infer<typeof samAddressSchema>;
 type SamOpportunity = z.infer<typeof samOpportunitySchema>;
 
@@ -130,9 +170,9 @@ export async function fetchSamGov(
   if (!trimmedKey) {
     logWarn(
       "ingest.sam_gov",
-      "SAM_GOV_API_KEY not configured; using keyless USASpending.gov federal contract feed",
+      "SAM_GOV_API_KEY not configured; using keyless federal contract and award feeds",
     );
-    return fetchUsaSpendingFallback({ daysBack: Math.max(daysBack, 180), limit });
+    return fetchResilientFederalFallback({ daysBack: Math.max(daysBack, 180), limit });
   }
 
   const formatSamDate = (d: Date) => {
@@ -160,13 +200,13 @@ export async function fetchSamGov(
       }
     }
   } catch (err) {
-    if (err instanceof SamAuthError) {
+    if (err instanceof SamAuthError || isTimeoutError(err)) {
       logWarn(
         "ingest.sam_gov",
-        "SAM.gov rejected API key; falling back to keyless USASpending.gov federal contract feed",
-        { status: err.status, detail: err.message },
+        "SAM.gov unavailable or unauthorized; falling back to keyless federal award feeds",
+        { detail: err instanceof Error ? err.message : String(err) },
       );
-      return fetchUsaSpendingFallback({ daysBack: Math.max(daysBack, 180), limit });
+      return fetchResilientFederalFallback({ daysBack: Math.max(daysBack, 180), limit });
     }
     throw err;
   }
@@ -212,6 +252,33 @@ export async function fetchSamGov(
     });
 }
 
+function isTimeoutError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return (
+    err.name === "TimeoutError" ||
+    err.name === "AbortError" ||
+    err.message.toLowerCase().includes("timeout") ||
+    err.message.toLowerCase().includes("aborted")
+  );
+}
+
+async function fetchResilientFederalFallback(opts: {
+  daysBack: number;
+  limit: number;
+}): Promise<RawLead[]> {
+  try {
+    const usaLeads = await fetchUsaSpendingFallback(opts);
+    if (usaLeads.length > 0) return usaLeads;
+  } catch (err) {
+    logWarn(
+      "ingest.sam_gov",
+      "USASpending.gov fallback failed or timed out; cascading to NIH RePORTER federal awards",
+      { error: err instanceof Error ? err.message : String(err) },
+    );
+  }
+  return fetchNihReporterFallback({ limit: opts.limit });
+}
+
 async function fetchByNaics(
   apiKey: string,
   ncode: string,
@@ -228,8 +295,8 @@ async function fetchByNaics(
     ptype: "o,k,p",
   });
   const response = await fetch(`${SAM_BASE}?${params}`, {
-    headers: { Accept: "application/json" },
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    headers: { Accept: "application/json", "User-Agent": USER_AGENT },
+    signal: AbortSignal.timeout(SAM_TIMEOUT_MS),
   });
   if (!response.ok) {
     const detail = sanitizeErrorText(await response.text());
@@ -246,15 +313,16 @@ export async function fetchUsaSpendingFallback(opts: {
   daysBack?: number;
   limit?: number;
 }): Promise<RawLead[]> {
-  const { daysBack = 180, limit = 50 } = opts;
+  const { daysBack = 180, limit = 25 } = opts;
   const startDate = new Date(Date.now() - daysBack * 86400_000).toISOString().slice(0, 10);
-  const endDate = new Date(Date.now() + 365 * 86400_000).toISOString().slice(0, 10);
+  const endDate = new Date().toISOString().slice(0, 10);
 
   const response = await fetch(USASPENDING_BASE, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
+      "User-Agent": USER_AGENT,
     },
     body: JSON.stringify({
       fields: [
@@ -280,12 +348,12 @@ export async function fetchUsaSpendingFallback(opts: {
         })),
         time_period: [{ start_date: startDate, end_date: endDate }],
       },
-      limit: Math.min(Math.max(limit, 25), 100),
+      limit: Math.min(Math.max(limit, 15), 40),
       page: 1,
       sort: "Start Date",
       order: "desc",
     }),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: AbortSignal.timeout(FALLBACK_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -312,7 +380,7 @@ export async function fetchUsaSpendingFallback(opts: {
     const office = (row["Awarding Office"] ?? "").trim();
     const searchable = `${recipient} ${description} ${agency} ${office}`;
 
-    if (USASPENDING_NOISE_RX.test(searchable)) continue;
+    if (NON_CLINICAL_NOISE_RX.test(searchable)) continue;
     if (!USASPENDING_MEDICAL_SIGNAL_RX.test(searchable)) continue;
 
     const internalId = (row.generated_internal_id ?? "").trim();
@@ -364,6 +432,112 @@ export async function fetchUsaSpendingFallback(opts: {
       ].join("\n"),
       date_discovered: discoveredIso,
       raw_payload: row as Record<string, unknown>,
+    });
+  }
+
+  return leads;
+}
+
+export async function fetchNihReporterFallback(opts: { limit?: number } = {}): Promise<RawLead[]> {
+  const { limit = 20 } = opts;
+  const currentYear = new Date().getFullYear();
+
+  const response = await fetch(NIH_REPORTER_BASE, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "User-Agent": USER_AGENT,
+    },
+    body: JSON.stringify({
+      criteria: {
+        org_states: [...TERRITORY_STATE_CODES],
+        fiscal_years: [currentYear - 1, currentYear],
+        advanced_text_search: {
+          operator: "or",
+          search_field: "projecttitle,terms",
+          search_text:
+            "ultrasound echocardiography MRI catheterization fluoroscopy defibrillator cardiography",
+        },
+      },
+      offset: 0,
+      limit: Math.min(Math.max(limit, 10), 30),
+      sort_field: "award_notice_date",
+      sort_order: "desc",
+    }),
+    signal: AbortSignal.timeout(FALLBACK_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    const detail = sanitizeErrorText(await response.text());
+    throw new Error(`NIH RePORTER ${response.status}: ${detail}`);
+  }
+
+  const parsed = nihResponseSchema.parse(await response.json());
+  const leads: RawLead[] = [];
+  const seen = new Set<string>();
+
+  for (const proj of parsed.results) {
+    const orgName = (proj.organization?.org_name ?? "").trim();
+    const stateCode = (proj.organization?.org_state ?? "").trim().toUpperCase();
+    const city = (proj.organization?.org_city ?? "").trim();
+    const projectTitle = (proj.project_title ?? "").trim();
+    if (!orgName || !projectTitle || !TERRITORY_STATE_NAMES.has(stateCode)) continue;
+    if (NON_CLINICAL_NOISE_RX.test(`${orgName} ${projectTitle}`)) continue;
+
+    const projectId = String(proj.appl_id ?? proj.project_num ?? "").trim();
+    if (!projectId || seen.has(projectId)) continue;
+    seen.add(projectId);
+
+    const stateName = STATE_CODE_TO_NAME[stateCode] ?? stateCode;
+    const amount = proj.award_amount;
+    const amountFormatted =
+      typeof amount === "number" && amount > 0
+        ? `$${Math.round(amount).toLocaleString("en-US")}`
+        : "Federal Award";
+
+    const contacts: LeadContact[] = (proj.principal_investigators ?? [])
+      .map((pi): LeadContact => {
+        const name =
+          pi.full_name?.trim() ||
+          [pi.first_name, pi.last_name].filter(Boolean).join(" ").trim() ||
+          null;
+        return {
+          name,
+          title: pi.title?.trim() || "Principal Investigator",
+          organization: orgName,
+          email: null,
+          phone: null,
+          address: [city, stateCode].filter(Boolean).join(", ") || null,
+          type: pi.is_contact_pi ? "primary" : "investigator",
+          source_origin: "sam_gov",
+        };
+      })
+      .filter((c) => Boolean(c.name));
+
+    const discoveredIso = proj.award_notice_date
+      ? new Date(proj.award_notice_date).toISOString()
+      : new Date().toISOString();
+
+    leads.push({
+      source: "sam_gov",
+      source_external_id: `nih:${projectId}`,
+      source_url: proj.appl_id
+        ? `https://reporter.nih.gov/project-details/${proj.appl_id}`
+        : "https://reporter.nih.gov/",
+      title: `${orgName} (${stateCode}) — ${amountFormatted}: ${projectTitle}`.slice(0, 280),
+      raw_text: [
+        `Hospital/Agency: ${orgName}`,
+        `State: ${stateName} (${stateCode})`,
+        `Place of Performance: ${[city, stateName].filter(Boolean).join(", ")}`,
+        `Award $: ${amountFormatted}`,
+        `Project Number: ${proj.project_num ?? projectId}`,
+        `Title: ${projectTitle}`,
+        `Abstract: ${(proj.abstract_text ?? "").slice(0, 1200)}`,
+      ].join("\n"),
+      date_discovered: discoveredIso,
+      raw_payload: proj as Record<string, unknown>,
+      source_contacts: contacts,
     });
   }
 
