@@ -72,6 +72,19 @@ export const Route = createFileRoute("/_authenticated/")({
 // them in its dependency array and doesn't reallocate them every render.
 const AGE_FILTER_MS = 365 * 24 * 60 * 60 * 1000;
 const TERRITORY_STATES = new Set(["TX", "OK", "AR", "LA"]);
+const MIN_HEADLINE_CONFIDENCE = 35;
+
+function extractFailedSourceNames(errorMessage: string | null | undefined): string[] {
+  if (!errorMessage) return [];
+  const names: string[] = [];
+  for (const segment of errorMessage.split("|")) {
+    const match = segment.trim().match(/^([a-z0-9_]+):/i);
+    if (match?.[1] && !names.includes(match[1])) {
+      names.push(match[1]);
+    }
+  }
+  return names;
+}
 
 function Dashboard() {
   const [filters, setFilters] = useState<Filters>(emptyFilters);
@@ -148,6 +161,7 @@ function Dashboard() {
         let inserted = 0;
         let fetched = 0;
         let failed = 0;
+        const failedSources: string[] = [];
         const errors: string[] = [];
         for (let i = 0; i < results.length; i++) {
           const r = results[i];
@@ -156,6 +170,7 @@ function Dashboard() {
             fetched += r.value.fetched;
           } else {
             failed += 1;
+            failedSources.push(INGESTION_SOURCES[i]);
             const msg =
               r.status === "rejected"
                 ? r.reason instanceof Error
@@ -177,7 +192,7 @@ function Dashboard() {
           },
         });
         if (allFailed) throw new Error(errors[0] ?? "All sources failed");
-        return { inserted, failed };
+        return { inserted, failed, failedSources };
       } catch (e) {
         await finishRefresh({
           data: {
@@ -189,10 +204,11 @@ function Dashboard() {
       }
     },
     onMutate: () => toast.loading("Scanning live sources…", { id: "ingest" }),
-    onSuccess: ({ inserted, failed }) => {
+    onSuccess: ({ inserted, failed, failedSources }) => {
+      const sourceDetail = failedSources.length > 0 ? ` (${failedSources.join(", ")})` : "";
       const msg =
         failed > 0
-          ? `Found ${inserted} new leads · ${failed} source${failed === 1 ? "" : "s"} failed`
+          ? `Found ${inserted} new leads · ${failed} source${failed === 1 ? "" : "s"} failed${sourceDetail}`
           : `Found ${inserted} new leads`;
       toast.success(msg, { id: "ingest" });
       qc.invalidateQueries({ queryKey: ["leads"] });
@@ -327,8 +343,11 @@ function Dashboard() {
   const filtered = useMemo(
     () =>
       visibleLeads.filter((l) => {
-        if (!showOld && Date.now() - new Date(l.dateDiscovered).getTime() > AGE_FILTER_MS)
-          return false;
+        if (!showOld) {
+          const discoveredTs = new Date(l.dateDiscovered).getTime() || 0;
+          const ingestedTs = l.dateIngested ? new Date(l.dateIngested).getTime() || 0 : 0;
+          if (Date.now() - Math.max(discoveredTs, ingestedTs) > AGE_FILTER_MS) return false;
+        }
         if (!showAllTerritories && filters.states.length === 0) {
           const code = leadStateCode(l);
           if (!code || !TERRITORY_STATES.has(code)) return false;
@@ -365,13 +384,18 @@ function Dashboard() {
     [visibleLeads, filters, showOld, showAllTerritories],
   );
 
-  const discoveredToday = activeLeads.filter((l) => isDiscoveredToday(l.dateDiscovered)).length;
+  const discoveredToday = activeLeads.filter(
+    (l) =>
+      l.confidence >= MIN_HEADLINE_CONFIDENCE &&
+      isDiscoveredToday(l.dateDiscovered, l.dateIngested),
+  ).length;
   const highPriority = activeLeads.filter(leadIsHighPriority).length;
 
   // Honest label for the feed section: only call it "Discovered today" when
   // every shown lead is actually dated today, otherwise describe the real range.
   const feedLabel =
-    filtered.length > 0 && filtered.every((l) => isDiscoveredToday(l.dateDiscovered))
+    filtered.length > 0 &&
+    filtered.every((l) => isDiscoveredToday(l.dateDiscovered, l.dateIngested))
       ? "Discovered today"
       : "Recent leads";
 
@@ -519,7 +543,13 @@ function Dashboard() {
               Last successful refresh: {formatWhen(rs.lastSucceededAt)} · last attempt:{" "}
               {formatWhen(rs.lastAttemptedAt)} · {rs.recordsScanned} scanned · {rs.recordsUpdated}{" "}
               new · {enrichedCountQ.data?.count ?? 0} enriched
-              {rs.sourcesFailed > 0 ? ` · ${rs.sourcesFailed} source(s) failed` : ""}
+              {rs.sourcesFailed > 0
+                ? (() => {
+                    const names = extractFailedSourceNames(rs.errorMessage);
+                    const suffix = names.length > 0 ? ` (${names.join(", ")})` : "";
+                    return ` · ${rs.sourcesFailed} source${rs.sourcesFailed === 1 ? "" : "s"} failed${suffix}`;
+                  })()
+                : ""}
             </div>
           );
         })()}

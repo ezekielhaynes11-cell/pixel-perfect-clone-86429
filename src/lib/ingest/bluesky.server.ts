@@ -1,8 +1,11 @@
-import type { RawLead } from "./types";
+import { z } from "zod";
+import { logWarn } from "../logger.server";
 import { loadKeywords } from "./keywords.server";
+import { isAmbiguousExtraTerm } from "./medical-gate";
+import type { RawLead } from "./types";
 
-// Free Bluesky public search — no auth required.
 const BASE = "https://api.bsky.app/xrpc/app.bsky.feed.searchPosts";
+const REQUEST_TIMEOUT_MS = 15_000;
 
 const BASE_QUERIES = [
   '"POCUS"',
@@ -11,31 +14,53 @@ const BASE_QUERIES = [
   '"point of care ultrasound"',
 ];
 
-interface BskyPost {
-  uri: string;
-  cid: string;
-  author?: { handle?: string; displayName?: string };
-  record?: { text?: string; createdAt?: string };
-  indexedAt?: string;
-}
+const bskyPostSchema = z
+  .object({
+    uri: z.string(),
+    cid: z.string(),
+    author: z
+      .object({
+        handle: z.string().nullish(),
+        displayName: z.string().nullish(),
+      })
+      .nullish(),
+    record: z
+      .object({
+        text: z.string().nullish(),
+        createdAt: z.string().nullish(),
+      })
+      .nullish(),
+    indexedAt: z.string().nullish(),
+  })
+  .passthrough();
 
-interface BskyResponse {
-  posts?: BskyPost[];
-}
+const bskyResponseSchema = z.object({
+  posts: z.array(bskyPostSchema).nullish(),
+});
 
-function uriToWebUrl(uri: string, handle?: string): string {
-  // at://did:plc:xxx/app.bsky.feed.post/abc123 → https://bsky.app/profile/<handle>/post/<rkey>
+function uriToWebUrl(uri: string, handle?: string | null): string {
   const parts = uri.split("/");
   const rkey = parts[parts.length - 1];
   const did = parts[2];
-  return `https://bsky.app/profile/${handle ?? did}/post/${rkey}`;
+  return `https://bsky.app/profile/${handle || did}/post/${rkey}`;
+}
+
+export function buildBlueskySearchQuery(term: string): string | null {
+  const trimmed = term.trim();
+  if (!trimmed || trimmed.length < 3) return null;
+  if (isAmbiguousExtraTerm(trimmed)) {
+    return `"${trimmed}" ultrasound`;
+  }
+  return `"${trimmed}"`;
 }
 
 export async function fetchBluesky(opts: { perQuery?: number } = {}): Promise<RawLead[]> {
   const { perQuery = 15 } = opts;
   const kw = await loadKeywords();
-  // Build vendor/product-specific queries on top of the base ones.
-  const vendorQueries = [...kw.vendors, ...kw.products].slice(0, 8).map((v) => `"${v}"`);
+  const vendorQueries = [...kw.vendors, ...kw.products]
+    .map(buildBlueskySearchQuery)
+    .filter((q): q is string => q !== null)
+    .slice(0, 8);
   const queries = Array.from(new Set([...BASE_QUERIES, ...vendorQueries]));
 
   const seen = new Set<string>();
@@ -44,10 +69,13 @@ export async function fetchBluesky(opts: { perQuery?: number } = {}): Promise<Ra
   for (const q of queries) {
     try {
       const url = `${BASE}?q=${encodeURIComponent(q)}&limit=${perQuery}&sort=latest`;
-      const res = await fetch(url, { headers: { Accept: "application/json" } });
-      if (!res.ok) continue;
-      const json = (await res.json()) as BskyResponse;
-      for (const p of json.posts ?? []) {
+      const response = await fetch(url, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      if (!response.ok) continue;
+      const parsed = bskyResponseSchema.parse(await response.json());
+      for (const p of parsed.posts ?? []) {
         if (seen.has(p.uri)) continue;
         seen.add(p.uri);
         const webUrl = uriToWebUrl(p.uri, p.author?.handle);
@@ -67,11 +95,14 @@ export async function fetchBluesky(opts: { perQuery?: number } = {}): Promise<Ra
             text,
           ].join("\n"),
           date_discovered: created,
-          raw_payload: p as unknown as Record<string, unknown>,
+          raw_payload: p as Record<string, unknown>,
         });
       }
     } catch (e) {
-      console.error(`bluesky q=${q} failed:`, e instanceof Error ? e.message : e);
+      logWarn("ingest.bluesky", "Bluesky query failed", {
+        query: q,
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
   }
   return results;

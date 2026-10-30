@@ -43,6 +43,7 @@ export interface Lead {
   sourceUrl: string;
   confidence: number;
   dateDiscovered: string;
+  dateIngested?: string | null;
   hospital: string | null;
   specialty: string | null;
   territory: string | null;
@@ -67,6 +68,7 @@ export interface LeadRow {
   source_url: string | null;
   confidence: number;
   date_discovered: string;
+  date_ingested?: string | null;
   hospital: string | null;
   specialty: string | null;
   territory: string | null;
@@ -93,6 +95,7 @@ export function rowToLead(r: LeadRow): Lead {
     sourceUrl: r.source_url ?? "#",
     confidence: r.confidence,
     dateDiscovered: r.date_discovered,
+    dateIngested: r.date_ingested ?? null,
     hospital: cleanHospital(r.hospital),
     specialty: r.specialty,
     territory: r.territory,
@@ -150,16 +153,21 @@ export function leadIsHighPriority(l: Lead): boolean {
   return false;
 }
 
-// True when a lead was discovered on the current local calendar day.
-export function isDiscoveredToday(iso: string): boolean {
+function isSameLocalCalendarDay(iso: string | null | undefined, now: Date): boolean {
+  if (!iso) return false;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return false;
-  const now = new Date();
   return (
     d.getFullYear() === now.getFullYear() &&
     d.getMonth() === now.getMonth() &&
     d.getDate() === now.getDate()
   );
+}
+
+// True when a lead's source event date OR ingestion timestamp falls on today's local calendar day.
+export function isDiscoveredToday(dateDiscovered: string, dateIngested?: string | null): boolean {
+  const now = new Date();
+  return isSameLocalCalendarDay(dateDiscovered, now) || isSameLocalCalendarDay(dateIngested, now);
 }
 
 export function leadHospital(l: Lead): string | null {

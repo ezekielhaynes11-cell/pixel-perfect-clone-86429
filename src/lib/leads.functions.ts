@@ -2,6 +2,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { OWNER_ID } from "./owner.server";
+import { logWarn } from "./logger.server";
+import { sanitizeErrorText } from "./ingest/medical-gate";
 import {
   runIngestion,
   runIngestionForSource,
@@ -18,21 +20,47 @@ export const INGESTION_SOURCES = INGESTION_SOURCE_NAMES;
 const LEAD_LIST_COLUMNS =
   "id, source, source_external_id, source_url, title, summary, confidence, priority, hospital, specialty, territory, entities, estimated_value_usd, win_probability, competitor_incumbent, date_discovered, date_ingested, enriched, vendor_mentions, account_type, signal_type, account_id, source_contacts";
 
-// Returns ALL enriched leads (including dismissed ones). Dismissed/saved state is
-// derived on the client from listLeadActions, which lets the "Show dismissed"
-// view actually populate after a refetch. (Previously dismissed leads were
-// filtered out server-side via a NOT-IN over every dismissed UUID — that both
-// broke Restore and risked a URL-length failure once dismissals piled up.)
+const RECENT_INGEST_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const MIN_QUALIFIED_CONFIDENCE = 35;
+
+// Returns ALL top-confidence enriched leads PLUS recently ingested qualified leads
+// so newly discovered opportunities never get crowded out behind older all-time rows.
 export const listLeads = createServerFn({ method: "GET" }).handler(async () => {
-  const { data, error } = await supabaseAdmin
-    .from("leads")
-    .select(LEAD_LIST_COLUMNS)
-    .eq("enriched", true)
-    .order("confidence", { ascending: false })
-    .order("date_discovered", { ascending: false })
-    .limit(500);
-  throwIfError(error);
-  return data ?? [];
+  const recentSince = new Date(Date.now() - RECENT_INGEST_WINDOW_MS).toISOString();
+  const [topRes, recentRes] = await Promise.all([
+    supabaseAdmin
+      .from("leads")
+      .select(LEAD_LIST_COLUMNS)
+      .eq("enriched", true)
+      .order("confidence", { ascending: false })
+      .order("date_discovered", { ascending: false })
+      .limit(500),
+    supabaseAdmin
+      .from("leads")
+      .select(LEAD_LIST_COLUMNS)
+      .eq("enriched", true)
+      .gte("date_ingested", recentSince)
+      .gte("confidence", MIN_QUALIFIED_CONFIDENCE)
+      .order("date_ingested", { ascending: false })
+      .limit(200),
+  ]);
+  throwIfError(topRes.error);
+  throwIfError(recentRes.error);
+
+  const byId = new Map<string, NonNullable<typeof topRes.data>[number]>();
+  for (const row of topRes.data ?? []) {
+    byId.set(row.id, row);
+  }
+  for (const row of recentRes.data ?? []) {
+    if (!byId.has(row.id)) {
+      byId.set(row.id, row);
+    }
+  }
+
+  return Array.from(byId.values()).sort((a, b) => {
+    if (b.confidence !== a.confidence) return b.confidence - a.confidence;
+    return new Date(b.date_discovered).getTime() - new Date(a.date_discovered).getTime();
+  });
 });
 
 export const triggerIngestion = createServerFn({ method: "POST" }).handler(async () => {
@@ -445,11 +473,16 @@ export const getPipelineForecast = createServerFn({ method: "GET" }).handler(asy
 export const getRecentIngestionRuns = createServerFn({ method: "GET" }).handler(async () => {
   const { data, error } = await supabaseAdmin
     .from("ingestion_runs")
-    .select("source, started_at, finished_at, status, fetched_count, new_count, enriched_count")
+    .select(
+      "source, started_at, finished_at, status, fetched_count, new_count, enriched_count, error",
+    )
     .order("started_at", { ascending: false })
     .limit(12);
   if (error) throw new Error(error.message);
-  return data ?? [];
+  return (data ?? []).map((row) => ({
+    ...row,
+    error: row.error ? sanitizeErrorText(row.error, 240) : null,
+  }));
 });
 
 /* -------------------- Physician contacts -------------------- */
@@ -681,12 +714,12 @@ async function runContactWaterfall(leadId: string): Promise<ContactEnrichmentRow
   // Step 5: Apollo fallback (server-side client reads APOLLO_API_KEY from env)
   try {
     const { apolloPeopleSearch } = await import("./apollo/client.server");
-    const res = await apolloPeopleSearch({
+    const searchResult = await apolloPeopleSearch({
       organization_name: org,
       person_titles: DECISION_MAKER_TITLES,
       per_page: 10,
     });
-    const person = (res.people ?? [])[0];
+    const person = (searchResult.people ?? [])[0];
     if (!person) {
       return writeAndReturn({
         lead_id: leadId,
@@ -714,12 +747,10 @@ async function runContactWaterfall(leadId: string): Promise<ContactEnrichmentRow
       linkedin_url: person.linkedin_url ?? null,
     });
   } catch (e) {
-    console.error(
-      "[runContactWaterfall]",
+    logWarn("contacts.waterfall", "Apollo contact waterfall failed", {
       leadId,
-      "apollo failed:",
-      e instanceof Error ? e.message : e,
-    );
+      error: e instanceof Error ? e.message : String(e),
+    });
     return writeAndReturn({
       lead_id: leadId,
       status: "none",
@@ -772,7 +803,10 @@ export const batchEnrichContacts = createServerFn({ method: "POST" })
         if (result.status === "found") enriched++;
       } catch (e) {
         errors++;
-        console.error("[batchEnrichContacts]", lead.id, e instanceof Error ? e.message : e);
+        logWarn("contacts.batch", "Batch contact enrichment failed for lead", {
+          leadId: lead.id,
+          error: e instanceof Error ? e.message : String(e),
+        });
       }
     }
     return { enriched, errors, total: toProcess.length };

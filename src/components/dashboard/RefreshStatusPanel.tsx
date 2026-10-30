@@ -30,6 +30,7 @@ export interface RunRow {
   fetched_count: number | null;
   new_count: number | null;
   enriched_count?: number | null;
+  error?: string | null;
 }
 
 export function RefreshStatusPanel({
@@ -113,6 +114,10 @@ export function RefreshStatusPanel({
         <div className="mt-3 rounded-sm border border-destructive/40 bg-destructive/10 p-2 text-[11px] text-destructive">
           {status.errorMessage}
         </div>
+      ) : status && status.sourcesFailed > 0 && status.errorMessage ? (
+        <div className="mt-3 rounded-sm border border-warning/40 bg-warning/10 p-2 text-[11px] text-warning">
+          {status.errorMessage}
+        </div>
       ) : null}
 
       <div className="mt-3 flex items-center gap-2">
@@ -176,24 +181,29 @@ export function RefreshStatusPanel({
                   {runs.map((r, i) => (
                     <li
                       key={`${r.source}-${r.started_at}-${i}`}
-                      className="flex items-center gap-2 rounded-sm bg-surface-2 px-2 py-1"
+                      className="rounded-sm bg-surface-2 px-2 py-1"
                     >
-                      <span
-                        className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                          r.status === "error"
-                            ? "bg-destructive"
-                            : r.status === "running"
-                              ? "bg-primary"
-                              : "bg-success"
-                        }`}
-                      />
-                      <span className="font-medium">{r.source}</span>
-                      <span className="text-muted-foreground">
-                        {r.fetched_count ?? 0} fetched · {r.new_count ?? 0} new
-                      </span>
-                      <span className="ml-auto text-muted-foreground">
-                        {formatWhen(r.started_at)}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                            r.status === "error"
+                              ? "bg-destructive"
+                              : r.status === "running"
+                                ? "bg-primary"
+                                : "bg-success"
+                          }`}
+                        />
+                        <span className="font-medium">{r.source}</span>
+                        <span className="text-muted-foreground">
+                          {r.fetched_count ?? 0} fetched · {r.new_count ?? 0} new
+                        </span>
+                        <span className="ml-auto text-muted-foreground">
+                          {formatWhen(r.started_at)}
+                        </span>
+                      </div>
+                      {r.status === "error" && r.error ? (
+                        <div className="mt-1 pl-3.5 text-[11px] text-destructive/90">{r.error}</div>
+                      ) : null}
                     </li>
                   ))}
                 </ul>

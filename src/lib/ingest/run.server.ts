@@ -1,5 +1,5 @@
 import { isUniqueViolation } from "../supabase-errors";
-import { logInfo } from "../logger.server";
+import { logError, logInfo, logWarn } from "../logger.server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { fetchGdelt } from "./gdelt.server";
 import { fetchOpenFda } from "./openfda.server";
@@ -10,6 +10,7 @@ import { fetchReddit } from "./reddit.server";
 import { fetchBluesky } from "./bluesky.server";
 import { fetchFundingRss } from "./funding-rss.server";
 import { enrichRawLead } from "./enrich.server";
+import { passesMedicalGate, sanitizeErrorText } from "./medical-gate";
 import { attachPhysiciansToLead, type PhysicianLookupInput } from "./nppes.server";
 import { backfillApolloForLinkedPhysicians } from "@/lib/apollo/service.server";
 import { STATE_NAME_TO_CODE as STATE_TO_CODE, territoryMatchesStates } from "@/lib/territory";
@@ -59,7 +60,7 @@ function buildSources(): SourceSpec[] {
     {
       name: "sam_gov",
       sourceFilter: ["sam_gov"],
-      fn: () => (samKey ? fetchSamGov({ apiKey: samKey }) : Promise.resolve([])),
+      fn: () => fetchSamGov({ apiKey: samKey }),
     },
     { name: "openfda", sourceFilter: ["openfda"], fn: () => fetchOpenFda({}) },
     {
@@ -82,7 +83,10 @@ function buildSources(): SourceSpec[] {
             const rows = await fetchCmsOpenPayments({ territoryState: s });
             all.push(...rows);
           } catch (e) {
-            console.error(`cms_open_payments ${s} failed:`, e instanceof Error ? e.message : e);
+            logWarn("ingest.cms_open_payments", "CMS Open Payments state fetch failed", {
+              state: s,
+              error: e instanceof Error ? e.message : String(e),
+            });
           }
         }
         return all;
@@ -139,8 +143,9 @@ async function runOneSource(
       enrichedIds,
     };
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.error(`Ingestion failed for ${src.name}:`, msg);
+    const rawMsg = e instanceof Error ? e.message : String(e);
+    const msg = sanitizeErrorText(rawMsg);
+    logError("ingest", "Ingestion failed for source", { source: src.name, error: msg });
     if (runId) {
       await supabaseAdmin
         .from("ingestion_runs")
@@ -169,13 +174,19 @@ export async function runIngestionForSource(
     try {
       await evaluateAlerts(enrichedIds, forUserId);
     } catch (e) {
-      console.error("alerts evaluation failed:", e);
+      logWarn("ingest", "Alerts evaluation failed", {
+        source: name,
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
   }
   try {
     await backfillApolloForLinkedPhysicians({ limit: 25 });
   } catch (e) {
-    console.error("apollo backfill failed:", e);
+    logWarn("ingest", "Apollo backfill failed", {
+      source: name,
+      error: e instanceof Error ? e.message : String(e),
+    });
   }
   return summary;
 }
@@ -193,71 +204,19 @@ export async function runIngestion(forUserId?: string): Promise<IngestionSummary
     try {
       await evaluateAlerts(newlyEnrichedIds, forUserId);
     } catch (e) {
-      console.error("alerts evaluation failed:", e);
+      logWarn("ingest", "Alerts evaluation failed", {
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
   }
   try {
     await backfillApolloForLinkedPhysicians({ limit: 50 });
   } catch (e) {
-    console.error("apollo backfill failed:", e);
+    logWarn("ingest", "Apollo backfill failed", {
+      error: e instanceof Error ? e.message : String(e),
+    });
   }
   return summaries;
-}
-
-// Sources that are domain-pure (medical/healthcare by construction) bypass the gate.
-const GATE_BYPASS_SOURCES = new Set<string>(["openfda", "clinicaltrials", "cms_open_payments"]);
-
-// Hard pre-enrichment gate: only let through items with explicit
-// medical / healthcare / hospital terminology. Prevents pop-culture and
-// general-news noise (esp. from GDELT/Reddit/Bluesky/SAM.gov) from being
-// inserted into leads or sent to the LLM for enrichment.
-const MEDICAL_GATE_TERMS = [
-  "ultrasound",
-  "pocus",
-  "echocard",
-  "sonograph",
-  "doppler",
-  "cath lab",
-  "catheterization",
-  "radiolog",
-  "cardiolog",
-  "oncolog",
-  "emergency medicine",
-  "anesthesi",
-  "surgical",
-  "surgery",
-  "hospital",
-  "health system",
-  "healthcare",
-  "health care",
-  "medical center",
-  "clinic",
-  "physician",
-  "nurse",
-  "patient",
-  "va medical",
-  "va healthcare",
-  "veterans health",
-  "imaging",
-  "mri",
-  "ct scan",
-  "x-ray",
-  "biomed",
-  "medtech",
-  "medical device",
-  "fda",
-  "clinical trial",
-  "icu",
-  "ed ",
-  "ehr",
-  "emr",
-];
-
-function passesMedicalGate(r: RawLead, extraTerms: string[]): boolean {
-  if (GATE_BYPASS_SOURCES.has(r.source)) return true;
-  const hay = `${r.title} ${r.raw_text} ${r.source_url ?? ""}`.toLowerCase();
-  if (MEDICAL_GATE_TERMS.some((t) => hay.includes(t))) return true;
-  return extraTerms.some((t) => t && hay.includes(t.toLowerCase()));
 }
 
 async function persistRaws(raws: RawLead[]): Promise<number> {
@@ -269,10 +228,9 @@ async function persistRaws(raws: RawLead[]): Promise<number> {
     const kw = await loadKeywords();
     extraTerms = kw.all;
   } catch (e) {
-    console.error(
-      "medical gate: keyword load failed, using built-in terms only:",
-      e instanceof Error ? e.message : e,
-    );
+    logWarn("ingest", "Keyword load failed for medical gate; using built-in clinical terms", {
+      error: e instanceof Error ? e.message : String(e),
+    });
   }
 
   let inserted = 0;
@@ -295,7 +253,12 @@ async function persistRaws(raws: RawLead[]): Promise<number> {
       enriched: false,
     });
     if (!error) inserted++;
-    else if (!isUniqueViolation(error)) console.error("insert lead:", error.message);
+    else if (!isUniqueViolation(error)) {
+      logWarn("ingest", "Failed to insert raw lead", {
+        source: r.source,
+        error: error.message,
+      });
+    }
   }
   if (gated > 0) {
     logInfo("ingest", "Medical gate filtered non-medical items", {
@@ -314,6 +277,7 @@ async function enrichPending(source: string): Promise<string[]> {
     )
     .eq("source", source)
     .eq("enriched", false)
+    .order("date_ingested", { ascending: false })
     .order("date_discovered", { ascending: false })
     .limit(20);
   if (!pending || pending.length === 0) return [];
@@ -417,10 +381,16 @@ async function enrichPending(source: string): Promise<string[]> {
         }
         if (refs.length > 0) await attachPhysiciansToLead(row.id, refs);
       } catch (e) {
-        console.error("physician enrichment failed:", e instanceof Error ? e.message : e);
+        logWarn("ingest", "Physician enrichment failed", {
+          leadId: row.id,
+          error: e instanceof Error ? e.message : String(e),
+        });
       }
     } catch (e) {
-      console.error("enrich failed:", e instanceof Error ? e.message : e);
+      logWarn("ingest", "Lead enrichment failed", {
+        leadId: row.id,
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
   }
   return ids;

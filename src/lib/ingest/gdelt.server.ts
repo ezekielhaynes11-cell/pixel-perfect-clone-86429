@@ -1,7 +1,9 @@
+import { z } from "zod";
+import { logWarn } from "../logger.server";
 import type { RawLead, LeadSource } from "./types";
 
-// GDELT 2.1 DOC API — free, no key.
 const BASE = "https://api.gdeltproject.org/api/v2/doc/doc";
+const REQUEST_TIMEOUT_MS = 12_000;
 
 const QUERIES: Array<{ source: LeadSource; query: string }> = [
   {
@@ -29,6 +31,21 @@ const QUERIES: Array<{ source: LeadSource; query: string }> = [
   },
 ];
 
+const gdeltArticleSchema = z
+  .object({
+    url: z.string(),
+    title: z.string().nullish(),
+    domain: z.string().nullish(),
+    sourcecountry: z.string().nullish(),
+    language: z.string().nullish(),
+    seendate: z.string().nullish(),
+  })
+  .passthrough();
+
+const gdeltResponseSchema = z.object({
+  articles: z.array(gdeltArticleSchema).nullish(),
+});
+
 export async function fetchGdelt(
   opts: { hoursBack?: number; limit?: number } = {},
 ): Promise<RawLead[]> {
@@ -44,16 +61,15 @@ export async function fetchGdelt(
         timespan: `${hoursBack}h`,
         sort: "DateDesc",
       });
-      const res = await fetch(`${BASE}?${params}`);
-      if (!res.ok) continue;
-      const text = await res.text();
-      let json: { articles?: GdeltArticle[] } = {};
-      try {
-        json = JSON.parse(text);
-      } catch {
-        continue;
-      }
-      const rows = json.articles ?? [];
+      const response = await fetch(`${BASE}?${params}`, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      if (!response.ok) continue;
+      const text = await response.text();
+      if (!text.trim().startsWith("{")) continue;
+      const parsed = gdeltResponseSchema.parse(JSON.parse(text));
+      const rows = parsed.articles ?? [];
       for (const a of rows) {
         all.push({
           source,
@@ -61,35 +77,29 @@ export async function fetchGdelt(
           source_url: a.url,
           title: (a.title ?? "Untitled article").slice(0, 280),
           raw_text: [
-            `Title: ${a.title}`,
-            `Domain: ${a.domain}`,
-            `Country: ${a.sourcecountry}`,
-            `Language: ${a.language}`,
-            `Published: ${a.seendate}`,
+            `Title: ${a.title ?? ""}`,
+            `Domain: ${a.domain ?? ""}`,
+            `Country: ${a.sourcecountry ?? ""}`,
+            `Language: ${a.language ?? ""}`,
+            `Published: ${a.seendate ?? ""}`,
             `Query slice: ${source}`,
             `URL: ${a.url}`,
           ].join("\n"),
           date_discovered: parseGdeltDate(a.seendate) ?? new Date().toISOString(),
-          raw_payload: a as unknown as Record<string, unknown>,
+          raw_payload: a as Record<string, unknown>,
         });
       }
     } catch (e) {
-      console.error(`gdelt ${source} failed:`, e instanceof Error ? e.message : e);
+      logWarn("ingest.gdelt", "GDELT slice request failed", {
+        source,
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
   }
   return all;
 }
 
-function parseGdeltDate(s?: string): string | null {
+function parseGdeltDate(s?: string | null): string | null {
   if (!s || s.length < 15) return null;
   return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}T${s.slice(9, 11)}:${s.slice(11, 13)}:${s.slice(13, 15)}Z`;
-}
-
-interface GdeltArticle {
-  url: string;
-  title?: string;
-  domain?: string;
-  sourcecountry?: string;
-  language?: string;
-  seendate?: string;
 }

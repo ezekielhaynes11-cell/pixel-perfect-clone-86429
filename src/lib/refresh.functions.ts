@@ -6,6 +6,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { sanitizeErrorText } from "./ingest/medical-gate";
 import { throwIfError } from "./supabase-errors";
 
 const ROW_ID = "global";
@@ -31,14 +32,9 @@ export interface RefreshStatus {
   serverTime: string;
 }
 
-// Never leak keys/URLs/tokens from upstream error strings into the UI.
+// Never leak HTML markup, keys, URLs, or tokens from upstream error strings into the UI.
 function safeMessage(raw: string): string {
-  return raw
-    .replace(/(api[_-]?key|token|secret|password)\s*[=:]\s*\S+/gi, "$1=***")
-    .replace(/https?:\/\/\S+/gi, "[url]")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 300);
+  return sanitizeErrorText(raw, 300);
 }
 
 function toStatus(row: {
@@ -62,7 +58,7 @@ function toStatus(row: {
     recordsUpdated: row.records_updated ?? 0,
     sourcesOk: row.sources_ok ?? 0,
     sourcesFailed: row.sources_failed ?? 0,
-    errorMessage: row.error_message,
+    errorMessage: row.error_message ? safeMessage(row.error_message) : null,
     isLive: succeeded > 0 && Date.now() - succeeded < LIVE_WINDOW_MS,
     serverTime: new Date().toISOString(),
   };
