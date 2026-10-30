@@ -1,4 +1,3 @@
-import { requireRep } from "./rep-auth";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
@@ -38,7 +37,7 @@ export const listAccountBriefs = createServerFn({ method: "POST" })
     return (rows ?? []) as unknown as AccountBriefRow[];
   });
 
-export const researchAccount = createServerFn({ method: "POST" }).middleware([requireRep])
+export const researchAccount = createServerFn({ method: "POST" })
   .inputValidator((input) => z.object({ account_id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => {
     const result = await runAccountResearch(data.account_id);
