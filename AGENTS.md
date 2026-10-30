@@ -1,4 +1,5 @@
+# Project guidance
 
-- Every app server function uses `.middleware([requireRep])` (src/lib/rep-auth.ts: signed in + rep/admin role); only `/api/public/*` cron routes skip it and verify `CRON_SECRET`. Why: server functions are public RPC endpoints.
-- Dashboard pages live under `src/routes/_authenticated/` (client-only gate to `/auth`). Why: session is in localStorage.
-- Server-side fetches of user-supplied URLs must go through `assertSafePublicUrl` + `readCapped` (src/lib/safe-url.ts). Why: SSRF and memory limits.
+- Dashboard routes and server functions operate in zero-login single-user mode (`OWNER_ID`). The `_authenticated` directory is a route group and must never force visitors to sign in; `/auth` redirects directly to `/`.
+- All dashboard features — shared lead/contact data, lead notes and status actions, keyword management, page scraping, AI research/drafting, Copilot, manual intelligence refresh, Apollo enrichment/prospecting, HubSpot CRM push, and Gmail outreach — run without operator sign-in.
+- Keep scheduled `/api/public/*` webhook endpoints protected by `CRON_SECRET`. Keep Apollo quota checks fail-closed (`tryConsumeApolloCall`) and all user-supplied URL fetches behind `assertSafePublicUrl` and `readCapped` (`src/lib/safe-url.ts`).

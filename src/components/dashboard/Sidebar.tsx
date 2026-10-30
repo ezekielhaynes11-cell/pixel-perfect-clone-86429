@@ -34,8 +34,7 @@ export function Sidebar({ leads }: { leads: Lead[] }) {
     Array.from({ length: 7 }, () => ({ label: "", count: 0 })),
   );
   useEffect(() => {
-    const startOfDay = (d: Date) =>
-      new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
     const todayStart = startOfDay(new Date());
     setTrend(
       Array.from({ length: 7 }, (_, i) => {

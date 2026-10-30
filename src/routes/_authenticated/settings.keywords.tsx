@@ -79,7 +79,9 @@ function KeywordsPage() {
       qc.invalidateQueries({ queryKey: ["physician_contacts_unenriched_count"] });
       qc.invalidateQueries({ queryKey: ["lead_physicians"] });
       qc.invalidateQueries({ queryKey: ["account_physicians"] });
-      toast.success(`Attempted ${r.attempted} · Matched ${r.matched} · ${r.errors} errors${r.remaining ? ` · ${r.remaining} left — run again to continue` : ""}`);
+      toast.success(
+        `Attempted ${r.attempted} · Matched ${r.matched} · ${r.errors} errors${r.remaining ? ` · ${r.remaining} left — run again to continue` : ""}`,
+      );
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -265,9 +267,7 @@ function KeywordsPage() {
             min={1}
             max={20}
             value={enrichLimit}
-            onChange={(e) =>
-              setEnrichLimit(Math.max(1, Math.min(20, Number(e.target.value) || 1)))
-            }
+            onChange={(e) => setEnrichLimit(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
             className="h-9 w-24 rounded-md border border-border bg-surface-3 px-3 text-sm"
           />
           <button

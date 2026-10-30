@@ -82,7 +82,8 @@ export async function scrapeUrlForAccount(args: {
       Accept: "text/html,application/xhtml+xml",
     },
   });
-  if (res.status >= 300 && res.status < 400) throw new Error("Redirects are not followed; paste the final page URL");
+  if (res.status >= 300 && res.status < 400)
+    throw new Error("Redirects are not followed; paste the final page URL");
   if (!res.ok) throw new Error(`fetch ${safe.hostname}: ${res.status}`);
   const html = await readCapped(res);
   const { text, title } = stripHtml(html);

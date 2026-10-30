@@ -34,14 +34,7 @@ export interface RawLead {
 }
 
 export type SignalType =
-  | "recall"
-  | "rfp"
-  | "funding"
-  | "expansion"
-  | "sentiment"
-  | "m_and_a"
-  | "incumbency"
-  | "other";
+  "recall" | "rfp" | "funding" | "expansion" | "sentiment" | "m_and_a" | "incumbency" | "other";
 
 export type AccountType = "va" | "non_va" | "unknown";
 

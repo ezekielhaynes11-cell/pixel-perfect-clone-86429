@@ -31,21 +31,27 @@ export function assertSafePublicUrl(raw: string): URL {
     throw new Error("Only http(s) URLs are allowed");
   }
   if (u.username || u.password) throw new Error("URLs with credentials are not allowed");
-  if (u.port && u.port !== "80" && u.port !== "443") throw new Error("Non-standard ports are not allowed");
+  if (u.port && u.port !== "80" && u.port !== "443")
+    throw new Error("Non-standard ports are not allowed");
   const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (
     host === "localhost" ||
     host.endsWith(".localhost") ||
     host.endsWith(".local") ||
     host.endsWith(".internal") ||
-    !host.includes(".") && !host.includes(":")
+    (!host.includes(".") && !host.includes(":"))
   ) {
     throw new Error("Internal hosts are not allowed");
   }
   if (isPrivateIPv4(host)) throw new Error("Private IP addresses are not allowed");
   if (host.includes(":")) {
     // Any IPv6 literal: block loopback, link-local, unique-local, mapped v4.
-    if (host === "::1" || host === "::" || /^(fe8|fe9|fea|feb|fc|fd)/.test(host) || host.startsWith("::ffff:")) {
+    if (
+      host === "::1" ||
+      host === "::" ||
+      /^(fe8|fe9|fea|feb|fc|fd)/.test(host) ||
+      host.startsWith("::ffff:")
+    ) {
       throw new Error("Private IP addresses are not allowed");
     }
   }

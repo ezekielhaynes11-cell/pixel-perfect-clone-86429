@@ -37,8 +37,16 @@ function PipelinePage() {
       <main className="mx-auto max-w-[1400px] space-y-6 px-6 py-6">
         {q.isError ? (
           <div className="rounded-md border border-destructive/40 bg-destructive/5 p-8 text-center text-sm">
-            <p className="text-destructive">Couldn't load the forecast: {q.error instanceof Error ? q.error.message : "unknown error"}</p>
-            <button onClick={() => q.refetch()} className="mt-3 h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">Retry</button>
+            <p className="text-destructive">
+              Couldn't load the forecast:{" "}
+              {q.error instanceof Error ? q.error.message : "unknown error"}
+            </p>
+            <button
+              onClick={() => q.refetch()}
+              className="mt-3 h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground"
+            >
+              Retry
+            </button>
           </div>
         ) : q.isLoading || !d ? (
           <div className="rounded-md border border-dashed border-border p-12 text-center text-sm text-muted-foreground">

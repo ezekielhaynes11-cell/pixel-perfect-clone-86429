@@ -1,4 +1,5 @@
 import { isUniqueViolation } from "../supabase-errors";
+import { logInfo } from "../logger.server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { fetchGdelt } from "./gdelt.server";
 import { fetchOpenFda } from "./openfda.server";
@@ -296,8 +297,12 @@ async function persistRaws(raws: RawLead[]): Promise<number> {
     if (!error) inserted++;
     else if (!isUniqueViolation(error)) console.error("insert lead:", error.message);
   }
-  if (gated > 0)
-    console.log(`[ingest] medical gate dropped ${gated}/${raws.length} non-medical items`);
+  if (gated > 0) {
+    logInfo("ingest", "Medical gate filtered non-medical items", {
+      dropped: gated,
+      total: raws.length,
+    });
+  }
   return inserted;
 }
 

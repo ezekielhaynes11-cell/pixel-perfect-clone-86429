@@ -3,9 +3,8 @@
 // Apollo request is metered centrally in client.server.ts#call(), so this is the
 // single source of truth for the cap — no matter which isolate serves it.
 //
-// Failure policy: if the DB round-trip errors, we FAIL OPEN (allow the call) so a
-// transient database hiccup never takes down enrichment; the cap is best-effort
-// overspend protection, not a hard billing gate.
+// Fail closed when usage cannot be recorded. Public enrichment must never bypass
+// the durable daily spending cap during a database outage.
 
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
@@ -21,8 +20,7 @@ function todayKey(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-// Atomically consume one call against today's cap. Returns false only when the
-// cap has been definitively reached; returns true on success OR on DB error.
+// Atomically consume one call. Only an explicit successful reservation allows spend.
 export async function tryConsumeApolloCall(): Promise<boolean> {
   const cap = currentCap();
   try {
@@ -31,16 +29,16 @@ export async function tryConsumeApolloCall(): Promise<boolean> {
       { p_cap: cap } as never,
     );
     if (error) {
-      console.error("[apollo quota] consume_apollo_call failed, failing open:", error.message);
-      return true;
+      console.error("[apollo quota] consume_apollo_call failed, blocking request:", error.message);
+      return false;
     }
     return data === true;
   } catch (e) {
     console.error(
-      "[apollo quota] consume_apollo_call threw, failing open:",
+      "[apollo quota] consume_apollo_call threw, blocking request:",
       e instanceof Error ? e.message : e,
     );
-    return true;
+    return false;
   }
 }
 

@@ -6,13 +6,7 @@
 import type { LeadSource } from "@/data/leads";
 
 export type SignalType =
-  | "recall"
-  | "rfp"
-  | "funding"
-  | "m_and_a"
-  | "expansion"
-  | "sentiment"
-  | "incumbency";
+  "recall" | "rfp" | "funding" | "m_and_a" | "expansion" | "sentiment" | "incumbency";
 
 export type AccountType = "va" | "non_va";
 

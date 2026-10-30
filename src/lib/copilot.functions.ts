@@ -1,5 +1,4 @@
 import { createServerFn } from "@tanstack/react-start";
-import { requireRep } from "./rep-auth";
 import { z } from "zod";
 import { COPILOT_TOOLS, runCopilotTool } from "./copilot-tools.server";
 
@@ -37,7 +36,7 @@ const MessageSchema = z.object({
   content: z.string().min(1).max(8000),
 });
 
-export const copilotChat = createServerFn({ method: "POST" }).middleware([requireRep])
+export const copilotChat = createServerFn({ method: "POST" })
   .inputValidator((input) =>
     z.object({ messages: z.array(MessageSchema).min(1).max(40) }).parse(input),
   )

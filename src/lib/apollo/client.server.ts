@@ -11,7 +11,9 @@ const TIMEOUT_MS = 30_000;
 // hammering the metered endpoint.
 export class ApolloCapError extends Error {
   constructor() {
-    super("Apollo daily cap reached — resets at midnight UTC.");
+    super(
+      "Apollo request blocked: daily cap reached or usage could not be verified. Try again later.",
+    );
     this.name = "ApolloCapError";
   }
 }

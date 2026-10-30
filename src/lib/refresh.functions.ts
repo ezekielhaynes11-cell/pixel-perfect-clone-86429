@@ -4,7 +4,6 @@
 // (triggerIngestionForSource → runIngestionForSource). These functions only
 // own the *state machine* around it so the UI never fabricates a sync.
 import { createServerFn } from "@tanstack/react-start";
-import { requireRep } from "./rep-auth";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { throwIfError } from "./supabase-errors";
@@ -72,7 +71,7 @@ function toStatus(row: {
 const SELECT_COLS =
   "status, trigger, last_attempted_at, last_succeeded_at, records_scanned, records_updated, sources_ok, sources_failed, error_message, updated_at";
 
-export const getRefreshStatus = createServerFn({ method: "GET" }).middleware([requireRep]).handler(async () => {
+export const getRefreshStatus = createServerFn({ method: "GET" }).handler(async () => {
   const { data, error } = await supabaseAdmin
     .from("refresh_state")
     .select(SELECT_COLS)
@@ -115,7 +114,7 @@ export const getRefreshStatus = createServerFn({ method: "GET" }).middleware([re
 });
 
 /** Claim the refresh lock. Throws if another run is already in flight. */
-export const beginRefresh = createServerFn({ method: "POST" }).middleware([requireRep])
+export const beginRefresh = createServerFn({ method: "POST" })
   .inputValidator((input) =>
     z
       .object({ trigger: z.enum(["manual", "auto"]).default("manual") })
@@ -131,11 +130,7 @@ export const beginRefresh = createServerFn({ method: "POST" }).middleware([requi
       .eq("id", ROW_ID)
       .maybeSingle();
 
-    if (
-      current?.status === "running" &&
-      current.updated_at &&
-      current.updated_at > staleBefore
-    ) {
+    if (current?.status === "running" && current.updated_at && current.updated_at > staleBefore) {
       throw new Error("A refresh is already running. Please wait for it to finish.");
     }
 
@@ -161,7 +156,7 @@ export const beginRefresh = createServerFn({ method: "POST" }).middleware([requi
   });
 
 /** Record the outcome of a refresh run. */
-export const completeRefresh = createServerFn({ method: "POST" }).middleware([requireRep])
+export const completeRefresh = createServerFn({ method: "POST" })
   .inputValidator((input) =>
     z
       .object({
