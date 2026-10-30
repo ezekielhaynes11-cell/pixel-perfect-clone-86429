@@ -9,31 +9,21 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as PipelineRouteImport } from './routes/pipeline'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as SettingsKeywordsRouteImport } from './routes/settings.keywords'
-import { Route as AccountsIdRouteImport } from './routes/accounts.$id'
+import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
+import { Route as AuthenticatedPipelineRouteImport } from './routes/_authenticated/pipeline'
 import { Route as ApiPublicIngestRouteImport } from './routes/api/public/ingest'
 import { Route as ApiPublicApolloSyncAccountsRouteImport } from './routes/api/public/apollo-sync-accounts'
+import { Route as AuthenticatedSettingsKeywordsRouteImport } from './routes/_authenticated/settings.keywords'
+import { Route as AuthenticatedAccountsIdRouteImport } from './routes/_authenticated/accounts.$id'
 
-const PipelineRoute = PipelineRouteImport.update({
-  id: '/pipeline',
-  path: '/pipeline',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
+const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
+  id: '/_authenticated/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const SettingsKeywordsRoute = SettingsKeywordsRouteImport.update({
-  id: '/settings/keywords',
-  path: '/settings/keywords',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AccountsIdRoute = AccountsIdRouteImport.update({
-  id: '/accounts/$id',
-  path: '/accounts/$id',
+const AuthenticatedPipelineRoute = AuthenticatedPipelineRouteImport.update({
+  id: '/_authenticated/pipeline',
+  path: '/pipeline',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiPublicIngestRoute = ApiPublicIngestRouteImport.update({
@@ -47,96 +37,93 @@ const ApiPublicApolloSyncAccountsRoute =
     path: '/api/public/apollo-sync-accounts',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AuthenticatedSettingsKeywordsRoute =
+  AuthenticatedSettingsKeywordsRouteImport.update({
+    id: '/_authenticated/settings/keywords',
+    path: '/settings/keywords',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AuthenticatedAccountsIdRoute = AuthenticatedAccountsIdRouteImport.update({
+  id: '/_authenticated/accounts/$id',
+  path: '/accounts/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/pipeline': typeof PipelineRoute
-  '/accounts/$id': typeof AccountsIdRoute
-  '/settings/keywords': typeof SettingsKeywordsRoute
+  '/pipeline': typeof AuthenticatedPipelineRoute
+  '/': typeof AuthenticatedIndexRoute
+  '/accounts/$id': typeof AuthenticatedAccountsIdRoute
+  '/settings/keywords': typeof AuthenticatedSettingsKeywordsRoute
   '/api/public/apollo-sync-accounts': typeof ApiPublicApolloSyncAccountsRoute
   '/api/public/ingest': typeof ApiPublicIngestRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/pipeline': typeof PipelineRoute
-  '/accounts/$id': typeof AccountsIdRoute
-  '/settings/keywords': typeof SettingsKeywordsRoute
+  '/pipeline': typeof AuthenticatedPipelineRoute
+  '/': typeof AuthenticatedIndexRoute
+  '/accounts/$id': typeof AuthenticatedAccountsIdRoute
+  '/settings/keywords': typeof AuthenticatedSettingsKeywordsRoute
   '/api/public/apollo-sync-accounts': typeof ApiPublicApolloSyncAccountsRoute
   '/api/public/ingest': typeof ApiPublicIngestRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/pipeline': typeof PipelineRoute
-  '/accounts/$id': typeof AccountsIdRoute
-  '/settings/keywords': typeof SettingsKeywordsRoute
+  '/_authenticated/pipeline': typeof AuthenticatedPipelineRoute
+  '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/accounts/$id': typeof AuthenticatedAccountsIdRoute
+  '/_authenticated/settings/keywords': typeof AuthenticatedSettingsKeywordsRoute
   '/api/public/apollo-sync-accounts': typeof ApiPublicApolloSyncAccountsRoute
   '/api/public/ingest': typeof ApiPublicIngestRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    | '/'
     | '/pipeline'
+    | '/'
     | '/accounts/$id'
     | '/settings/keywords'
     | '/api/public/apollo-sync-accounts'
     | '/api/public/ingest'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/'
     | '/pipeline'
+    | '/'
     | '/accounts/$id'
     | '/settings/keywords'
     | '/api/public/apollo-sync-accounts'
     | '/api/public/ingest'
   id:
     | '__root__'
-    | '/'
-    | '/pipeline'
-    | '/accounts/$id'
-    | '/settings/keywords'
+    | '/_authenticated/pipeline'
+    | '/_authenticated/'
+    | '/_authenticated/accounts/$id'
+    | '/_authenticated/settings/keywords'
     | '/api/public/apollo-sync-accounts'
     | '/api/public/ingest'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  PipelineRoute: typeof PipelineRoute
-  AccountsIdRoute: typeof AccountsIdRoute
-  SettingsKeywordsRoute: typeof SettingsKeywordsRoute
+  AuthenticatedPipelineRoute: typeof AuthenticatedPipelineRoute
+  AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
+  AuthenticatedAccountsIdRoute: typeof AuthenticatedAccountsIdRoute
+  AuthenticatedSettingsKeywordsRoute: typeof AuthenticatedSettingsKeywordsRoute
   ApiPublicApolloSyncAccountsRoute: typeof ApiPublicApolloSyncAccountsRoute
   ApiPublicIngestRoute: typeof ApiPublicIngestRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/pipeline': {
-      id: '/pipeline'
-      path: '/pipeline'
-      fullPath: '/pipeline'
-      preLoaderRoute: typeof PipelineRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/': {
-      id: '/'
+    '/_authenticated/': {
+      id: '/_authenticated/'
       path: '/'
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+      preLoaderRoute: typeof AuthenticatedIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/settings/keywords': {
-      id: '/settings/keywords'
-      path: '/settings/keywords'
-      fullPath: '/settings/keywords'
-      preLoaderRoute: typeof SettingsKeywordsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/accounts/$id': {
-      id: '/accounts/$id'
-      path: '/accounts/$id'
-      fullPath: '/accounts/$id'
-      preLoaderRoute: typeof AccountsIdRouteImport
+    '/_authenticated/pipeline': {
+      id: '/_authenticated/pipeline'
+      path: '/pipeline'
+      fullPath: '/pipeline'
+      preLoaderRoute: typeof AuthenticatedPipelineRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/public/ingest': {
@@ -153,14 +140,28 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicApolloSyncAccountsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/settings/keywords': {
+      id: '/_authenticated/settings/keywords'
+      path: '/settings/keywords'
+      fullPath: '/settings/keywords'
+      preLoaderRoute: typeof AuthenticatedSettingsKeywordsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/accounts/$id': {
+      id: '/_authenticated/accounts/$id'
+      path: '/accounts/$id'
+      fullPath: '/accounts/$id'
+      preLoaderRoute: typeof AuthenticatedAccountsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
-  PipelineRoute: PipelineRoute,
-  AccountsIdRoute: AccountsIdRoute,
-  SettingsKeywordsRoute: SettingsKeywordsRoute,
+  AuthenticatedPipelineRoute: AuthenticatedPipelineRoute,
+  AuthenticatedIndexRoute: AuthenticatedIndexRoute,
+  AuthenticatedAccountsIdRoute: AuthenticatedAccountsIdRoute,
+  AuthenticatedSettingsKeywordsRoute: AuthenticatedSettingsKeywordsRoute,
   ApiPublicApolloSyncAccountsRoute: ApiPublicApolloSyncAccountsRoute,
   ApiPublicIngestRoute: ApiPublicIngestRoute,
 }
