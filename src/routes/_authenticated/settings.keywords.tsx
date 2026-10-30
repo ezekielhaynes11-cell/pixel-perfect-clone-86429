@@ -48,7 +48,7 @@ function KeywordsPage() {
   const [kind, setKind] = useState<Kind>("vendor");
   const [value, setValue] = useState("");
   const [url, setUrl] = useState("");
-  const [enrichLimit, setEnrichLimit] = useState(25);
+  const [enrichLimit, setEnrichLimit] = useState(20);
   const [contactEnrichLimit, setContactEnrichLimit] = useState(20);
 
   const add = useMutation({
@@ -263,10 +263,10 @@ function KeywordsPage() {
           <input
             type="number"
             min={1}
-            max={100}
+            max={20}
             value={enrichLimit}
             onChange={(e) =>
-              setEnrichLimit(Math.max(1, Math.min(100, Number(e.target.value) || 1)))
+              setEnrichLimit(Math.max(1, Math.min(20, Number(e.target.value) || 1)))
             }
             className="h-9 w-24 rounded-md border border-border bg-surface-3 px-3 text-sm"
           />
