@@ -79,7 +79,7 @@ function KeywordsPage() {
       qc.invalidateQueries({ queryKey: ["physician_contacts_unenriched_count"] });
       qc.invalidateQueries({ queryKey: ["lead_physicians"] });
       qc.invalidateQueries({ queryKey: ["account_physicians"] });
-      toast.success(`Attempted ${r.attempted} · Matched ${r.matched} · ${r.errors} errors`);
+      toast.success(`Attempted ${r.attempted} · Matched ${r.matched} · ${r.errors} errors${r.remaining ? ` · ${r.remaining} left — run again to continue` : ""}`);
     },
     onError: (e: Error) => toast.error(e.message),
   });
