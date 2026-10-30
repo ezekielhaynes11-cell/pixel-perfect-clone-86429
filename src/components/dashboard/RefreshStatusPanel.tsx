@@ -42,7 +42,7 @@ export function RefreshStatusPanel({
   status: RefreshStatus | undefined;
   isLoading: boolean;
   isRunning: boolean;
-  onRefresh: () => void;
+  onRefresh?: () => void;
   runs: RunRow[];
 }) {
   const [open, setOpen] = useState(false);
@@ -115,7 +115,8 @@ export function RefreshStatusPanel({
         <button
           type="button"
           onClick={onRefresh}
-          disabled={isRunning || isLoading}
+          disabled={!onRefresh || isRunning || isLoading}
+          title={!onRefresh ? "Operator sign-in required to refresh intelligence" : undefined}
           className="flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
         >
           <RefreshCw className={`h-3.5 w-3.5 ${isRunning ? "animate-spin" : ""}`} />
