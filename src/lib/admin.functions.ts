@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { throwUnlessDuplicate } from "./supabase-errors";
 import { requireRep } from "./rep-auth";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
@@ -45,7 +46,7 @@ export const upsertKeyword = createServerFn({ method: "POST" }).middleware([requ
       .insert({ kind: data.kind, value: data.value, active: data.active })
       .select("id")
       .single();
-    if (error && !error.message.includes("duplicate")) throw new Error(error.message);
+    throwUnlessDuplicate(error);
     return { id: row?.id ?? null };
   });
 
