@@ -9,22 +9,22 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
+import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedPipelineRouteImport } from './routes/_authenticated/pipeline'
-import { Route as ApiPublicIngestRouteImport } from './routes/api/public/ingest'
-import { Route as ApiPublicApolloSyncAccountsRouteImport } from './routes/api/public/apollo-sync-accounts'
-import { Route as AuthenticatedSettingsKeywordsRouteImport } from './routes/_authenticated/settings.keywords'
 import { Route as AuthenticatedAccountsIdRouteImport } from './routes/_authenticated/accounts.$id'
+import { Route as AuthenticatedSettingsKeywordsRouteImport } from './routes/_authenticated/settings.keywords'
+import { Route as ApiPublicApolloSyncAccountsRouteImport } from './routes/api/public/apollo-sync-accounts'
+import { Route as ApiPublicIngestRouteImport } from './routes/api/public/ingest'
 
+const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
+  id: '/_authenticated',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
-  id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
@@ -37,27 +37,27 @@ const AuthenticatedPipelineRoute = AuthenticatedPipelineRouteImport.update({
   path: '/pipeline',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const ApiPublicIngestRoute = ApiPublicIngestRouteImport.update({
-  id: '/api/public/ingest',
-  path: '/api/public/ingest',
-  getParentRoute: () => rootRouteImport,
+const AuthenticatedAccountsIdRoute = AuthenticatedAccountsIdRouteImport.update({
+  id: '/accounts/$id',
+  path: '/accounts/$id',
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const ApiPublicApolloSyncAccountsRoute =
-  ApiPublicApolloSyncAccountsRouteImport.update({
-    id: '/api/public/apollo-sync-accounts',
-    path: '/api/public/apollo-sync-accounts',
-    getParentRoute: () => rootRouteImport,
-  } as any)
 const AuthenticatedSettingsKeywordsRoute =
   AuthenticatedSettingsKeywordsRouteImport.update({
     id: '/settings/keywords',
     path: '/settings/keywords',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const AuthenticatedAccountsIdRoute = AuthenticatedAccountsIdRouteImport.update({
-  id: '/accounts/$id',
-  path: '/accounts/$id',
-  getParentRoute: () => AuthenticatedRouteRoute,
+const ApiPublicApolloSyncAccountsRoute =
+  ApiPublicApolloSyncAccountsRouteImport.update({
+    id: '/api/public/apollo-sync-accounts',
+    path: '/api/public/apollo-sync-accounts',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicIngestRoute = ApiPublicIngestRouteImport.update({
+  id: '/api/public/ingest',
+  path: '/api/public/ingest',
+  getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -129,18 +129,18 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/auth': {
-      id: '/auth'
-      path: '/auth'
-      fullPath: '/auth'
-      preLoaderRoute: typeof AuthRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/_authenticated': {
       id: '/_authenticated'
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof AuthenticatedRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/': {
@@ -157,19 +157,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedPipelineRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/api/public/ingest': {
-      id: '/api/public/ingest'
-      path: '/api/public/ingest'
-      fullPath: '/api/public/ingest'
-      preLoaderRoute: typeof ApiPublicIngestRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/public/apollo-sync-accounts': {
-      id: '/api/public/apollo-sync-accounts'
-      path: '/api/public/apollo-sync-accounts'
-      fullPath: '/api/public/apollo-sync-accounts'
-      preLoaderRoute: typeof ApiPublicApolloSyncAccountsRouteImport
-      parentRoute: typeof rootRouteImport
+    '/_authenticated/accounts/$id': {
+      id: '/_authenticated/accounts/$id'
+      path: '/accounts/$id'
+      fullPath: '/accounts/$id'
+      preLoaderRoute: typeof AuthenticatedAccountsIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/settings/keywords': {
       id: '/_authenticated/settings/keywords'
@@ -178,12 +171,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsKeywordsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/accounts/$id': {
-      id: '/_authenticated/accounts/$id'
-      path: '/accounts/$id'
-      fullPath: '/accounts/$id'
-      preLoaderRoute: typeof AuthenticatedAccountsIdRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
+    '/api/public/apollo-sync-accounts': {
+      id: '/api/public/apollo-sync-accounts'
+      path: '/api/public/apollo-sync-accounts'
+      fullPath: '/api/public/apollo-sync-accounts'
+      preLoaderRoute: typeof ApiPublicApolloSyncAccountsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/ingest': {
+      id: '/api/public/ingest'
+      path: '/api/public/ingest'
+      fullPath: '/api/public/ingest'
+      preLoaderRoute: typeof ApiPublicIngestRouteImport
+      parentRoute: typeof rootRouteImport
     }
   }
 }
