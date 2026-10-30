@@ -406,7 +406,10 @@ function Dashboard() {
                   ? "text-success"
                   : "text-warning";
             return (
-              <div className="hidden items-center gap-1.5 text-xs text-muted-foreground md:flex">
+              <div
+                className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                title={label}
+              >
                 <RefreshCw className={`h-3.5 w-3.5 ${color} ${running ? "animate-spin" : ""}`} />
                 {label}
               </div>
@@ -454,6 +457,23 @@ function Dashboard() {
               <DropdownMenuItem onSelect={() => setSearchesOpen(true)}>
                 <Bookmark className="h-4 w-4" />
                 Saved
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link to="/settings/keywords">
+                  <Settings className="h-4 w-4" />
+                  Settings
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={async () => {
+                  await queryClient.cancelQueries();
+                  queryClient.clear();
+                  await supabase.auth.signOut();
+                  navigate({ to: "/auth", replace: true });
+                }}
+              >
+                <LogOut className="h-4 w-4" />
+                Sign out
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
