@@ -12,9 +12,9 @@ import {
   RotateCcw,
   Sparkles,
   SlidersHorizontal,
-  MoreHorizontal,,
+  MoreHorizontal,
   Settings,
-  LogOut
+  LogOut,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -647,7 +647,12 @@ function Dashboard() {
               )}
             </div>
 
-            {leadsQ.isLoading ? (
+            {leadsQ.isError ? (
+              <div className="rounded-md border border-destructive/40 bg-destructive/5 p-8 text-center text-sm">
+                <p className="text-destructive">Couldn't load leads: {leadsQ.error instanceof Error ? leadsQ.error.message : "unknown error"}</p>
+                <button onClick={() => leadsQ.refetch()} className="mt-3 h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">Retry</button>
+              </div>
+            ) : leadsQ.isLoading ? (
               <div className="space-y-3" aria-busy="true" aria-label="Loading leads">
                 {Array.from({ length: 4 }).map((_, i) => (
                   <div
