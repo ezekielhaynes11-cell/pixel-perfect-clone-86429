@@ -24,7 +24,7 @@ const LEAD_LIST_COLUMNS =
 // view actually populate after a refetch. (Previously dismissed leads were
 // filtered out server-side via a NOT-IN over every dismissed UUID — that both
 // broke Restore and risked a URL-length failure once dismissals piled up.)
-export const listLeads = createServerFn({ method: "GET" }).middleware([requireRep]).handler(async () => {
+export const listLeads = createServerFn({ method: "GET" }).handler(async () => {
   const { data, error } = await supabaseAdmin
     .from("leads")
     .select(LEAD_LIST_COLUMNS)
@@ -46,7 +46,7 @@ export const triggerIngestionForSource = createServerFn({ method: "POST" }).midd
     return await runIngestionForSource(data.source as IngestionSourceName, OWNER_ID);
   });
 
-export const listLeadActions = createServerFn({ method: "GET" }).middleware([requireRep]).handler(async () => {
+export const listLeadActions = createServerFn({ method: "GET" }).handler(async () => {
   const { data, error } = await supabaseAdmin
     .from("lead_actions")
     .select("lead_id, action, note, created_at")
@@ -59,7 +59,7 @@ export const listLeadActions = createServerFn({ method: "GET" }).middleware([req
 // via saveLeadNote (it carries free text rather than being a boolean flag).
 const LEAD_ACTION = z.enum(["saved", "dismissed", "pushed_sfdc", "contacted"]);
 
-export const setLeadAction = createServerFn({ method: "POST" }).middleware([requireRep])
+export const setLeadAction = createServerFn({ method: "POST" })
   .inputValidator((input) =>
     z
       .object({
@@ -91,7 +91,7 @@ export const setLeadAction = createServerFn({ method: "POST" }).middleware([requ
     return { ok: true };
   });
 
-export const bulkSetLeadAction = createServerFn({ method: "POST" }).middleware([requireRep])
+export const bulkSetLeadAction = createServerFn({ method: "POST" })
   .inputValidator((input) =>
     z
       .object({
@@ -128,7 +128,7 @@ export const bulkSetLeadAction = createServerFn({ method: "POST" }).middleware([
 
 /* -------------------- Lead notes -------------------- */
 
-export const getLeadNote = createServerFn({ method: "POST" }).middleware([requireRep])
+export const getLeadNote = createServerFn({ method: "POST" })
   .inputValidator((input) => z.object({ lead_id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => {
     const { data: row, error } = await supabaseAdmin
@@ -142,7 +142,7 @@ export const getLeadNote = createServerFn({ method: "POST" }).middleware([requir
     return { note: row?.note ?? "" };
   });
 
-export const saveLeadNote = createServerFn({ method: "POST" }).middleware([requireRep])
+export const saveLeadNote = createServerFn({ method: "POST" })
   .inputValidator((input) =>
     z.object({ lead_id: z.string().uuid(), note: z.string().max(2000) }).parse(input),
   )
@@ -159,7 +159,7 @@ export const saveLeadNote = createServerFn({ method: "POST" }).middleware([requi
 
 /* -------------------- Outreach drafts -------------------- */
 
-export const listDraftsForLead = createServerFn({ method: "POST" }).middleware([requireRep])
+export const listDraftsForLead = createServerFn({ method: "POST" })
   .inputValidator((input) => z.object({ lead_id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => {
     const { data: rows, error } = await supabaseAdmin
@@ -230,7 +230,7 @@ export const generateOutreachDraft = createServerFn({ method: "POST" }).middlewa
     return saved;
   });
 
-export const updateOutreachDraft = createServerFn({ method: "POST" }).middleware([requireRep])
+export const updateOutreachDraft = createServerFn({ method: "POST" })
   .inputValidator((input) =>
     z
       .object({
@@ -263,7 +263,7 @@ const FilterSchema = z.object({
   minConfidence: z.number().min(0).max(100).default(0),
 });
 
-export const listSavedSearches = createServerFn({ method: "GET" }).middleware([requireRep]).handler(async () => {
+export const listSavedSearches = createServerFn({ method: "GET" }).handler(async () => {
   const { data, error } = await supabaseAdmin
     .from("saved_searches")
     .select("*")
@@ -273,7 +273,7 @@ export const listSavedSearches = createServerFn({ method: "GET" }).middleware([r
   return data ?? [];
 });
 
-export const upsertSavedSearch = createServerFn({ method: "POST" }).middleware([requireRep])
+export const upsertSavedSearch = createServerFn({ method: "POST" })
   .inputValidator((input) =>
     z
       .object({
@@ -315,7 +315,7 @@ export const upsertSavedSearch = createServerFn({ method: "POST" }).middleware([
     return { id: row.id };
   });
 
-export const deleteSavedSearch = createServerFn({ method: "POST" }).middleware([requireRep])
+export const deleteSavedSearch = createServerFn({ method: "POST" })
   .inputValidator((input) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => {
     const { error } = await supabaseAdmin
@@ -329,7 +329,7 @@ export const deleteSavedSearch = createServerFn({ method: "POST" }).middleware([
 
 /* -------------------- Alerts -------------------- */
 
-export const listAlerts = createServerFn({ method: "GET" }).middleware([requireRep]).handler(async () => {
+export const listAlerts = createServerFn({ method: "GET" }).handler(async () => {
   const { data, error } = await supabaseAdmin
     .from("alerts")
     .select("id, lead_id, created_at, read_at, saved_search_id")
@@ -340,7 +340,7 @@ export const listAlerts = createServerFn({ method: "GET" }).middleware([requireR
   return data ?? [];
 });
 
-export const markAlertRead = createServerFn({ method: "POST" }).middleware([requireRep])
+export const markAlertRead = createServerFn({ method: "POST" })
   .inputValidator((input) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ data }) => {
     const { error } = await supabaseAdmin
@@ -352,7 +352,7 @@ export const markAlertRead = createServerFn({ method: "POST" }).middleware([requ
     return { ok: true };
   });
 
-export const markAllAlertsRead = createServerFn({ method: "POST" }).middleware([requireRep]).handler(async () => {
+export const markAllAlertsRead = createServerFn({ method: "POST" }).handler(async () => {
   const { error } = await supabaseAdmin
     .from("alerts")
     .update({ read_at: new Date().toISOString() })
@@ -364,7 +364,7 @@ export const markAllAlertsRead = createServerFn({ method: "POST" }).middleware([
 
 /* -------------------- Pipeline forecast -------------------- */
 
-export const getPipelineForecast = createServerFn({ method: "GET" }).middleware([requireRep]).handler(async () => {
+export const getPipelineForecast = createServerFn({ method: "GET" }).handler(async () => {
   const [leadsRes, actionsRes] = await Promise.all([
     supabaseAdmin
       .from("leads")
@@ -443,7 +443,7 @@ export const getPipelineForecast = createServerFn({ method: "GET" }).middleware(
 
 /* -------------------- Ingestion runs -------------------- */
 
-export const getRecentIngestionRuns = createServerFn({ method: "GET" }).middleware([requireRep]).handler(async () => {
+export const getRecentIngestionRuns = createServerFn({ method: "GET" }).handler(async () => {
   const { data, error } = await supabaseAdmin
     .from("ingestion_runs")
     .select("source, started_at, finished_at, status, fetched_count, new_count, enriched_count")
@@ -474,7 +474,7 @@ export interface LeadPhysician {
   apollo_enriched_at: string | null;
 }
 
-export const listLeadPhysicians = createServerFn({ method: "GET" }).middleware([requireRep]).handler(
+export const listLeadPhysicians = createServerFn({ method: "GET" }).handler(
   async (): Promise<LeadPhysician[]> => {
     const { data, error } = await supabaseAdmin
       .from("lead_physicians")
@@ -547,7 +547,7 @@ const MANUAL_CONTACT_COLUMNS =
 
 // Decision-maker contacts seeded into the `contacts` table and linked to a lead.
 // Surfaced in the lead's contact panel alongside source_contacts and physicians.
-export const listLeadContacts = createServerFn({ method: "POST" }).middleware([requireRep])
+export const listLeadContacts = createServerFn({ method: "POST" })
   .inputValidator((input) => z.object({ lead_id: z.string().uuid() }).parse(input))
   .handler(async ({ data }): Promise<ManualContact[]> => {
     const { data: rows, error } = await supabaseAdmin
@@ -734,13 +734,13 @@ async function runContactWaterfall(leadId: string): Promise<ContactEnrichmentRow
   }
 }
 
-export const fetchContactEnrichment = createServerFn({ method: "POST" }).middleware([requireRep])
+export const fetchContactEnrichment = createServerFn({ method: "POST" })
   .inputValidator((input) => z.object({ lead_id: z.string().uuid() }).parse(input))
   .handler(async ({ data }): Promise<ContactEnrichmentRow> => {
     return runContactWaterfall(data.lead_id);
   });
 
-export const batchEnrichContacts = createServerFn({ method: "POST" }).middleware([requireRep])
+export const batchEnrichContacts = createServerFn({ method: "POST" })
   .inputValidator((input) =>
     z.object({ limit: z.number().int().min(1).max(50).optional() }).parse(input),
   )
@@ -779,7 +779,7 @@ export const batchEnrichContacts = createServerFn({ method: "POST" }).middleware
     return { enriched, errors, total: toProcess.length };
   });
 
-export const getEnrichedContactCount = createServerFn({ method: "GET" }).middleware([requireRep]).handler(async () => {
+export const getEnrichedContactCount = createServerFn({ method: "GET" }).handler(async () => {
   const [enrichRes, physRes] = await Promise.all([
     supabaseAdmin
       .from("contact_enrichment")
