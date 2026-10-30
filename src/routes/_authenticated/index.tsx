@@ -1,3 +1,4 @@
+import { useOperatorSession } from "@/hooks/use-operator-session";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -76,6 +77,7 @@ const AGE_FILTER_MS = 365 * 24 * 60 * 60 * 1000;
 const TERRITORY_STATES = new Set(["TX", "OK", "AR", "LA"]);
 
 function Dashboard() {
+  const operatorSignedIn = useOperatorSession();
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [active, setActive] = useState<Lead | null>(null);
   const [draftFor, setDraftFor] = useState<Lead | null>(null);
@@ -210,7 +212,7 @@ function Dashboard() {
   // Auto-trigger first ingestion if the database is empty and nothing has ever run.
   const autoRanRef = useRef(false);
   useEffect(() => {
-    if (autoRanRef.current) return;
+    if (!operatorSignedIn || autoRanRef.current) return;
     if (leadsQ.isLoading || runsQ.isLoading || leadsQ.isError) return;
     const noLeads = (leadsQ.data ?? []).length === 0;
     const noRuns = (runsQ.data ?? []).length === 0;
@@ -218,7 +220,7 @@ function Dashboard() {
       autoRanRef.current = true;
       ingest.mutate();
     }
-  }, [leadsQ.isLoading, leadsQ.data, runsQ.isLoading, runsQ.data, ingest]);
+  }, [operatorSignedIn, leadsQ.isLoading, leadsQ.data, runsQ.isLoading, runsQ.data, ingest]);
 
   const act = useMutation({
     mutationFn: (input: {
@@ -423,16 +425,17 @@ function Dashboard() {
           <button
             onClick={() => setCopilotOpen(true)}
             className="flex items-center gap-1.5 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20"
-            title="Open Copilot"
+            disabled={!operatorSignedIn}
+            title={operatorSignedIn ? "Open Copilot" : "Operator sign-in required for Copilot"}
           >
             <Sparkles className="h-3.5 w-3.5" /> Copilot
           </button>
           <AlertsBell leads={activeLeads} onOpenLead={setActive} />
           <button
             onClick={() => ingest.mutate()}
-            disabled={ingest.isPending || refreshQ.data?.status === "running"}
+            disabled={!operatorSignedIn || ingest.isPending || refreshQ.data?.status === "running"}
             aria-label="Refresh Intelligence"
-            title={ingest.isPending ? "Refreshing…" : "Refresh Intelligence"}
+            title={!operatorSignedIn ? "Operator sign-in required to refresh intelligence" : ingest.isPending ? "Refreshing…" : "Refresh Intelligence"}
             className="flex h-8 items-center justify-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             <RefreshCw className={`h-4 w-4 ${ingest.isPending ? "animate-spin" : ""}`} />
@@ -468,17 +471,23 @@ function Dashboard() {
                   Settings
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem
-                onSelect={async () => {
-                  await qc.cancelQueries();
-                  qc.clear();
-                  await supabase.auth.signOut();
-                  navigate({ to: "/auth", replace: true });
-                }}
-              >
-                <LogOut className="h-4 w-4" />
-                Sign out
-              </DropdownMenuItem>
+              {operatorSignedIn ? (
+                <DropdownMenuItem
+                  onSelect={async () => {
+                    await qc.cancelQueries();
+                    qc.clear();
+                    await supabase.auth.signOut();
+                    navigate({ to: "/", replace: true });
+                  }}
+                >
+                  <LogOut className="h-4 w-4" />
+                  Sign out
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem asChild>
+                  <Link to="/auth">Operator sign in</Link>
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -739,7 +748,7 @@ function Dashboard() {
                 status={refreshQ.data ?? undefined}
                 isLoading={refreshQ.isLoading}
                 isRunning={ingest.isPending || refreshQ.data?.status === "running"}
-                onRefresh={() => ingest.mutate()}
+                onRefresh={operatorSignedIn ? () => ingest.mutate() : undefined}
                 runs={runsQ.data ?? []}
               />
               <Sidebar leads={filtered.length ? filtered : visibleLeads} />
