@@ -23,10 +23,10 @@ export const countUnenrichedPhysicians = createServerFn({ method: "GET" })
 export const bulkEnrichApollo = createServerFn({ method: "POST" })
   .middleware([requireRep])
   .inputValidator((input) =>
-    z.object({ limit: z.number().int().min(1).max(100).optional() }).parse(input),
+    z.object({ limit: z.number().int().min(1).max(20).optional() }).parse(input),
   )
   .handler(async ({ data }) => {
-    const limit = data.limit ?? 25;
+    const limit = Math.min(data.limit ?? 20, 20);
     const { data: rows, error } = await supabaseAdmin
       .from("physician_contacts")
       .select("npi")
@@ -48,7 +48,12 @@ export const bulkEnrichApollo = createServerFn({ method: "POST" })
       }
       await new Promise((r) => setTimeout(r, 300));
     }
-    return { attempted: targets.length, matched, errors };
+    const { count: remaining } = await supabaseAdmin
+      .from("physician_contacts")
+      .select("npi", { count: "exact", head: true })
+      .is("apollo_id", null)
+      .is("apollo_enriched_at", null);
+    return { attempted: targets.length, matched, errors, remaining: remaining ?? 0 };
   });
 
 export const enrichAccountApollo = createServerFn({ method: "POST" })
