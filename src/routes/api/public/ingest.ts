@@ -28,10 +28,12 @@ async function runFromRequest(request: Request) {
       }
       summaries.push(await runIngestionForSource(n as IngestionSourceName, OWNER_ID));
     }
-    return Response.json({ ok: true, summaries });
+    const ok = summaries.every((summary) => !summary.error);
+    return Response.json({ ok, summaries }, { status: ok ? 200 : 503 });
   }
   const summaries = await runIngestion(OWNER_ID);
-  return Response.json({ ok: true, summaries });
+  const ok = summaries.every((summary) => !summary.error);
+  return Response.json({ ok, summaries }, { status: ok ? 200 : 503 });
 }
 
 export const Route = createFileRoute("/api/public/ingest")({

@@ -180,6 +180,7 @@ function Dashboard() {
       // Claim the server-side lock first: prevents concurrent runs across tabs
       // and records the attempt even if the run later fails.
       await startRefresh({ data: { trigger: "manual" as const } });
+      let recorded = false;
       try {
         // Fan out per-source so each call stays well under the Worker 60s timeout.
         const results = await Promise.allSettled(
@@ -192,10 +193,11 @@ function Dashboard() {
         const errors: string[] = [];
         for (let i = 0; i < results.length; i++) {
           const r = results[i];
-          if (r.status === "fulfilled" && !r.value.error) {
+          if (r.status === "fulfilled") {
             inserted += r.value.inserted;
             fetched += r.value.fetched;
-          } else {
+          }
+          if (r.status === "rejected" || r.value.error) {
             failed += 1;
             failedSources.push(INGESTION_SOURCES[i]);
             const msg =
@@ -210,7 +212,7 @@ function Dashboard() {
         const allFailed = failed === results.length;
         await finishRefresh({
           data: {
-            ok: !allFailed,
+            ok: failed === 0,
             recordsScanned: fetched,
             recordsUpdated: inserted,
             sourcesOk: results.length - failed,
@@ -218,15 +220,17 @@ function Dashboard() {
             errorMessage: errors.length ? errors.slice(0, 3).join(" | ") : undefined,
           },
         });
+        recorded = true;
         if (allFailed) throw new Error(errors[0] ?? "All sources failed");
         return { inserted, failed, failedSources };
       } catch (e) {
-        await finishRefresh({
-          data: {
-            ok: false,
-            errorMessage: e instanceof Error ? e.message : String(e),
-          },
-        }).catch(() => undefined);
+        if (!recorded)
+          await finishRefresh({
+            data: {
+              ok: false,
+              errorMessage: e instanceof Error ? e.message : String(e),
+            },
+          }).catch(() => undefined);
         throw e;
       }
     },
@@ -235,9 +239,10 @@ function Dashboard() {
       const sourceDetail = failedSources.length > 0 ? ` (${failedSources.join(", ")})` : "";
       const msg =
         failed > 0
-          ? `Found ${inserted} new leads · ${failed} source${failed === 1 ? "" : "s"} failed${sourceDetail}`
-          : `Found ${inserted} new leads`;
-      toast.success(msg, { id: "ingest" });
+          ? `Collected ${inserted} new signals · ${failed} source${failed === 1 ? "" : "s"} failed${sourceDetail}`
+          : `Collected ${inserted} new signals`;
+      if (failed > 0) toast.warning(msg, { id: "ingest" });
+      else toast.success(msg, { id: "ingest" });
       qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["ingestion_runs"] });
       qc.invalidateQueries({ queryKey: ["lead_physicians"] });
