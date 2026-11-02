@@ -121,11 +121,14 @@ async function runOneSource(
     const raws = await src.fn();
     const inserted = await persistRaws(raws);
     let enrichedTotal = 0;
+    const enrichmentErrors: string[] = [];
     for (const s of src.sourceFilter) {
-      const ids = await enrichPending(s);
+      const { ids, error } = await enrichPending(s);
       enrichedIds.push(...ids);
       enrichedTotal += ids.length;
+      if (error) enrichmentErrors.push(error);
     }
+    const enrichmentError = enrichmentErrors.length ? enrichmentErrors.join(" | ") : undefined;
     if (runId) {
       await supabaseAdmin
         .from("ingestion_runs")
@@ -134,12 +137,19 @@ async function runOneSource(
           fetched_count: raws.length,
           new_count: inserted,
           enriched_count: enrichedTotal,
-          status: "ok",
+          status: enrichmentError ? "error" : "ok",
+          error: enrichmentError ?? null,
         })
         .eq("id", runId);
     }
     return {
-      summary: { source: src.name, fetched: raws.length, inserted, enriched: enrichedTotal },
+      summary: {
+        source: src.name,
+        fetched: raws.length,
+        inserted,
+        enriched: enrichedTotal,
+        error: enrichmentError,
+      },
       enrichedIds,
     };
   } catch (e) {
@@ -269,8 +279,8 @@ async function persistRaws(raws: RawLead[]): Promise<number> {
   return inserted;
 }
 
-async function enrichPending(source: string): Promise<string[]> {
-  const { data: pending } = await supabaseAdmin
+async function enrichPending(source: string): Promise<{ ids: string[]; error?: string }> {
+  const { data: pending, error: pendingError } = await supabaseAdmin
     .from("leads")
     .select(
       "id, source, source_external_id, source_url, title, summary, raw_payload, date_discovered",
@@ -280,9 +290,12 @@ async function enrichPending(source: string): Promise<string[]> {
     .order("date_ingested", { ascending: false })
     .order("date_discovered", { ascending: false })
     .limit(20);
-  if (!pending || pending.length === 0) return [];
+  if (pendingError) throw new Error(`Unable to load pending leads: ${pendingError.message}`);
+  if (!pending || pending.length === 0) return { ids: [] };
 
   const ids: string[] = [];
+  let failures = 0;
+  let firstError = "";
   for (const row of pending) {
     try {
       const raw: RawLead = {
@@ -330,7 +343,7 @@ async function enrichPending(source: string): Promise<string[]> {
         keywords: enriched.entities.keywords,
       };
 
-      await supabaseAdmin
+      const { error: updateError } = await supabaseAdmin
         .from("leads")
         .update({
           summary: enriched.summary,
@@ -350,6 +363,7 @@ async function enrichPending(source: string): Promise<string[]> {
           enriched: true,
         })
         .eq("id", row.id);
+      if (updateError) throw new Error(`Unable to save enriched lead: ${updateError.message}`);
       ids.push(row.id);
 
       try {
@@ -387,13 +401,22 @@ async function enrichPending(source: string): Promise<string[]> {
         });
       }
     } catch (e) {
+      failures++;
+      const message = e instanceof Error ? e.message : String(e);
+      if (!firstError) firstError = sanitizeErrorText(message);
       logWarn("ingest", "Lead enrichment failed", {
         leadId: row.id,
-        error: e instanceof Error ? e.message : String(e),
+        error: sanitizeErrorText(message),
       });
+      // Authentication, quota, and rate-limit failures affect the whole batch.
+      // Stop instead of repeatedly calling a provider that cannot process it.
+      if (/LOVABLE_API_KEY not configured|AI gateway (401|402|403|429)\b/i.test(message)) break;
     }
   }
-  return ids;
+  return {
+    ids,
+    error: failures ? `Lead enrichment failed (${failures} attempted): ${firstError}` : undefined,
+  };
 }
 
 async function evaluateAlerts(newLeadIds: string[], forUserId?: string) {
