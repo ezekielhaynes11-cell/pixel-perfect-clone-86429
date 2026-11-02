@@ -1,3 +1,4 @@
+import { logWarn } from "../logger.server";
 import type { RawLead } from "./types";
 import { loadKeywords, matchesAnyKeyword } from "./keywords.server";
 
@@ -41,11 +42,12 @@ export async function fetchReddit(opts: { perSub?: number } = {}): Promise<RawLe
   const results: RawLead[] = [];
   for (const sub of SUBS) {
     try {
-      const res = await fetch(`https://www.reddit.com/r/${sub}/new.json?limit=${perSub}`, {
+      const response = await fetch(`https://www.reddit.com/r/${sub}/new.json?limit=${perSub}`, {
         headers: { "User-Agent": UA, Accept: "application/json" },
+        signal: AbortSignal.timeout(7_000),
       });
-      if (!res.ok) continue;
-      const json = (await res.json()) as RedditListing;
+      if (!response.ok) continue;
+      const json = (await response.json()) as RedditListing;
       const posts = (json.data?.children ?? []).map((c) => c.data).filter(Boolean) as RedditPost[];
       for (const p of posts) {
         const haystack = `${p.title}\n${p.selftext ?? ""}`;
@@ -75,7 +77,10 @@ export async function fetchReddit(opts: { perSub?: number } = {}): Promise<RawLe
         });
       }
     } catch (e) {
-      console.error(`reddit r/${sub} failed:`, e instanceof Error ? e.message : e);
+      logWarn("ingest.reddit", "Reddit subreddit fetch failed", {
+        subreddit: sub,
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
   }
   return results;

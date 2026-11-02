@@ -1,7 +1,12 @@
-import type { EnrichmentResult, RawLead } from "./types";
+import { z } from "zod";
+import { logWarn } from "../logger.server";
+import { deterministicEnrichRawLead } from "./deterministic-enrich.server";
 import { loadKeywords } from "./keywords.server";
+import { sanitizeErrorText } from "./medical-gate";
+import type { EnrichmentResult, RawLead } from "./types";
 
 const GATEWAY_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
+const GATEWAY_TIMEOUT_MS = 12_000;
 
 const BASE_SYSTEM = `You are a senior sales intelligence analyst for Philips Medical (medical imaging, patient monitoring, cardiac, respiratory). You evaluate raw signals and produce structured leads for field reps covering Texas, Oklahoma, Arkansas, and Louisiana.
 
@@ -109,14 +114,106 @@ const TOOL_SCHEMA = {
   },
 };
 
-export async function enrichRawLead(raw: RawLead): Promise<EnrichmentResult> {
-  const apiKey = process.env.LOVABLE_API_KEY;
-  if (!apiKey) throw new Error("LOVABLE_API_KEY not configured");
-  const kw = await loadKeywords();
+const gatewayEnvelopeSchema = z.object({
+  choices: z
+    .array(
+      z.object({
+        message: z
+          .object({
+            tool_calls: z
+              .array(
+                z.object({
+                  function: z.object({ arguments: z.string().optional() }).optional(),
+                }),
+              )
+              .optional(),
+          })
+          .optional(),
+      }),
+    )
+    .optional(),
+});
 
-  const hintBlock = `Known vendors of interest: ${kw.vendors.join(", ")}
-Known product models: ${kw.products.join(", ")}
-Focus concepts: ${kw.focusConcepts.join(", ")}`;
+const physicianEntitySchema = z.union([
+  z.string().transform((name) => ({ name, role_hint: null as string | null })),
+  z.object({
+    name: z.string(),
+    role_hint: z.string().nullable().optional().default(null),
+  }),
+]);
+
+const enrichmentResultSchema = z.object({
+  summary: z.string(),
+  confidence: z.number(),
+  priority: z.enum(["high", "medium", "low"]),
+  hospital: z.string().nullable(),
+  specialty: z.string().nullable(),
+  territory: z.string().nullable(),
+  estimated_value_usd: z.number().nullable(),
+  win_probability: z.number().nullable(),
+  competitor_incumbent: z.string().nullable(),
+  account_type: z.enum(["va", "non_va", "unknown"]),
+  signal_type: z.enum([
+    "recall",
+    "rfp",
+    "funding",
+    "expansion",
+    "sentiment",
+    "m_and_a",
+    "incumbency",
+    "other",
+  ]),
+  vendor_mentions: z.array(z.string()).default([]),
+  entities: z
+    .object({
+      hospitals: z.array(z.string()).default([]),
+      physicians: z.array(physicianEntitySchema).default([]),
+      equipment: z.array(z.string()).default([]),
+      keywords: z.array(z.string()).default([]),
+    })
+    .default({ hospitals: [], physicians: [], equipment: [], keywords: [] }),
+});
+
+function normalizeEnrichmentResult(parsed: EnrichmentResult): EnrichmentResult {
+  const confidence = Math.max(0, Math.min(100, Math.round(parsed.confidence ?? 0)));
+  const isHighPriority =
+    confidence >= 85 ||
+    (confidence >= 70 &&
+      ["recall", "rfp", "funding"].includes(parsed.signal_type) &&
+      (parsed.estimated_value_usd ?? 0) >= 250_000);
+
+  return {
+    ...parsed,
+    confidence,
+    priority: isHighPriority ? "high" : parsed.priority,
+    win_probability:
+      parsed.win_probability != null ? Math.max(0, Math.min(1, parsed.win_probability)) : null,
+  };
+}
+
+export async function enrichRawLead(raw: RawLead): Promise<EnrichmentResult> {
+  let vendors: string[] = [];
+  let products: string[] = [];
+  let focusConcepts: string[] = [];
+  try {
+    const keywordLists = await loadKeywords();
+    vendors = keywordLists.vendors;
+    products = keywordLists.products;
+    focusConcepts = keywordLists.focusConcepts;
+  } catch (err) {
+    logWarn("ingest.enrich", "Keyword table unavailable during enrichment; using built-in lists", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  const apiKey = process.env.LOVABLE_API_KEY?.trim();
+  if (!apiKey) {
+    return deterministicEnrichRawLead(raw, vendors, products);
+  }
+
+  const hintBlock = `Known vendors of interest: ${vendors.join(", ")}
+Known product models: ${products.join(", ")}
+Focus concepts: ${focusConcepts.join(", ")}`;
 
   const userMsg = `Source: ${raw.source}
 Discovered: ${raw.date_discovered}
@@ -126,53 +223,51 @@ ${hintBlock}
 
 ${raw.raw_text}`;
 
-  const response = await fetch(GATEWAY_URL, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "google/gemini-2.5-flash",
-      messages: [
-        { role: "system", content: BASE_SYSTEM },
-        { role: "user", content: userMsg },
-      ],
-      tools: [TOOL_SCHEMA],
-      tool_choice: { type: "function", function: { name: "extract_lead" } },
-    }),
-    signal: AbortSignal.timeout(25_000),
-  });
+  try {
+    const response = await fetch(GATEWAY_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [
+          { role: "system", content: BASE_SYSTEM },
+          { role: "user", content: userMsg },
+        ],
+        tools: [TOOL_SCHEMA],
+        tool_choice: { type: "function", function: { name: "extract_lead" } },
+      }),
+      signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS),
+    });
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`AI gateway ${response.status}: ${body}`);
-  }
-  const json = (await response.json()) as {
-    choices?: { message?: { tool_calls?: { function?: { arguments?: string } }[] } }[];
-  };
-  const argsStr = json.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
-  if (!argsStr) throw new Error("AI gateway returned no tool call");
-  const parsed = JSON.parse(argsStr) as EnrichmentResult;
+    if (!response.ok) {
+      const bodyText = sanitizeErrorText(await response.text(), 180);
+      logWarn(
+        "ingest.enrich",
+        "AI gateway returned non-2xx; falling back to deterministic clinical enrichment",
+        { source: raw.source, status: response.status, detail: bodyText },
+      );
+      return deterministicEnrichRawLead(raw, vendors, products);
+    }
 
-  parsed.confidence = Math.max(0, Math.min(100, Math.round(parsed.confidence ?? 0)));
-  if (
-    parsed.confidence >= 85 ||
-    (parsed.confidence >= 70 &&
-      ["recall", "rfp", "funding"].includes(parsed.signal_type) &&
-      (parsed.estimated_value_usd ?? 0) >= 250_000)
-  ) {
-    parsed.priority = "high";
+    const envelope = gatewayEnvelopeSchema.parse(await response.json());
+    const argsStr = envelope.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
+    if (!argsStr) {
+      logWarn(
+        "ingest.enrich",
+        "AI gateway omitted tool call; falling back to deterministic clinical enrichment",
+        { source: raw.source },
+      );
+      return deterministicEnrichRawLead(raw, vendors, products);
+    }
+
+    const parsed = enrichmentResultSchema.parse(JSON.parse(argsStr));
+    return normalizeEnrichmentResult(parsed);
+  } catch (err) {
+    logWarn(
+      "ingest.enrich",
+      "AI gateway call failed; falling back to deterministic clinical enrichment",
+      { source: raw.source, error: err instanceof Error ? err.message : String(err) },
+    );
+    return deterministicEnrichRawLead(raw, vendors, products);
   }
-  if (parsed.win_probability != null) {
-    parsed.win_probability = Math.max(0, Math.min(1, parsed.win_probability));
-  }
-  parsed.vendor_mentions = parsed.vendor_mentions ?? [];
-  parsed.entities = parsed.entities ?? {
-    hospitals: [],
-    physicians: [],
-    equipment: [],
-    keywords: [],
-  };
-  parsed.entities.physicians = (parsed.entities.physicians ?? []).map((p) =>
-    typeof p === "string" ? { name: p, role_hint: null } : p,
-  );
-  return parsed;
 }

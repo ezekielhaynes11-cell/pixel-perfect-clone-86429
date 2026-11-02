@@ -10,6 +10,8 @@ import {
 } from "@/data/leads";
 import { fetchClinicalTrialContacts, hospitalsMatch } from "@/lib/apollo/public-enrichment.server";
 import { buildBlueskySearchQuery } from "./bluesky.server";
+import { deterministicEnrichRawLead } from "./deterministic-enrich.server";
+import { enrichRawLead } from "./enrich.server";
 import { passesMedicalGate, sanitizeErrorText } from "./medical-gate";
 import { fetchSamGov } from "./sam-gov.server";
 import type { RawLead } from "./types";
@@ -191,8 +193,18 @@ describe("medical pre-enrichment gate and Bluesky query scoping", () => {
     "That concert venue was ridiculous and agreed by everyone",
     "Samsung Galaxy S25 Ultra camera test",
     "Shenzhen Mindray Animal Medical Technology submitted a veterinary NIBP module",
+    "Hocus Pocus by Focus — prog rock never fails",
+    "PECHAR Halloween Shirts Women Hocus Pocus Shirt I Smell Children Tee Tops",
   ])("blocks non-medical noise: %s", (text) => {
     expect(passesMedicalGate(makeBlueskyLead(text), extraKeywords)).toBe(false);
+  });
+
+  it("ignores synthetic Query metadata lines when evaluating medical gate", () => {
+    const noisyWithQueryLine = makeBlueskyLead(
+      "It's a labor of love! But now it's time to hibernate until next year",
+      "Author: Test (@test)\nQuery: \"Philips\" ultrasound\n\nIt's a labor of love! But now it's time to hibernate until next year",
+    );
+    expect(passesMedicalGate(noisyWithQueryLine, extraKeywords)).toBe(false);
   });
 
   it.each([
@@ -404,5 +416,72 @@ describe("historical lead archiving, high-priority qualification, and territory 
     expect(contacts[0].name).toBe("Riley Martin");
     expect(contacts[0].email).toBe("riley.martin@utsouthwestern.edu");
     expect(contacts[0].phone).toBe("214-648-2147");
+  });
+});
+
+describe("deterministic clinical enrichment fallback when AI gateway is unavailable", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("enriches TX/OK/AR/LA hospital awards into high-priority leads when AI gateway returns 402", async () => {
+    vi.stubEnv("LOVABLE_API_KEY", "exhausted-gateway-key");
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () => new Response(JSON.stringify({ error: "Payment Required" }), { status: 402 }),
+    );
+
+    const rawAward: RawLead = {
+      source: "sam_gov",
+      source_external_id: "nih:11299881",
+      source_url: "https://reporter.nih.gov/project-details/11299881",
+      title:
+        "UT SOUTHWESTERN MEDICAL CENTER (TX) — $692,660: IDENTIFYING SUBCLINICAL TRANSTHYRETIN CARDIAC AMYLOIDOSIS IN ECHOCARDIOGRAPHY",
+      raw_text: [
+        "Hospital/Agency: UT SOUTHWESTERN MEDICAL CENTER",
+        "State: Texas (TX)",
+        "Place of Performance: DALLAS, Texas",
+        "Award $: $692,660",
+        "Title: IDENTIFYING SUBCLINICAL TRANSTHYRETIN CARDIAC AMYLOIDOSIS IN ECHOCARDIOGRAPHY",
+      ].join("\n"),
+      date_discovered: "2026-11-02T00:00:00Z",
+      raw_payload: {},
+      source_contacts: [
+        {
+          name: "Justin Grodin, MD",
+          title: "Principal Investigator",
+          organization: "UT Southwestern Medical Center",
+          phone: null,
+          email: null,
+          address: "Dallas, TX",
+        },
+      ],
+    };
+
+    const enriched = await enrichRawLead(rawAward);
+    expect(enriched.confidence).toBeGreaterThanOrEqual(85);
+    expect(enriched.priority).toBe("high");
+    expect(enriched.hospital).toBe("UT Southwestern Medical Center");
+    expect(enriched.territory).toBe("texas");
+    expect(enriched.signal_type).toBe("funding");
+    expect(enriched.specialty).toBe("Cardiology");
+    expect(enriched.estimated_value_usd).toBe(692_660);
+    expect(enriched.entities.physicians[0]?.name).toBe("Justin Grodin, MD");
+  });
+
+  it("scores off-topic Halloween / Hocus Pocus social chatter below the 35 qualification floor", () => {
+    const hocusPocusNoise: RawLead = {
+      source: "bluesky",
+      source_external_id: "bsky:hocus-1",
+      source_url: "https://bsky.app/profile/music/post/1",
+      title: "Hocus Pocus by Focus — prog rock never fails",
+      raw_text: "Hocus Pocus by Focus — prog rock never fails",
+      date_discovered: "2026-11-02T12:00:00Z",
+      raw_payload: {},
+    };
+
+    const result = deterministicEnrichRawLead(hocusPocusNoise);
+    expect(result.confidence).toBeLessThan(35);
+    expect(result.priority).toBe("low");
   });
 });

@@ -16,12 +16,15 @@ export async function fetchOpenFda(
   const search = `recall_initiation_date:[${since}+TO+${to}]+AND+(classification:"Class+I"+OR+classification:"Class+II")`;
   const url = `${BASE}?search=${search}&limit=${limit}`;
 
-  const res = await fetch(url);
-  if (!res.ok) {
-    if (res.status === 404) return [];
-    throw new Error(`openFDA ${res.status}: ${await res.text()}`);
+  const response = await fetch(url, {
+    headers: { Accept: "application/json", "User-Agent": "YieldArchitect/1.0" },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) {
+    if (response.status === 404) return [];
+    throw new Error(`openFDA ${response.status}: ${await response.text()}`);
   }
-  const json = (await res.json()) as { results?: FdaRecall[] };
+  const json = (await response.json()) as { results?: FdaRecall[] };
   const rows = json.results ?? [];
 
   return rows

@@ -81,13 +81,19 @@ export const getArchivedLeadCount = createServerFn({ method: "GET" }).handler(as
 });
 
 export const triggerIngestion = createServerFn({ method: "POST" }).handler(async () => {
-  return await runIngestion(OWNER_ID);
+  const summaries = await runIngestion(OWNER_ID);
+  await backfillRecentLeadContacts(12);
+  return summaries;
 });
 
 export const triggerIngestionForSource = createServerFn({ method: "POST" })
   .inputValidator((input) => z.object({ source: z.enum(INGESTION_SOURCE_NAMES) }).parse(input))
   .handler(async ({ data }) => {
-    return await runIngestionForSource(data.source as IngestionSourceName, OWNER_ID);
+    const summary = await runIngestionForSource(data.source as IngestionSourceName, OWNER_ID);
+    if (summary.enriched > 0 || summary.inserted > 0) {
+      await backfillRecentLeadContacts(6);
+    }
+    return summary;
   });
 
 export const listLeadActions = createServerFn({ method: "GET" }).handler(async () => {
@@ -682,25 +688,44 @@ async function persistSourceContactIfEmpty(
   },
 ): Promise<void> {
   if (!resolved.name) return;
-  const hasExisting = Array.isArray(existingSourceContacts) && existingSourceContacts.length > 0;
-  if (hasExisting) return;
+  const existingList = Array.isArray(existingSourceContacts)
+    ? (existingSourceContacts as Array<{
+        name?: string | null;
+        title?: string | null;
+        organization?: string | null;
+        phone?: string | null;
+        email?: string | null;
+        address?: string | null;
+        type?: string | null;
+        source_origin?: string | null;
+      }>)
+    : [];
+  const hasActionableExisting = existingList.some((c) => Boolean(c.phone || c.email));
+  if (hasActionableExisting) return;
+
+  const primaryEntry = {
+    name: resolved.name,
+    title: resolved.title,
+    organization: resolved.organization,
+    phone: resolved.phone,
+    email: resolved.email,
+    address: resolved.address ?? null,
+    type: "primary",
+    source_origin: resolved.origin ?? "enriched",
+  };
+  const mergedContacts =
+    existingList.length > 0
+      ? [
+          primaryEntry,
+          ...existingList.filter(
+            (c) => (c.name ?? "").toLowerCase() !== resolved.name?.toLowerCase(),
+          ),
+        ]
+      : [primaryEntry];
 
   await supabaseAdmin
     .from("leads")
-    .update({
-      source_contacts: [
-        {
-          name: resolved.name,
-          title: resolved.title,
-          organization: resolved.organization,
-          phone: resolved.phone,
-          email: resolved.email,
-          address: resolved.address ?? null,
-          type: "primary",
-          source_origin: resolved.origin ?? "enriched",
-        },
-      ] as never,
-    })
+    .update({ source_contacts: mergedContacts as never })
     .eq("id", leadId);
 }
 
@@ -1080,6 +1105,40 @@ async function runContactWaterfall(leadId: string): Promise<ContactEnrichmentRow
     email: null,
     linkedin_url: null,
   });
+}
+
+async function backfillRecentLeadContacts(limit: number): Promise<void> {
+  try {
+    const activeCutoff = getActiveCutoffIso();
+    const [{ data: alreadyFound }, { data: recentLeads }] = await Promise.all([
+      supabaseAdmin.from("contact_enrichment").select("lead_id").eq("status", "found"),
+      supabaseAdmin
+        .from("leads")
+        .select("id")
+        .eq("enriched", true)
+        .gte("date_ingested", activeCutoff)
+        .gte("confidence", MIN_QUALIFIED_CONFIDENCE)
+        .order("date_ingested", { ascending: false })
+        .order("confidence", { ascending: false })
+        .limit(80),
+    ]);
+    const foundSet = new Set((alreadyFound ?? []).map((r) => r.lead_id as string));
+    const candidates = (recentLeads ?? []).filter((l) => !foundSet.has(l.id)).slice(0, limit);
+    for (const candidate of candidates) {
+      try {
+        await runContactWaterfall(candidate.id);
+      } catch (err) {
+        logWarn("contacts.auto_backfill", "Auto contact backfill failed for lead", {
+          leadId: candidate.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  } catch (err) {
+    logWarn("contacts.auto_backfill", "Auto contact backfill batch skipped", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 export const fetchContactEnrichment = createServerFn({ method: "POST" })

@@ -16,13 +16,13 @@ const TERRITORY_ABBREVS = new Set(Object.values(TERRITORY_STATES));
 export async function fetchClinicalTrials(
   opts: { daysBack?: number; limit?: number } = {},
 ): Promise<RawLead[]> {
-  const { daysBack = 30, limit = 100 } = opts;
+  const { daysBack = 21, limit = 80 } = opts;
   const since = new Date(Date.now() - daysBack * 86400_000).toISOString().slice(0, 10);
 
-  // Restrict to territory states and imaging/cardiac/critical-care equipment keywords.
+  // Restrict to territory states and recently posted or updated imaging/cardiac/critical-care studies.
   const stateFilter =
     "(AREA[LocationState]Texas OR AREA[LocationState]Oklahoma OR AREA[LocationState]Arkansas OR AREA[LocationState]Louisiana)";
-  const term = `AREA[StudyFirstPostDate]RANGE[${since},MAX] AND AREA[LocationCountry]United States AND ${stateFilter} AND (imaging OR MRI OR ultrasound OR "cath lab" OR cardiac OR ventilator OR "patient monitor")`;
+  const term = `AREA[LastUpdatePostDate]RANGE[${since},MAX] AND AREA[LocationCountry]United States AND ${stateFilter} AND (imaging OR MRI OR ultrasound OR "cath lab" OR cardiac OR ventilator OR "patient monitor")`;
 
   const params = new URLSearchParams({
     "query.term": term,
@@ -33,7 +33,10 @@ export async function fetchClinicalTrials(
       "NCTId,BriefTitle,OfficialTitle,StudyFirstPostDate,OverallStatus,LeadSponsorName,ResponsiblePartyInvestigatorFullName,ResponsiblePartyInvestigatorTitle,ResponsiblePartyInvestigatorAffiliation,CentralContactName,CentralContactRole,CentralContactPhone,CentralContactEMail,OverallOfficialName,OverallOfficialRole,OverallOfficialAffiliation,LocationFacility,LocationCity,LocationState,LocationZip,LocationContactName,LocationContactRole,LocationContactPhone,LocationContactEMail,Condition,InterventionName,BriefSummary",
   });
 
-  const response = await fetch(`${BASE}?${params}`);
+  const response = await fetch(`${BASE}?${params}`, {
+    headers: { Accept: "application/json", "User-Agent": "YieldArchitect/1.0" },
+    signal: AbortSignal.timeout(10_000),
+  });
   if (!response.ok) {
     if (response.status === 404) return [];
     throw new Error(`ClinicalTrials.gov ${response.status}: ${await response.text()}`);

@@ -1,3 +1,4 @@
+import { logWarn } from "../logger.server";
 import type { RawLead } from "./types";
 
 // Free RSS feeds — VA News + HRSA press releases. Filtered by territory + imaging keywords.
@@ -59,9 +60,12 @@ export async function fetchFundingRss(): Promise<RawLead[]> {
   const out: RawLead[] = [];
   for (const f of FEEDS) {
     try {
-      const res = await fetch(f.url, { headers: { "User-Agent": "PhilipsLeadRadar/1.0" } });
-      if (!res.ok) continue;
-      const xml = await res.text();
+      const response = await fetch(f.url, {
+        headers: { "User-Agent": "PhilipsLeadRadar/1.0" },
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (!response.ok) continue;
+      const xml = await response.text();
       const items = parseRss(xml);
       for (const it of items) {
         const haystack = `${it.title} ${it.description ?? ""}`;
@@ -92,7 +96,10 @@ export async function fetchFundingRss(): Promise<RawLead[]> {
         });
       }
     } catch (e) {
-      console.error(`funding_rss ${f.url} failed:`, e instanceof Error ? e.message : e);
+      logWarn("ingest.funding_rss", "RSS feed fetch failed", {
+        url: f.url,
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
   }
   return out;

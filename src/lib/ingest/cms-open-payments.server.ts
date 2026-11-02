@@ -1,3 +1,4 @@
+import { logWarn } from "../logger.server";
 import type { RawLead } from "./types";
 
 // CMS Open Payments — Socrata-style API at openpaymentsdata.cms.gov
@@ -55,19 +56,27 @@ export async function fetchCmsOpenPayments(
     "sort[0][order]": "desc",
   });
 
-  const res = await fetch(`${url}?${qs}`, { headers: { Accept: "application/json" } });
+  const response = await fetch(`${url}?${qs}`, {
+    headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(8_000),
+  });
 
   // If the discovery API is unavailable (CMS rotates dataset IDs occasionally),
   // log and return empty rather than failing the whole ingestion run.
-  if (!res.ok) {
-    if (res.status === 404 || res.status === 400) {
-      console.warn(`CMS Open Payments unavailable (${res.status}); skipping this run`);
+  if (!response.ok) {
+    if (response.status === 404 || response.status === 400) {
+      logWarn("ingest.cms_open_payments", "CMS Open Payments endpoint returned 404/400; skipping", {
+        status: response.status,
+        state: territoryState,
+      });
       return [];
     }
-    throw new Error(`CMS Open Payments ${res.status}: ${await res.text().catch(() => "")}`);
+    throw new Error(
+      `CMS Open Payments ${response.status}: ${await response.text().catch(() => "")}`,
+    );
   }
 
-  const json = (await res.json().catch(() => ({}))) as { results?: OpRow[] };
+  const json = (await response.json().catch(() => ({}))) as { results?: OpRow[] };
   const rows = (json.results ?? []).filter((r) => {
     const mfr = (r.Submitting_Applicable_Manufacturer_or_Applicable_GPO_Name ?? "").toLowerCase();
     const amt = Number(r.Total_Amount_of_Payment_USDollars ?? 0);

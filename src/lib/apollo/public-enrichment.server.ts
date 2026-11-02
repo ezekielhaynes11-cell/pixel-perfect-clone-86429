@@ -333,45 +333,45 @@ const nppesResponseSchema = z.object({
   results: z
     .array(
       z.object({
-        number: z.string().optional(),
+        number: z.string().nullish(),
         basic: z
           .object({
-            first_name: z.string().optional(),
-            last_name: z.string().optional(),
-            credential: z.string().optional(),
-            name_prefix: z.string().optional(),
-            organization_name: z.string().optional(),
-            authorized_official_first_name: z.string().optional(),
-            authorized_official_last_name: z.string().optional(),
-            authorized_official_middle_name: z.string().optional(),
-            authorized_official_title_or_position: z.string().optional(),
-            authorized_official_telephone_number: z.string().optional(),
-            authorized_official_credential: z.string().optional(),
+            first_name: z.string().nullish(),
+            last_name: z.string().nullish(),
+            credential: z.string().nullish(),
+            name_prefix: z.string().nullish(),
+            organization_name: z.string().nullish(),
+            authorized_official_first_name: z.string().nullish(),
+            authorized_official_last_name: z.string().nullish(),
+            authorized_official_middle_name: z.string().nullish(),
+            authorized_official_title_or_position: z.string().nullish(),
+            authorized_official_telephone_number: z.string().nullish(),
+            authorized_official_credential: z.string().nullish(),
           })
-          .optional(),
+          .nullish(),
         addresses: z
           .array(
             z.object({
-              address_purpose: z.string().optional(),
-              address_1: z.string().optional(),
-              city: z.string().optional(),
-              state: z.string().optional(),
-              postal_code: z.string().optional(),
-              telephone_number: z.string().optional(),
+              address_purpose: z.string().nullish(),
+              address_1: z.string().nullish(),
+              city: z.string().nullish(),
+              state: z.string().nullish(),
+              postal_code: z.string().nullish(),
+              telephone_number: z.string().nullish(),
             }),
           )
-          .optional(),
+          .nullish(),
         taxonomies: z
           .array(
             z.object({
-              desc: z.string().optional(),
-              primary: z.boolean().optional(),
+              desc: z.string().nullish(),
+              primary: z.boolean().nullish(),
             }),
           )
-          .optional(),
+          .nullish(),
       }),
     )
-    .optional(),
+    .nullish(),
 });
 
 function formatPhone(raw: string | undefined | null): string | null {

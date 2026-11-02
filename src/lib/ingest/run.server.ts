@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { isUniqueViolation } from "../supabase-errors";
 import { logError, logInfo, logWarn } from "../logger.server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
@@ -269,22 +270,37 @@ async function persistRaws(raws: RawLead[]): Promise<number> {
   return inserted;
 }
 
+const storedLeadContactsSchema = z.array(
+  z.object({
+    name: z.string().nullable().default(null),
+    title: z.string().nullable().default(null),
+    organization: z.string().nullable().default(null),
+    email: z.string().nullable().default(null),
+    phone: z.string().nullable().default(null),
+    address: z.string().nullable().default(null),
+    type: z.string().nullable().optional(),
+    source_origin: z.string().nullable().optional(),
+  }),
+);
+
 async function enrichPending(source: string): Promise<string[]> {
   const { data: pending } = await supabaseAdmin
     .from("leads")
     .select(
-      "id, source, source_external_id, source_url, title, summary, raw_payload, date_discovered",
+      "id, source, source_external_id, source_url, title, summary, raw_payload, source_contacts, date_discovered",
     )
     .eq("source", source)
     .eq("enriched", false)
     .order("date_ingested", { ascending: false })
     .order("date_discovered", { ascending: false })
-    .limit(20);
+    .limit(35);
   if (!pending || pending.length === 0) return [];
 
-  const ids: string[] = [];
+  const qualifiedIds: string[] = [];
   for (const row of pending) {
     try {
+      const parsedContacts = storedLeadContactsSchema.safeParse(row.source_contacts);
+      const existingContacts = parsedContacts.success ? parsedContacts.data : undefined;
       const raw: RawLead = {
         source: row.source as RawLead["source"],
         source_external_id: row.source_external_id,
@@ -293,6 +309,7 @@ async function enrichPending(source: string): Promise<string[]> {
         raw_text: row.summary ?? row.title,
         date_discovered: row.date_discovered,
         raw_payload: (row.raw_payload as Record<string, unknown>) ?? {},
+        source_contacts: existingContacts,
       };
       const enriched = await enrichRawLead(raw);
 
@@ -350,7 +367,9 @@ async function enrichPending(source: string): Promise<string[]> {
           enriched: true,
         })
         .eq("id", row.id);
-      ids.push(row.id);
+      if (enriched.confidence >= 35) {
+        qualifiedIds.push(row.id);
+      }
 
       try {
         const refs: PhysicianLookupInput[] = [];
@@ -393,7 +412,7 @@ async function enrichPending(source: string): Promise<string[]> {
       });
     }
   }
-  return ids;
+  return qualifiedIds;
 }
 
 async function evaluateAlerts(newLeadIds: string[], forUserId?: string) {

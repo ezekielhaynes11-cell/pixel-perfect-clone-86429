@@ -49,7 +49,10 @@ const CLINICAL_SUBSTRING_TERMS = [
   "intravascular",
 ];
 
-const CLINICAL_WORD_BOUNDARY_RX = /\b(pocus|mri|icu|ehr|emr|fda|ecmo|pacs|ivus|ekg|ecg|clinic)\b/i;
+const CLINICAL_WORD_BOUNDARY_RX = /\b(mri|icu|ehr|emr|fda|ecmo|pacs|ivus|ekg|ecg|clinic)\b/i;
+
+const POCUS_RX = /\bpocus\b/i;
+const HOCUS_POCUS_NOISE_RX = /\bhocus[\s-]*pocus\b/i;
 
 // Consumer-overlapping brand names and 2-3 character model codes that match
 // non-medical products (espresso machines, shavers, TVs, phones, SUVs, concert venues)
@@ -76,7 +79,10 @@ const AMBIGUOUS_EXTRA_TERMS = new Set<string>([
   "edge ii",
 ]);
 
-const VETERINARY_NOISE_RX = /\b(animal medical|veterinary|vet clinic|equine|canine|feline)\b/i;
+const NON_MEDICAL_NOISE_RX =
+  /\b(animal medical|veterinary|vet clinic|equine|canine|feline|hocus[\s-]*pocus|witch film|halloween shirts?|prog rock|careerowl\.in|fresher alert)\b/i;
+
+const SYNTHETIC_METADATA_LINE_RX = /^(?:query|matched terms|query slice):.*$/gim;
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -91,13 +97,17 @@ export function isAmbiguousExtraTerm(term: string): boolean {
 export function passesMedicalGate(raw: RawLead, extraTerms: string[] = []): boolean {
   if (GATE_BYPASS_SOURCES.has(raw.source)) return true;
 
-  const haystack = `${raw.title} ${raw.raw_text} ${raw.source_url ?? ""}`.toLowerCase();
-  if (VETERINARY_NOISE_RX.test(haystack)) return false;
+  const cleanedRawText = raw.raw_text.replace(SYNTHETIC_METADATA_LINE_RX, " ");
+  const haystack = `${raw.title} ${cleanedRawText} ${raw.source_url ?? ""}`.toLowerCase();
+  if (NON_MEDICAL_NOISE_RX.test(haystack)) return false;
 
   if (CLINICAL_SUBSTRING_TERMS.some((term) => haystack.includes(term))) {
     return true;
   }
   if (CLINICAL_WORD_BOUNDARY_RX.test(haystack)) {
+    return true;
+  }
+  if (POCUS_RX.test(haystack) && !HOCUS_POCUS_NOISE_RX.test(haystack)) {
     return true;
   }
 

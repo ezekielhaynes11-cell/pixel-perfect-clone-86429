@@ -186,6 +186,7 @@ function Dashboard() {
           INGESTION_SOURCES.map((source) => runIngestForSource({ data: { source } })),
         );
         let inserted = 0;
+        let enriched = 0;
         let fetched = 0;
         let failed = 0;
         const failedSources: string[] = [];
@@ -194,6 +195,7 @@ function Dashboard() {
           const r = results[i];
           if (r.status === "fulfilled" && !r.value.error) {
             inserted += r.value.inserted;
+            enriched += r.value.enriched;
             fetched += r.value.fetched;
           } else {
             failed += 1;
@@ -207,19 +209,20 @@ function Dashboard() {
             errors.push(`${INGESTION_SOURCES[i]}: ${msg}`);
           }
         }
+        const surfaced = Math.max(inserted, enriched);
         const allFailed = failed === results.length;
         await finishRefresh({
           data: {
             ok: !allFailed,
             recordsScanned: fetched,
-            recordsUpdated: inserted,
+            recordsUpdated: surfaced,
             sourcesOk: results.length - failed,
             sourcesFailed: failed,
             errorMessage: errors.length ? errors.slice(0, 3).join(" | ") : undefined,
           },
         });
         if (allFailed) throw new Error(errors[0] ?? "All sources failed");
-        return { inserted, failed, failedSources };
+        return { surfaced, failed, failedSources };
       } catch (e) {
         await finishRefresh({
           data: {
@@ -231,16 +234,20 @@ function Dashboard() {
       }
     },
     onMutate: () => toast.loading("Scanning live sources…", { id: "ingest" }),
-    onSuccess: ({ inserted, failed, failedSources }) => {
+    onSuccess: ({ surfaced, failed, failedSources }) => {
       const sourceDetail = failedSources.length > 0 ? ` (${failedSources.join(", ")})` : "";
+      const leadLabel =
+        surfaced > 0 ? `Found ${surfaced} new leads` : "Sources synced · active leads up to date";
       const msg =
         failed > 0
-          ? `Found ${inserted} new leads · ${failed} source${failed === 1 ? "" : "s"} failed${sourceDetail}`
-          : `Found ${inserted} new leads`;
+          ? `${leadLabel} · ${failed} source${failed === 1 ? "" : "s"} failed${sourceDetail}`
+          : leadLabel;
       toast.success(msg, { id: "ingest" });
       qc.invalidateQueries({ queryKey: ["leads"] });
+      qc.invalidateQueries({ queryKey: ["archived_lead_count"] });
       qc.invalidateQueries({ queryKey: ["ingestion_runs"] });
       qc.invalidateQueries({ queryKey: ["lead_physicians"] });
+      qc.invalidateQueries({ queryKey: ["contact_enrichment_count"] });
     },
     onError: (e: unknown) =>
       toast.error(e instanceof Error ? e.message : "Refresh failed", { id: "ingest" }),
