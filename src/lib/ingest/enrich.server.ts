@@ -12,14 +12,14 @@ const BASE_SYSTEM = `You are a senior sales intelligence analyst for Philips Med
 
 Confidence rubric (0-100):
 - 92-98: Explicit RFQ / RFP / federal contract award at a named hospital or VA facility
-- 85-91: Class I or Class II FDA recall on competitor imaging/monitoring/cardiac/respiratory equipment (including nationwide US recalls that impact TX/OK/AR/LA hospitals), or federal hospital grant/capital award >= $200k at a named TX/OK/AR/LA institution
-- 72-84: Active clinical trial, hospital expansion, or new fellowship/imaging program at a named TX/OK/AR/LA hospital
+- 85-91: Class I or Class II FDA recall on competitor imaging/monitoring/cardiac/respiratory equipment (including nationwide US recalls that impact TX/OK/AR/LA hospitals), federal hospital grant/capital award >= $200k at a named TX/OK/AR/LA institution, or CMS $50B Rural Health Transformation (RHT) grant / Critical Access Hospital with 24/7 ED in TX/OK/AR/LA
+- 72-84: Active clinical trial, Critical Access Hospital modernization target, hospital expansion, or new fellowship/imaging program at a named TX/OK/AR/LA hospital
 - 60-71: Practitioner forum discussion mentioning vendor or equipment frustration (Reddit/Bluesky chatter)
 - Below 60: Weak signal, low specificity
 
 Priority: high (>=85, or >=70 with recall/rfp/funding signal and >=$250k pipeline value), medium (65-84), low (<65).
 
-Estimated value: realistic USD pipeline value for Philips if won. Ultrasound RFQ $400k-$1.2M; cath lab $1.5M-$4M; MRI $1.5M-$3M; ventilator fleet $300k-$1.5M; infusion pump replacement $200k-$800k; ECMO $250k-$600k per unit.
+Estimated value: realistic USD pipeline value for Philips if won. Ultrasound RFQ $400k-$1.2M; cath lab $1.5M-$4M; MRI $1.5M-$3M; Critical Access Hospital RHT bundle (BlueSeal Mobile 1.5T MRI, CT 5300, ROCC, eICU, Avalon/Lumify, EarlyVue VS30) $450k-$900k; ventilator fleet $300k-$1.5M; infusion pump replacement $200k-$800k; ECMO $250k-$600k per unit.
 
 Win probability: 0.0-1.0. Recall replacement = 0.45; explicit RFQ Philips invited = 0.4; RFQ generic = 0.2; news of expansion = 0.15; sentiment chatter = 0.05; vendor M&A disruption = 0.25.
 

@@ -3,7 +3,7 @@ import { X, ExternalLink, Building2, User2, Wrench, Tag, Loader2, Check } from "
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { type Lead, timeAgo } from "@/data/leads";
+import { SOURCE_LABELS, type Lead, timeAgo } from "@/data/leads";
 import { type LeadPhysician, getLeadNote, saveLeadNote } from "@/lib/leads.functions";
 import { pushLeadToCrm } from "@/lib/integrations.functions";
 import { ContactSection } from "./ContactSection";
@@ -84,7 +84,9 @@ export function LeadDetailModal({
         <div className="flex items-start justify-between border-b border-border p-5">
           <div>
             <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="uppercase tracking-wider">{lead.source}</span>
+              <span className="uppercase tracking-wider">
+                {SOURCE_LABELS[lead.source] ?? lead.source}
+              </span>
               <span>·</span>
               <span>{timeAgo(lead.dateDiscovered)}</span>
               <span>·</span>

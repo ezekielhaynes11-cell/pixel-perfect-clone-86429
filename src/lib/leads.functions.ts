@@ -11,7 +11,7 @@ import {
   type IngestionSourceName,
 } from "./ingest/run.server";
 import { draftOutreachEmail } from "./outreach.server";
-import { ACTIVE_LEAD_WINDOW_MS } from "@/data/leads";
+import { ACTIVE_LEAD_WINDOW_MS, normalizePhysicianStrings } from "@/data/leads";
 import { throwIfError, throwUnlessDuplicate } from "./supabase-errors";
 
 export const INGESTION_SOURCES = INGESTION_SOURCE_NAMES;
@@ -227,7 +227,9 @@ export const generateOutreachDraft = createServerFn({ method: "POST" })
     z
       .object({
         lead_id: z.string().uuid(),
-        tone: z.enum(["discovery", "follow_up", "executive_intro", "switch_pitch"]).optional(),
+        tone: z
+          .enum(["discovery", "follow_up", "executive_intro", "switch_pitch", "rht_grant_pitch"])
+          .optional(),
       })
       .parse(input),
   )
@@ -255,12 +257,21 @@ export const generateOutreachDraft = createServerFn({ method: "POST" })
         signal_type: (lead as { signal_type?: string | null }).signal_type ?? null,
         competitor_incumbent: lead.competitor_incumbent,
         vendor_mentions: (lead as { vendor_mentions?: string[] | null }).vendor_mentions ?? [],
-        entities:
-          (lead.entities as {
-            physicians?: string[];
-            equipment?: string[];
-            keywords?: string[];
-          }) ?? {},
+        entities: (() => {
+          const rawEntities =
+            lead.entities && typeof lead.entities === "object"
+              ? (lead.entities as {
+                  physicians?: unknown;
+                  equipment?: string[];
+                  keywords?: string[];
+                })
+              : {};
+          return {
+            physicians: normalizePhysicianStrings(rawEntities.physicians),
+            equipment: Array.isArray(rawEntities.equipment) ? rawEntities.equipment : [],
+            keywords: Array.isArray(rawEntities.keywords) ? rawEntities.keywords : [],
+          };
+        })(),
       },
       repName: profile?.display_name ?? "Your Philips rep",
       tone: data.tone,
@@ -306,6 +317,7 @@ const FilterSchema = z.object({
   hospitals: z.array(z.string()).default([]),
   specialties: z.array(z.string()).default([]),
   sources: z.array(z.string()).default([]),
+  leadTypes: z.array(z.string()).default([]),
   signalTypes: z.array(z.string()).default([]),
   accountTypes: z.array(z.string()).default([]),
   vendors: z.array(z.string()).default([]),
@@ -313,6 +325,11 @@ const FilterSchema = z.object({
   minConfidence: z.number().min(0).max(100).default(0),
   onlyToday: z.boolean().default(false),
   onlyHighPriority: z.boolean().default(false),
+  onlyRural: z.boolean().default(false),
+  datePreset: z.enum(["all", "today", "3d", "7d", "14d", "30d", "custom"]).default("all"),
+  dateFrom: z.string().default(""),
+  dateTo: z.string().default(""),
+  sortBy: z.enum(["priority", "newest", "value"]).default("priority"),
 });
 
 export const listSavedSearches = createServerFn({ method: "GET" }).handler(async () => {
@@ -700,7 +717,11 @@ async function persistSourceContactIfEmpty(
         source_origin?: string | null;
       }>)
     : [];
-  const hasActionableExisting = existingList.some((c) => Boolean(c.phone || c.email));
+  const hasActionableExisting = existingList.some(
+    (c) =>
+      Boolean(c.phone || c.email) &&
+      !/administration\s*&\s*clinical|switchboard/i.test(c.name ?? ""),
+  );
   if (hasActionableExisting) return;
 
   const primaryEntry = {
@@ -818,7 +839,14 @@ async function runContactWaterfall(leadId: string): Promise<ContactEnrichmentRow
     : [];
   const bestSourceContact =
     existingSourceList.find((c) => c.name && (c.phone || c.email)) ?? existingSourceList[0];
-  if (bestSourceContact?.name && (bestSourceContact.phone || bestSourceContact.email)) {
+  const isSwitchboardPlaceholder = /administration\s*&\s*clinical|switchboard/i.test(
+    bestSourceContact?.name ?? "",
+  );
+  if (
+    bestSourceContact?.name &&
+    !isSwitchboardPlaceholder &&
+    (bestSourceContact.phone || bestSourceContact.email)
+  ) {
     return writeAndReturn({
       lead_id: leadId,
       status: "found",
@@ -969,7 +997,11 @@ async function runContactWaterfall(leadId: string): Promise<ContactEnrichmentRow
   }
 
   // 7b: Named physicians extracted in lead.entities.physicians -> CMS NPPES lookup
-  for (const physName of (ents.physicians ?? []).slice(0, 2)) {
+  const extractedPhysicians = normalizePhysicianStrings(ents.physicians).map((entry) =>
+    entry.replace(/\s*\([^)]*\)\s*$/, "").trim(),
+  );
+  for (const physName of extractedPhysicians.slice(0, 2)) {
+    if (/administration\s*&\s*clinical|switchboard/i.test(physName)) continue;
     const nppesDoc = await fetchNppesClinicianByName(physName, stateCode);
     if (nppesDoc) {
       await persistSourceContactIfEmpty(leadId, lead.source_contacts, {
@@ -1003,8 +1035,13 @@ async function runContactWaterfall(leadId: string): Promise<ContactEnrichmentRow
     const candidate = nppesOrg ?? nihContacts[0] ?? null;
     if (candidate) {
       const mergedPhone =
-        candidate.phone ?? matchedManual?.direct_phone ?? matchedManual?.department_phone ?? null;
-      const mergedEmail = candidate.email ?? matchedManual?.email ?? null;
+        candidate.phone ??
+        bestSourceContact?.phone ??
+        matchedManual?.direct_phone ??
+        matchedManual?.department_phone ??
+        null;
+      const mergedEmail =
+        candidate.email ?? bestSourceContact?.email ?? matchedManual?.email ?? null;
       await persistSourceContactIfEmpty(leadId, lead.source_contacts, {
         name: candidate.name,
         title: candidate.title,
@@ -1027,72 +1064,88 @@ async function runContactWaterfall(leadId: string): Promise<ContactEnrichmentRow
     }
   }
 
-  // 7d: Territory specialty / recall fallback (for statewide/nationwide FDA recalls or unnamed accounts)
-  const namedManuals = manualList.filter(
-    (c) => c.contact_name && (c.direct_phone || c.department_phone || c.email),
-  );
-  const specialtyText = `${lead.specialty ?? ""} ${lead.title ?? ""}`.toLowerCase();
-  const preferredManual =
-    namedManuals.find((c) => {
-      const t = `${c.title ?? ""} ${c.account_name}`.toLowerCase();
-      if (specialtyText.includes("cardio") || specialtyText.includes("monitor")) {
-        return t.includes("em") || t.includes("imaging") || t.includes("ultrasound");
-      }
-      if (
-        specialtyText.includes("radiol") ||
-        specialtyText.includes("imaging") ||
-        specialtyText.includes("alphenix")
-      ) {
-        return t.includes("imaging") || t.includes("ultrasound");
-      }
-      return true;
-    }) ?? namedManuals[0];
-
-  if (preferredManual?.contact_name) {
-    const phone = preferredManual.direct_phone ?? preferredManual.department_phone;
-    await persistSourceContactIfEmpty(leadId, lead.source_contacts, {
-      name: preferredManual.contact_name,
-      title: `${preferredManual.title ?? "Clinical Director"} (Territory Account)`,
-      organization: preferredManual.account_name,
-      phone,
-      email: preferredManual.email,
-      address: preferredManual.facility_address,
-      origin: "Territory Directory",
-    });
+  if (bestSourceContact?.name && (bestSourceContact.phone || bestSourceContact.email)) {
     return writeAndReturn({
       lead_id: leadId,
       status: "found",
-      name: preferredManual.contact_name,
-      title: `${preferredManual.title ?? "Clinical Director"} (Territory Account)`,
-      organization: preferredManual.account_name,
-      phone,
-      email: preferredManual.email,
+      name: bestSourceContact.name,
+      title: bestSourceContact.title ?? "Hospital Executive Switchboard",
+      organization: bestSourceContact.organization ?? org,
+      phone: bestSourceContact.phone ?? null,
+      email: bestSourceContact.email ?? null,
       linkedin_url: null,
     });
   }
 
-  const specialists = await prospectNppesSpecialists({ stateCode, limit: 1 });
-  if (specialists[0]) {
-    const sp = specialists[0];
-    await persistSourceContactIfEmpty(leadId, lead.source_contacts, {
-      name: sp.name,
-      title: sp.title,
-      organization: sp.organization,
-      phone: sp.phone,
-      email: sp.email,
-      address: sp.address,
-      origin: sp.origin,
-    });
-    return writeAndReturn({
-      lead_id: leadId,
-      status: "found",
-      name: sp.name,
-      title: sp.title,
-      organization: sp.organization,
-      phone: sp.phone,
-      email: sp.email,
-      linkedin_url: null,
-    });
+  // 7d: Territory specialty / recall fallback (only for statewide/nationwide FDA recalls or unnamed accounts)
+  const isUnnamedOrRecall = !org || lead.signal_type === "recall" || lead.source === "openfda";
+  if (isUnnamedOrRecall) {
+    const namedManuals = manualList.filter(
+      (c) => c.contact_name && (c.direct_phone || c.department_phone || c.email),
+    );
+    const specialtyText = `${lead.specialty ?? ""} ${lead.title ?? ""}`.toLowerCase();
+    const preferredManual =
+      namedManuals.find((c) => {
+        const t = `${c.title ?? ""} ${c.account_name}`.toLowerCase();
+        if (specialtyText.includes("cardio") || specialtyText.includes("monitor")) {
+          return t.includes("em") || t.includes("imaging") || t.includes("ultrasound");
+        }
+        if (
+          specialtyText.includes("radiol") ||
+          specialtyText.includes("imaging") ||
+          specialtyText.includes("alphenix")
+        ) {
+          return t.includes("imaging") || t.includes("ultrasound");
+        }
+        return true;
+      }) ?? namedManuals[0];
+
+    if (preferredManual?.contact_name) {
+      const phone = preferredManual.direct_phone ?? preferredManual.department_phone;
+      await persistSourceContactIfEmpty(leadId, lead.source_contacts, {
+        name: preferredManual.contact_name,
+        title: `${preferredManual.title ?? "Clinical Director"} (Territory Account)`,
+        organization: preferredManual.account_name,
+        phone,
+        email: preferredManual.email,
+        address: preferredManual.facility_address,
+        origin: "Territory Directory",
+      });
+      return writeAndReturn({
+        lead_id: leadId,
+        status: "found",
+        name: preferredManual.contact_name,
+        title: `${preferredManual.title ?? "Clinical Director"} (Territory Account)`,
+        organization: preferredManual.account_name,
+        phone,
+        email: preferredManual.email,
+        linkedin_url: null,
+      });
+    }
+
+    const specialists = await prospectNppesSpecialists({ stateCode, limit: 1 });
+    if (specialists[0]) {
+      const sp = specialists[0];
+      await persistSourceContactIfEmpty(leadId, lead.source_contacts, {
+        name: sp.name,
+        title: sp.title,
+        organization: sp.organization,
+        phone: sp.phone,
+        email: sp.email,
+        address: sp.address,
+        origin: sp.origin,
+      });
+      return writeAndReturn({
+        lead_id: leadId,
+        status: "found",
+        name: sp.name,
+        title: sp.title,
+        organization: sp.organization,
+        phone: sp.phone,
+        email: sp.email,
+        linkedin_url: null,
+      });
+    }
   }
 
   return writeAndReturn({
@@ -1107,7 +1160,7 @@ async function runContactWaterfall(leadId: string): Promise<ContactEnrichmentRow
   });
 }
 
-async function backfillRecentLeadContacts(limit: number): Promise<void> {
+export async function backfillRecentLeadContacts(limit: number): Promise<void> {
   try {
     const activeCutoff = getActiveCutoffIso();
     const [{ data: alreadyFound }, { data: recentLeads }] = await Promise.all([

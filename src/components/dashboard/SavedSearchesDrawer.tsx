@@ -188,8 +188,16 @@ export function SavedSearchesDrawer({
 
 function FilterSummary({ filter }: { filter: Filters }) {
   const bits: string[] = [];
-  if (filter.onlyToday) bits.push("Today");
+  if (filter.onlyRural) bits.push("Rural RHT");
+  if (filter.onlyToday || filter.datePreset === "today") {
+    bits.push("Today");
+  } else if (filter.datePreset && filter.datePreset !== "all") {
+    bits.push(`Date: ${filter.datePreset}`);
+  }
   if (filter.onlyHighPriority) bits.push("Priority");
+  if (filter.leadTypes?.length) {
+    bits.push(`${filter.leadTypes.length} lead type${filter.leadTypes.length === 1 ? "" : "s"}`);
+  }
   if (filter.hospitals?.length)
     bits.push(`${filter.hospitals.length} hospital${filter.hospitals.length === 1 ? "" : "s"}`);
   if (filter.specialties?.length) bits.push(`${filter.specialties.length} specialty`);

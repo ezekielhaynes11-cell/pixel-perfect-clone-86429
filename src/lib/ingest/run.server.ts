@@ -10,6 +10,7 @@ import { fetchCmsOpenPayments } from "./cms-open-payments.server";
 import { fetchReddit } from "./reddit.server";
 import { fetchBluesky } from "./bluesky.server";
 import { fetchFundingRss } from "./funding-rss.server";
+import { fetchRuralRht } from "./rural-rht.server";
 import { enrichRawLead } from "./enrich.server";
 import { passesMedicalGate, sanitizeErrorText } from "./medical-gate";
 import { attachPhysiciansToLead, type PhysicianLookupInput } from "./nppes.server";
@@ -59,6 +60,11 @@ function buildSources(): SourceSpec[] {
   // ingestion-run entry but bucket inserts by their own source for clarity.
   return [
     {
+      name: "rural_rht",
+      sourceFilter: ["rural_rht"],
+      fn: () => fetchRuralRht({}),
+    },
+    {
       name: "sam_gov",
       sourceFilter: ["sam_gov"],
       fn: () => fetchSamGov({ apiKey: samKey }),
@@ -97,6 +103,7 @@ function buildSources(): SourceSpec[] {
 }
 
 export const INGESTION_SOURCE_NAMES = [
+  "rural_rht",
   "sam_gov",
   "openfda",
   "gdelt",
@@ -293,7 +300,7 @@ async function enrichPending(source: string): Promise<string[]> {
     .eq("enriched", false)
     .order("date_ingested", { ascending: false })
     .order("date_discovered", { ascending: false })
-    .limit(35);
+    .limit(65);
   if (!pending || pending.length === 0) return [];
 
   const qualifiedIds: string[] = [];

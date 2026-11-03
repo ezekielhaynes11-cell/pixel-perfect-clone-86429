@@ -10,13 +10,21 @@ import {
 } from "@/lib/leads.functions";
 import type { Lead } from "@/data/leads";
 
-type Tone = "discovery" | "follow_up" | "executive_intro";
+type Tone = "discovery" | "rht_grant_pitch" | "switch_pitch" | "executive_intro" | "follow_up";
 
 const TONE_LABEL: Record<Tone, string> = {
   discovery: "Discovery",
-  follow_up: "Follow-up",
+  rht_grant_pitch: "CMS $50B RHT",
+  switch_pitch: "Switch-pitch",
   executive_intro: "Exec intro",
+  follow_up: "Follow-up",
 };
+
+function preferredToneForLead(lead: Lead): Tone {
+  if (lead.source === "rural_rht") return "rht_grant_pitch";
+  if (lead.signalType === "recall" || lead.signalType === "m_and_a") return "switch_pitch";
+  return "discovery";
+}
 
 export function OutreachDraftDialog({
   lead,
@@ -50,6 +58,7 @@ export function OutreachDraftDialog({
     if (!lead || drafts.isLoading) return;
     if (seededLeadRef.current === lead.id) return;
     seededLeadRef.current = lead.id;
+    setTone(preferredToneForLead(lead));
     const latest = drafts.data?.[0];
     if (latest) {
       setDraftId(latest.id);

@@ -1,4 +1,5 @@
 export type LeadSource =
+  | "rural_rht"
   | "sam_gov"
   | "openfda"
   | "gdelt"

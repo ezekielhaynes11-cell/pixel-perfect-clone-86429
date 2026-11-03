@@ -35,7 +35,12 @@ import {
   leadIsHighPriority,
   isArchivedLead,
   isDiscoveredToday,
-  compareLeadsByPriorityAndRecency,
+  isRuralCampaignLead,
+  classifyLeadType,
+  leadMatchesDateFilter,
+  sortLeads,
+  ACTIVE_LEAD_WINDOW_MS,
+  SOURCE_LABELS,
   type Lead,
   type LeadRow,
 } from "@/data/leads";
@@ -90,7 +95,13 @@ function extractFailedSourceNames(errorMessage: string | null | undefined): stri
 }
 
 function resolveFeedLabel(filters: Filters, filtered: Lead[], showArchived: boolean): string {
-  if (filters.onlyHighPriority && filters.onlyToday) {
+  if (filters.onlyRural && filters.onlyHighPriority) {
+    return "High priority Rural RHT leads";
+  }
+  if (filters.onlyRural) {
+    return "CMS $50B Rural RHT campaign";
+  }
+  if (filters.onlyHighPriority && (filters.onlyToday || filters.datePreset === "today")) {
     return "High priority leads today";
   }
   if (filters.onlyHighPriority) {
@@ -99,7 +110,7 @@ function resolveFeedLabel(filters: Filters, filtered: Lead[], showArchived: bool
   const allFilteredToday =
     filtered.length > 0 &&
     filtered.every((l) => isDiscoveredToday(l.dateDiscovered, l.dateIngested));
-  if (filters.onlyToday || allFilteredToday) {
+  if (filters.onlyToday || filters.datePreset === "today" || allFilteredToday) {
     return "Discovered today";
   }
   if (showArchived) {
@@ -130,9 +141,17 @@ function Dashboard() {
   const actionFn = useServerFn(setLeadAction);
   const bulkActionFn = useServerFn(bulkSetLeadAction);
 
+  const customFromRequiresArchive = useMemo(() => {
+    if (!filters.dateFrom) return false;
+    const fromTs = new Date(`${filters.dateFrom}T00:00:00`).getTime();
+    return Number.isFinite(fromTs) && Date.now() - fromTs > ACTIVE_LEAD_WINDOW_MS;
+  }, [filters.dateFrom]);
+
+  const effectiveIncludeArchived = showArchived || customFromRequiresArchive;
+
   const leadsQ = useQuery({
-    queryKey: ["leads", showArchived],
-    queryFn: () => fetchLeads({ data: { includeArchived: showArchived } }),
+    queryKey: ["leads", effectiveIncludeArchived],
+    queryFn: () => fetchLeads({ data: { includeArchived: effectiveIncludeArchived } }),
   });
   const archivedCountQ = useQuery({
     queryKey: ["archived_lead_count"],
@@ -362,11 +381,11 @@ function Dashboard() {
   const scopedActiveLeads = useMemo(
     () =>
       activeLeads.filter((l) => {
-        if (!showArchived && isArchivedLead(l)) return false;
+        if (!effectiveIncludeArchived && isArchivedLead(l)) return false;
         if (!showAllTerritories && !leadInTerritoryScope(l, TERRITORY_STATES)) return false;
         return true;
       }),
-    [activeLeads, showArchived, showAllTerritories],
+    [activeLeads, effectiveIncludeArchived, showAllTerritories],
   );
 
   const facetSourceLeads = showDismissed ? dismissedLeads : scopedActiveLeads;
@@ -385,55 +404,65 @@ function Dashboard() {
     [facetSourceLeads],
   );
 
-  const filtered = useMemo(
-    () =>
-      visibleLeads
-        .filter((l) => {
-          if (!showArchived && isArchivedLead(l)) return false;
-          if (!showAllTerritories && filters.states.length === 0) {
-            if (!leadInTerritoryScope(l, TERRITORY_STATES)) return false;
-          }
-          if (filters.onlyToday) {
-            if (
-              l.confidence < MIN_HEADLINE_CONFIDENCE ||
-              !isDiscoveredToday(l.dateDiscovered, l.dateIngested)
-            ) {
-              return false;
-            }
-          }
-          if (filters.onlyHighPriority && !leadIsHighPriority(l)) return false;
-          if (filters.hospitals.length && (!l.hospital || !filters.hospitals.includes(l.hospital)))
-            return false;
-          if (
-            filters.specialties.length &&
-            (!l.specialty || !filters.specialties.includes(l.specialty))
-          )
-            return false;
-          if (filters.sources.length && !filters.sources.includes(l.source)) return false;
-          if (l.confidence < filters.minConfidence) return false;
-          if (
-            filters.signalTypes.length &&
-            (!l.signalType || !filters.signalTypes.includes(l.signalType as never))
-          )
-            return false;
-          if (
-            filters.accountTypes.length &&
-            (!l.accountType || !filters.accountTypes.includes(l.accountType as never))
-          )
-            return false;
-          if (filters.vendors.length) {
-            const hay = [...l.vendorMentions, l.competitorIncumbent ?? ""].join(" ").toLowerCase();
-            if (!filters.vendors.some((v) => hay.includes(v.toLowerCase()))) return false;
-          }
-          if (filters.states.length) {
-            const code = leadStateCode(l);
-            if (!code || !filters.states.includes(code)) return false;
-          }
-          return true;
+  const filtered = useMemo(() => {
+    const matched = visibleLeads.filter((l) => {
+      if (!effectiveIncludeArchived && isArchivedLead(l)) return false;
+      if (!showAllTerritories && filters.states.length === 0) {
+        if (!leadInTerritoryScope(l, TERRITORY_STATES)) return false;
+      }
+      if (
+        (filters.onlyToday || filters.datePreset === "today") &&
+        l.confidence < MIN_HEADLINE_CONFIDENCE
+      ) {
+        return false;
+      }
+      if (
+        !leadMatchesDateFilter(l, {
+          onlyToday: filters.onlyToday,
+          datePreset: filters.datePreset,
+          dateFrom: filters.dateFrom,
+          dateTo: filters.dateTo,
         })
-        .sort(compareLeadsByPriorityAndRecency),
-    [visibleLeads, filters, showArchived, showAllTerritories],
-  );
+      ) {
+        return false;
+      }
+      if (filters.onlyRural && !isRuralCampaignLead(l)) return false;
+      if (filters.onlyHighPriority && !leadIsHighPriority(l)) return false;
+      if (filters.leadTypes.length > 0 && !filters.leadTypes.includes(classifyLeadType(l))) {
+        return false;
+      }
+      if (filters.hospitals.length && (!l.hospital || !filters.hospitals.includes(l.hospital)))
+        return false;
+      if (
+        filters.specialties.length &&
+        (!l.specialty || !filters.specialties.includes(l.specialty))
+      )
+        return false;
+      if (filters.sources.length && !filters.sources.includes(l.source)) return false;
+      if (l.confidence < filters.minConfidence) return false;
+      if (
+        filters.signalTypes.length &&
+        (!l.signalType || !filters.signalTypes.includes(l.signalType as never))
+      )
+        return false;
+      if (
+        filters.accountTypes.length &&
+        (!l.accountType || !filters.accountTypes.includes(l.accountType as never))
+      )
+        return false;
+      if (filters.vendors.length) {
+        const hay = [...l.vendorMentions, l.competitorIncumbent ?? ""].join(" ").toLowerCase();
+        if (!filters.vendors.some((v) => hay.includes(v.toLowerCase()))) return false;
+      }
+      if (filters.states.length) {
+        const code = leadStateCode(l);
+        if (!code || !filters.states.includes(code)) return false;
+      }
+      return true;
+    });
+
+    return sortLeads(matched, filters.sortBy);
+  }, [visibleLeads, filters, effectiveIncludeArchived, showAllTerritories]);
 
   const discoveredToday = scopedActiveLeads.filter(
     (l) =>
@@ -441,12 +470,20 @@ function Dashboard() {
       isDiscoveredToday(l.dateDiscovered, l.dateIngested),
   ).length;
   const highPriority = scopedActiveLeads.filter(leadIsHighPriority).length;
+  const ruralCampaignCount = scopedActiveLeads.filter(isRuralCampaignLead).length;
 
-  const feedLabel = resolveFeedLabel(filters, filtered, showArchived);
+  const feedLabel = resolveFeedLabel(filters, filtered, effectiveIncludeArchived);
 
   const toggleTodayFilter = () => {
     setShowDismissed(false);
-    setFilters((prev) => ({ ...prev, onlyToday: !prev.onlyToday }));
+    setFilters((prev) => {
+      const nextToday = !prev.onlyToday;
+      return {
+        ...prev,
+        onlyToday: nextToday,
+        datePreset: nextToday ? "today" : prev.datePreset === "today" ? "all" : prev.datePreset,
+      };
+    });
   };
 
   const toggleHighPriorityFilter = () => {
@@ -632,8 +669,10 @@ function Dashboard() {
               onChange={setFilters}
               hospitals={hospitals}
               specialties={specialties}
+              facetLeads={facetSourceLeads}
               todayCount={discoveredToday}
               highPriorityCount={highPriority}
+              ruralCount={ruralCampaignCount}
             />
 
             <div className="mb-3 flex flex-wrap items-center gap-3">
@@ -840,21 +879,8 @@ function Dashboard() {
 
         <footer className="mt-12 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4 text-xs text-muted-foreground">
           {(() => {
-            const labels: Record<string, string> = {
-              sam_gov: "SAM.gov",
-              openfda: "openFDA",
-              gdelt: "GDELT",
-              gdelt_m_and_a: "GDELT",
-              gdelt_va_funding: "GDELT",
-              reddit: "Reddit",
-              bluesky: "Bluesky",
-              news: "News",
-              clinicaltrials: "ClinicalTrials",
-              cms_open_payments: "CMS Payments",
-              funding_rss: "Gov Funding RSS",
-            };
             const active = Array.from(
-              new Set(activeLeads.map((l) => labels[l.source] ?? l.source)),
+              new Set(activeLeads.map((l) => SOURCE_LABELS[l.source] ?? l.source)),
             ).sort();
             const list = active.length ? active.join(" · ") : "active sources";
             return <span>Live data from {list} · Enriched by Yield AI</span>;

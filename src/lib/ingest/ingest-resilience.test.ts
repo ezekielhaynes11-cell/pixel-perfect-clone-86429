@@ -1,18 +1,25 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  classifyLeadType,
   compareLeadsByPriorityAndRecency,
   isArchivedLead,
   isDiscoveredToday,
+  isRuralCampaignLead,
   leadInTerritoryScope,
   leadIsHighPriority,
+  leadMatchesDateFilter,
+  normalizePhysicianStrings,
   rowToLead,
+  sortLeads,
   type LeadRow,
 } from "@/data/leads";
 import { fetchClinicalTrialContacts, hospitalsMatch } from "@/lib/apollo/public-enrichment.server";
+import { defaultToneForLead, draftOutreachEmail } from "@/lib/outreach.server";
 import { buildBlueskySearchQuery } from "./bluesky.server";
 import { deterministicEnrichRawLead } from "./deterministic-enrich.server";
 import { enrichRawLead } from "./enrich.server";
 import { passesMedicalGate, sanitizeErrorText } from "./medical-gate";
+import { fetchRuralRht } from "./rural-rht.server";
 import { fetchSamGov } from "./sam-gov.server";
 import type { RawLead } from "./types";
 
@@ -483,5 +490,313 @@ describe("deterministic clinical enrichment fallback when AI gateway is unavaila
     const result = deterministicEnrichRawLead(hocusPocusNoise);
     expect(result.confidence).toBeLessThan(35);
     expect(result.priority).toBe("low");
+  });
+});
+
+describe("CMS $50B Rural Health Transformation (rural_rht) ingestion, enrichment, and outreach", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("ingests HHS rural grants, Grants.gov windows, and CMS Critical Access Hospitals while rejecting K-12 ISDs", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+
+      if (url === "https://api.usaspending.gov/api/v2/search/spending_by_award/") {
+        return new Response(
+          JSON.stringify({
+            results: [
+              {
+                "Award ID": "H54RH00099",
+                "Recipient Name": "CABUN RURAL HEALTH SERVICES, INC.",
+                "Start Date": "2026-10-20",
+                "End Date": "2027-09-30",
+                "Award Amount": 1_850_000,
+                "Awarding Agency": "Department of Health and Human Services",
+                "Awarding Sub Agency": "Health Resources and Services Administration",
+                Description:
+                  "RURAL HOSPITAL MATERNAL PERINATAL TELEHEALTH AND DIAGNOSTIC MODERNIZATION",
+                "Place of Performance State Code": "AR",
+                "Place of Performance City Code": "HAMPTON",
+                generated_internal_id: "ASST_NON_H54RH00099_7526",
+              },
+              {
+                "Award ID": "SCH001",
+                "Recipient Name": "BROWNSVILLE INDEPENDENT SCHOOL DISTRICT",
+                "Start Date": "2026-10-18",
+                "Award Amount": 500_000,
+                Description: "SCHOOL COUNSELING",
+                "Place of Performance State Code": "TX",
+                generated_internal_id: "ASST_NON_SCH001",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      if (url === "https://api.grants.gov/v1/api/search2") {
+        return new Response(
+          JSON.stringify({
+            data: {
+              oppHits: [
+                {
+                  id: "358901",
+                  number: "HRSA-26-088",
+                  title: "Rural Critical Access Hospital Tele-ICU and Diagnostic Readiness",
+                  agencyCode: "HHS-HRSA",
+                  oppStatus: "posted",
+                  closeDate: "2026-12-15",
+                },
+              ],
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      if (url.startsWith("https://data.cms.gov/provider-data/api/1/datastore/query/xubh-q36u/0")) {
+        const parsedUrl = new URL(url);
+        const stateCode = parsedUrl.searchParams.get("conditions[0][value]") ?? "TX";
+        if (stateCode === "LA") {
+          return new Response(
+            JSON.stringify({
+              results: [
+                {
+                  facility_id: "191306",
+                  facility_name: "BUNKIE GENERAL HOSPITAL",
+                  address: "427 EVERGREEN ST",
+                  citytown: "BUNKIE",
+                  state: "LA",
+                  zip_code: "71322",
+                  countyparish: "AVOYELLES",
+                  telephone_number: "(318) 346-6681",
+                  hospital_type: "Critical Access Hospitals",
+                  emergency_services: "Yes",
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (stateCode !== "TX") {
+          return new Response(JSON.stringify({ results: [] }), { status: 200 });
+        }
+        return new Response(
+          JSON.stringify({
+            results: [
+              {
+                facility_id: "451301",
+                facility_name: "BIG BEND REGIONAL MEDICAL CENTER",
+                address: "2600 N HIGHWAY 118",
+                citytown: "ALPINE",
+                state: "TX",
+                zip_code: "79830",
+                countyparish: "BREWSTER",
+                telephone_number: "(432) 837-3447",
+                hospital_type: "Critical Access Hospitals",
+                emergency_services: "Yes",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      throw new Error(`Unexpected URL in rural_rht test: ${url}`);
+    });
+
+    const rawLeads = await fetchRuralRht({ grantLimit: 10, cahPerState: 2 });
+    expect(rawLeads).toHaveLength(4);
+
+    const grantLead = rawLeads.find((item) => item.source_external_id.startsWith("rht-grant:"));
+    const ffoLead = rawLeads.find((item) => item.source_external_id.startsWith("grants-gov:"));
+    const cahLead = rawLeads.find((item) => item.source_external_id === "cms-cah:451301");
+    const laCahLead = rawLeads.find((item) => item.source_external_id === "cms-cah:191306");
+
+    expect(grantLead?.title).toContain("Cabun Rural Health Services, Inc. (AR)");
+    expect(ffoLead?.title).toContain("HRSA-26-088");
+    expect(cahLead?.source_contacts?.[0]?.phone).toBe("432-837-3447");
+    expect(deterministicEnrichRawLead(laCahLead!).territory).toBe("louisiana");
+
+    const enrichedGrant = deterministicEnrichRawLead(grantLead!);
+    expect(enrichedGrant.confidence).toBe(88);
+    expect(enrichedGrant.priority).toBe("high");
+    expect(enrichedGrant.territory).toBe("arkansas");
+    expect(enrichedGrant.estimated_value_usd).toBe(1_850_000);
+    expect(enrichedGrant.entities.equipment).toContain("Avalon & Lumify Perinatal");
+
+    const enrichedCah = deterministicEnrichRawLead(cahLead!);
+    expect(enrichedCah.confidence).toBe(85);
+    expect(enrichedCah.priority).toBe("high");
+    expect(enrichedCah.territory).toBe("texas");
+    expect(enrichedCah.signal_type).toBe("expansion");
+    expect(enrichedCah.entities.equipment).toContain("ROCC Remote Scanning");
+    expect(enrichedCah.entities.equipment).toContain("eICU / eCareManager");
+  });
+
+  it("drafts benchmark-backed CMS $50B RHT outreach when LOVABLE_API_KEY is unset", async () => {
+    vi.stubEnv("LOVABLE_API_KEY", "");
+    const leadBrief = {
+      title: "Big Bend Regional Medical Center (Alpine, TX) — CMS RHT Critical Access Hospital",
+      summary: "Verified Critical Access Hospital eligible for Texas $50B CMS RHT modernization.",
+      hospital: "Big Bend Regional Medical Center",
+      specialty: "Radiology",
+      source: "rural_rht",
+      signal_type: "expansion",
+      entities: {
+        equipment: ["BlueSeal Mobile 1.5T MRI", "ROCC Remote Scanning"],
+      },
+    };
+
+    expect(defaultToneForLead(leadBrief)).toBe("rht_grant_pitch");
+    const email = await draftOutreachEmail({
+      lead: leadBrief,
+      repName: "Mike Rivera",
+    });
+
+    expect(email.subject).toContain("CMS $50B Rural Health Transformation");
+    expect(email.body).toContain("Big Bend Regional Medical Center");
+    expect(email.body).toContain("Project EDDY");
+    expect(email.body).toContain("Mike Rivera");
+  });
+});
+
+describe("date presets, custom date range, lead type classification, and sorting", () => {
+  const anchorMs = new Date("2026-11-03T15:00:00Z").getTime();
+
+  function makeFilterLead(overrides: Partial<LeadRow>) {
+    return rowToLead({
+      id: "lead-base",
+      title: "Hospital Equipment Signal",
+      summary: "Clinical expansion",
+      source: "clinicaltrials",
+      source_url: "https://clinicaltrials.gov/study/NCT1",
+      confidence: 80,
+      date_discovered: "2026-11-01T12:00:00Z",
+      date_ingested: "2026-11-03T12:00:00Z",
+      hospital: "Baylor University Medical Center",
+      specialty: "Cardiology",
+      territory: "texas",
+      estimated_value_usd: 400_000,
+      win_probability: 0.25,
+      competitor_incumbent: null,
+      signal_type: "expansion",
+      priority: "medium",
+      entities: {
+        physicians: [{ name: "Dr. Sarah Lin", role_hint: "Cardiology Chair" }],
+        equipment: ["Echocardiography"],
+      },
+      ...overrides,
+    });
+  }
+
+  it("classifies rural_rht, recall, rfp, grant, competitive, and expansion lead types accurately", () => {
+    const ruralLead = makeFilterLead({
+      id: "rural-1",
+      source: "rural_rht",
+      signal_type: "funding",
+      estimated_value_usd: 950_000,
+    });
+    const recallLead = makeFilterLead({
+      id: "recall-1",
+      source: "openfda",
+      signal_type: "recall",
+      estimated_value_usd: 450_000,
+    });
+    const rfpLead = makeFilterLead({
+      id: "rfp-1",
+      source: "sam_gov",
+      signal_type: "rfp",
+      estimated_value_usd: 1_200_000,
+    });
+    const trialLead = makeFilterLead({
+      id: "trial-1",
+      source: "clinicaltrials",
+      signal_type: "expansion",
+      estimated_value_usd: 300_000,
+    });
+
+    expect(isRuralCampaignLead(ruralLead)).toBe(true);
+    expect(classifyLeadType(ruralLead)).toBe("rural_rht");
+    expect(classifyLeadType(recallLead)).toBe("fda_recall");
+    expect(classifyLeadType(rfpLead)).toBe("rfp_procurement");
+    expect(classifyLeadType(trialLead)).toBe("expansion_trial");
+    expect(normalizePhysicianStrings([{ name: "Dr. Sarah Lin", role_hint: "Chair" }])).toEqual([
+      "Dr. Sarah Lin (Chair)",
+    ]);
+  });
+
+  it("filters accurately by rolling date presets and custom YYYY-MM-DD bounds and sorts by value/newest", () => {
+    const todayLead = makeFilterLead({
+      id: "today",
+      date_ingested: "2026-11-03T13:00:00Z",
+      estimated_value_usd: 450_000,
+    });
+    const fiveDaysAgoLead = makeFilterLead({
+      id: "five-days",
+      date_discovered: "2026-10-29T12:00:00Z",
+      date_ingested: "2026-10-29T14:00:00Z",
+      estimated_value_usd: 1_900_000,
+    });
+    const twentyDaysAgoLead = makeFilterLead({
+      id: "twenty-days",
+      date_discovered: "2026-10-14T12:00:00Z",
+      date_ingested: "2026-10-14T14:00:00Z",
+      estimated_value_usd: 750_000,
+    });
+
+    expect(
+      leadMatchesDateFilter(
+        todayLead,
+        { onlyToday: false, datePreset: "3d", dateFrom: "", dateTo: "" },
+        anchorMs,
+      ),
+    ).toBe(true);
+    expect(
+      leadMatchesDateFilter(
+        fiveDaysAgoLead,
+        { onlyToday: false, datePreset: "3d", dateFrom: "", dateTo: "" },
+        anchorMs,
+      ),
+    ).toBe(false);
+    expect(
+      leadMatchesDateFilter(
+        fiveDaysAgoLead,
+        { onlyToday: false, datePreset: "7d", dateFrom: "", dateTo: "" },
+        anchorMs,
+      ),
+    ).toBe(true);
+    expect(
+      leadMatchesDateFilter(
+        twentyDaysAgoLead,
+        {
+          onlyToday: false,
+          datePreset: "custom",
+          dateFrom: "2026-10-10",
+          dateTo: "2026-10-20",
+        },
+        anchorMs,
+      ),
+    ).toBe(true);
+    expect(
+      leadMatchesDateFilter(
+        todayLead,
+        {
+          onlyToday: false,
+          datePreset: "custom",
+          dateFrom: "2026-10-10",
+          dateTo: "2026-10-20",
+        },
+        anchorMs,
+      ),
+    ).toBe(false);
+
+    const byValue = sortLeads([todayLead, fiveDaysAgoLead, twentyDaysAgoLead], "value");
+    expect(byValue.map((item) => item.id)).toEqual(["five-days", "twenty-days", "today"]);
+
+    const byNewest = sortLeads([twentyDaysAgoLead, fiveDaysAgoLead, todayLead], "newest");
+    expect(byNewest.map((item) => item.id)).toEqual(["today", "five-days", "twenty-days"]);
   });
 });

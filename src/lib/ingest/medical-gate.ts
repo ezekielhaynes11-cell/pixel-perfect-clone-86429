@@ -1,8 +1,18 @@
 import type { RawLead } from "./types";
 
-const GATE_BYPASS_SOURCES = new Set<string>(["openfda", "clinicaltrials", "cms_open_payments"]);
+const GATE_BYPASS_SOURCES = new Set<string>([
+  "rural_rht",
+  "openfda",
+  "clinicaltrials",
+  "cms_open_payments",
+]);
 
 const CLINICAL_SUBSTRING_TERMS = [
+  "critical access hospital",
+  "rural emergency hospital",
+  "rural health transformation",
+  "tele-critical",
+  "perinatal",
   "ultrasound",
   "echocard",
   "sonograph",

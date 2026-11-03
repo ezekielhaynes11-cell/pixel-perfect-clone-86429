@@ -9,6 +9,7 @@ import {
   RotateCcw,
   UserRound,
   MoreHorizontal,
+  Cpu,
 } from "lucide-react";
 
 import { Link } from "@tanstack/react-router";
@@ -19,11 +20,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { type Lead, timeAgo } from "@/data/leads";
+import { classifyLeadType, LEAD_TYPE_LABELS, type Lead, timeAgo } from "@/data/leads";
 import type { LeadPhysician } from "@/lib/leads.functions";
 import { ContactSection } from "./ContactSection";
 
 const sourceMeta: Record<string, { label: string; cls: string }> = {
+  rural_rht: {
+    label: "CMS Rural RHT",
+    cls: "bg-lime-500/15 text-lime-300 border-lime-500/30",
+  },
   sam_gov: { label: "SAM.gov", cls: "bg-blue-500/15 text-blue-300 border-blue-500/30" },
   openfda: { label: "FDA Recall", cls: "bg-red-500/15 text-red-300 border-red-500/30" },
   gdelt: { label: "News", cls: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
@@ -110,6 +115,9 @@ export function LeadCard({
         >
           {meta.label}
         </span>
+        <span className="hidden rounded-sm border border-border/80 bg-surface px-2 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline-block">
+          {LEAD_TYPE_LABELS[classifyLeadType(lead)]}
+        </span>
         <div className="flex items-center gap-1.5">
           <span className={`inline-block h-3 w-3 rounded-full ${conf.split(" ")[1]}`} />
           <span className="text-xs font-semibold">{lead.confidence}% Confidence</span>
@@ -168,14 +176,24 @@ export function LeadCard({
             Est. value TBD
           </span>
         )}
-        {lead.entities.keywords.slice(0, 2).map((k) => (
+        {lead.entities.equipment.slice(0, 2).map((equip) => (
           <span
-            key={k}
-            className="rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[11px] text-primary"
+            key={`eq:${equip}`}
+            className="inline-flex items-center gap-1 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-300"
           >
-            {k}
+            <Cpu className="h-3 w-3" />
+            {equip}
           </span>
         ))}
+        {lead.entities.equipment.length === 0 &&
+          lead.entities.keywords.slice(0, 2).map((k) => (
+            <span
+              key={k}
+              className="rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[11px] text-primary"
+            >
+              {k}
+            </span>
+          ))}
       </div>
 
       {/* Contact — visible immediately when contacts exist on file; otherwise enriches on click */}

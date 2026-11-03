@@ -70,6 +70,19 @@ const SPECIALTY_RULES: ReadonlyArray<[RegExp, string]> = [
 ];
 
 const EQUIPMENT_CATALOG: ReadonlyArray<[RegExp, string]> = [
+  [/\b(blueseal|helium[- ]free\s+mri|mobile\s+1\.5t|mobile\s+mri)\b/i, "BlueSeal Mobile 1.5T MRI"],
+  [/\b(ct\s*5300|ai\s+smart\s+workflow)\b/i, "CT 5300 Smart Workflow"],
+  [/\b(\brocc\b|radiology\s+operations\s+command|remote\s+scanning)\b/i, "ROCC Remote Scanning"],
+  [
+    /\b(ecaremanager|\beicu\b|tele[- ]critical|tele[- ]icu|virtual\s+icu)\b/i,
+    "eICU / eCareManager",
+  ],
+  [
+    /\b(avalon|intellispace\s+perinatal|lumify\s+with\s+reacts|fetal\s+monitoring)\b/i,
+    "Avalon & Lumify Perinatal",
+  ],
+  [/\b(earlyvue|vs30|early\s+warning\s+scoring)\b/i, "EarlyVue VS30"],
+  [/\b(telemetry\s+monitor\s+5500|intellivue\s+mx40|\bmx40\b)\b/i, "Telemetry 5500 / MX40"],
   [
     /\b(echocardiograph\w*|cardiac\s+ultrasound|transthoracic|transesophageal)\b/i,
     "Echocardiography",
@@ -163,15 +176,29 @@ function extractHospital(raw: RawLead): string | null {
 }
 
 function extractTerritory(raw: RawLead, hospital: string | null): string | null {
-  const combined = `${raw.title}\n${raw.raw_text}\n${hospital ?? ""}`;
+  const explicitStateLine = raw.raw_text.match(/^State:\s*(Texas|Oklahoma|Arkansas|Louisiana)\b/im);
+  if (explicitStateLine?.[1]) {
+    return explicitStateLine[1].toLowerCase();
+  }
+
+  const headerAndHospital = `${raw.title}\n${hospital ?? ""}`;
   for (const [pattern, slug] of STATE_LOOKUP) {
-    if (pattern.test(combined)) return slug;
+    if (pattern.test(headerAndHospital)) return slug;
+  }
+
+  for (const [pattern, slug] of STATE_LOOKUP) {
+    if (pattern.test(raw.raw_text)) return slug;
   }
   return null;
 }
 
 function inferSignalType(raw: RawLead): SignalType {
   if (raw.source === "openfda") return "recall";
+  if (raw.source === "rural_rht") {
+    if (raw.source_external_id.startsWith("grants-gov:")) return "rfp";
+    if (raw.source_external_id.startsWith("cms-cah:")) return "expansion";
+    return "funding";
+  }
   if (raw.source === "sam_gov") {
     return raw.source_external_id.startsWith("nih:") ? "funding" : "rfp";
   }
@@ -244,12 +271,24 @@ function extractDollarValue(
   signalType: SignalType,
   equipment: string[],
 ): number | null {
-  const awardMatch = `${raw.title}\n${raw.raw_text}`.match(/\$([0-9]{1,3}(?:,[0-9]{3})+)/);
+  const explicitAwardLine = raw.raw_text.match(/^Award \$:\s*\$([0-9]{1,3}(?:,[0-9]{3})+)/im);
+  const awardMatch =
+    explicitAwardLine ?? `${raw.title}\n${raw.raw_text}`.match(/\$([0-9]{1,3}(?:,[0-9]{3})+)/);
   if (awardMatch?.[1]) {
     const numeric = Number(awardMatch[1].replace(/,/g, ""));
     if (Number.isFinite(numeric) && numeric >= 50_000) {
       return Math.min(numeric, 4_000_000);
     }
+  }
+  if (raw.source === "rural_rht") {
+    if (raw.source_external_id.startsWith("grants-gov:")) return 650_000;
+    if (raw.source_external_id.startsWith("cms-cah:")) {
+      const hasImagingHub = equipment.some(
+        (item) => item.includes("MRI") || item.includes("CT") || item.includes("ROCC"),
+      );
+      return hasImagingHub ? 750_000 : 450_000;
+    }
+    return 500_000;
   }
   if (equipment.some((item) => item.includes("MRI") || item.includes("Cath Lab"))) return 1_200_000;
   if (equipment.some((item) => item.includes("CT"))) return 850_000;
@@ -277,6 +316,26 @@ function extractPhysiciansFromContacts(
   return list.slice(0, 5);
 }
 
+function scoreRuralRhtLead(
+  raw: RawLead,
+  inCoreTerritory: boolean,
+): { confidence: number; priority: "high" | "medium"; winProbability: number } {
+  if (raw.source_external_id.startsWith("rht-grant:")) {
+    const confidence = inCoreTerritory ? 88 : 78;
+    return { confidence, priority: "high", winProbability: 0.32 };
+  }
+  if (raw.source_external_id.startsWith("grants-gov:")) {
+    return { confidence: 86, priority: "high", winProbability: 0.28 };
+  }
+  const hasEmergencyServices = /24\/7 Emergency Services/i.test(raw.raw_text);
+  const confidence = hasEmergencyServices ? 85 : 80;
+  return {
+    confidence,
+    priority: confidence >= 80 && inCoreTerritory ? "high" : "medium",
+    winProbability: hasEmergencyServices ? 0.28 : 0.22,
+  };
+}
+
 function scoreLead(opts: {
   raw: RawLead;
   hospital: string | null;
@@ -293,6 +352,10 @@ function scoreLead(opts: {
   }
 
   const inCoreTerritory = territory !== null && TERRITORY_SLUGS.has(territory);
+  if (raw.source === "rural_rht") {
+    return scoreRuralRhtLead(raw, inCoreTerritory);
+  }
+
   const hasEquipmentSignal = equipment.length > 0;
   const isCommercialEntity = hospital !== null && COMMERCIAL_NON_HOSPITAL_RX.test(hospital);
 
@@ -341,6 +404,34 @@ function scoreLead(opts: {
   return { confidence, priority, winProbability };
 }
 
+function buildRuralRhtSummary(
+  raw: RawLead,
+  hospital: string | null,
+  stateUpper: string | null,
+  equipment: string[],
+  valueText: string,
+): string {
+  const bundleLabel = equipment.slice(0, 2).join(" + ") || "BlueSeal Mobile 1.5T MRI + ROCC / eICU";
+  const loc = stateUpper ? ` (${stateUpper})` : "";
+
+  if (raw.source_external_id.startsWith("rht-grant:") && hospital) {
+    return `${hospital}${loc} secured ${valueText}HHS/CMS rural health grant. Position Philips ${bundleLabel} under ${stateUpper ?? "state"} $50B CMS RHT funding.`.slice(
+      0,
+      275,
+    );
+  }
+  if (raw.source_external_id.startsWith("cms-cah:") && hospital) {
+    return `${hospital}${loc} is a verified CMS Critical Access Hospital eligible for ${stateUpper ?? "state"} $50B RHT modernization. Pitch Philips ${bundleLabel}.`.slice(
+      0,
+      275,
+    );
+  }
+  return `Active HHS/CMS rural hospital grant window for TX/OK/AR/LA accounts. Spec Philips ${bundleLabel} into facility capital budgets before close.`.slice(
+    0,
+    275,
+  );
+}
+
 function buildSalesSummary(opts: {
   raw: RawLead;
   hospital: string | null;
@@ -381,6 +472,9 @@ function buildSalesSummary(opts: {
       ? `$${Math.round(estimatedValueUsd).toLocaleString("en-US")} `
       : "";
 
+  if (raw.source === "rural_rht") {
+    return buildRuralRhtSummary(raw, hospital, stateUpper, equipment, valueText);
+  }
   if (signalType === "recall") {
     return `${incumbent ?? "Competitor"} FDA recall impacting ${modalityLabel}. Position Philips replacement fleet across TX/OK/AR/LA accounts.`.slice(
       0,

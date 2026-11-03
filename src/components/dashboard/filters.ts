@@ -3,7 +3,7 @@
 // component file only exports components — otherwise React Fast Refresh warns
 // and full-reloads on every edit.
 
-import type { LeadSource } from "@/data/leads";
+import type { DatePreset, LeadSource, LeadType, SortOption } from "@/data/leads";
 
 export type SignalType =
   "recall" | "rfp" | "funding" | "m_and_a" | "expansion" | "sentiment" | "incumbency";
@@ -16,6 +16,7 @@ export interface Filters {
   hospitals: string[];
   specialties: string[];
   sources: LeadSource[];
+  leadTypes: LeadType[];
   signalTypes: SignalType[];
   accountTypes: AccountType[];
   vendors: string[];
@@ -23,23 +24,30 @@ export interface Filters {
   minConfidence: number;
   onlyToday: boolean;
   onlyHighPriority: boolean;
+  onlyRural: boolean;
+  datePreset: DatePreset;
+  dateFrom: string;
+  dateTo: string;
+  sortBy: SortOption;
 }
 
 export const emptyFilters: Filters = {
   hospitals: [],
   specialties: [],
   sources: [],
+  leadTypes: [],
   signalTypes: [],
   accountTypes: [],
   vendors: [],
   states: [],
-  // The feed is sorted by confidence (best first) rather than filtered by it, and
-  // there is no min-confidence UI control, so the default is 0 — never silently
-  // hide sub-threshold leads with no way to reveal them. (minConfidence stays in
-  // the type because saved-search alerting can still set it.)
   minConfidence: 0,
   onlyToday: false,
   onlyHighPriority: false,
+  onlyRural: false,
+  datePreset: "all",
+  dateFrom: "",
+  dateTo: "",
+  sortBy: "priority",
 };
 
 export const signalTypeOptions: SignalType[] = [

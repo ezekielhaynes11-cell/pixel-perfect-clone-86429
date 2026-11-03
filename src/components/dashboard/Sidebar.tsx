@@ -50,6 +50,7 @@ export function Sidebar({ leads }: { leads: Lead[] }) {
   }, [leads]);
   const trendMax = Math.max(1, ...trend.map((d) => d.count));
   const sourceColors: Record<string, string> = {
+    rural_rht: "bg-lime-500",
     sam_gov: "bg-blue-500",
     openfda: "bg-red-500",
     gdelt: "bg-violet-500",
@@ -63,6 +64,7 @@ export function Sidebar({ leads }: { leads: Lead[] }) {
     funding_rss: "bg-teal-500",
   };
   const sourceLabels: Record<string, string> = {
+    rural_rht: "CMS Rural RHT",
     sam_gov: "SAM.gov",
     openfda: "openFDA",
     gdelt: "GDELT",
