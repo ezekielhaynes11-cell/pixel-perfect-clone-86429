@@ -10,6 +10,8 @@ import {
   UserRound,
   MoreHorizontal,
   Cpu,
+  Presentation,
+  CheckCircle2,
 } from "lucide-react";
 
 import { Link } from "@tanstack/react-router";
@@ -63,6 +65,9 @@ export function LeadCard({
   saved = false,
   onDismiss,
   onDraft,
+  onPitchDeck,
+  onToggleContacted,
+  contacted = false,
   selectMode = false,
   selected = false,
   onToggleSelect,
@@ -77,6 +82,9 @@ export function LeadCard({
   saved?: boolean;
   onDismiss?: () => void;
   onDraft?: () => void;
+  onPitchDeck?: (lead: Lead) => void;
+  onToggleContacted?: (lead: Lead) => void;
+  contacted?: boolean;
   selectMode?: boolean;
   selected?: boolean;
   onToggleSelect?: () => void;
@@ -95,6 +103,7 @@ export function LeadCard({
   const handleOpenContact = () => {
     setIsOpeningContact(true);
     setContactOpen(true);
+    setTimeout(() => setIsOpeningContact(false), 500);
   };
 
   const formattedValue =
@@ -106,7 +115,7 @@ export function LeadCard({
 
   return (
     <article
-      className={`fade-up group rounded-xl border bg-card/50 p-4 sm:p-5 backdrop-blur-sm transition-all duration-200 hover:scale-[1.01] hover:border-primary/40 hover:bg-card/80 hover:shadow-lg ${
+      className={`fade-up group rounded-2xl border bg-card/60 p-4 sm:p-5 backdrop-blur-sm transition-all duration-200 hover:scale-[1.01] hover:border-primary/40 hover:bg-card/90 hover:shadow-lg ${
         selected ? "border-primary/60 ring-1 ring-primary/40" : "border-border/40"
       } ${dismissed ? "opacity-60" : ""}`}
       style={{ animationDelay: `${Math.min(index * 30, 300)}ms` }}
@@ -153,6 +162,13 @@ export function LeadCard({
           </span>
         )}
 
+        {contacted && (
+          <span className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-400">
+            <CheckCircle2 className="h-3 w-3" />
+            Contacted
+          </span>
+        )}
+
         <span className="ml-auto text-xs tabular-nums text-muted-foreground">
           {timeAgo(lead.dateDiscovered)}
         </span>
@@ -177,7 +193,7 @@ export function LeadCard({
           {lead.title}
         </h3>
 
-        {/* Summary */}
+        {/* Executive Prose Narrative */}
         <p className="line-clamp-2 text-sm leading-relaxed text-muted-foreground">{lead.summary}</p>
       </div>
 
@@ -215,7 +231,7 @@ export function LeadCard({
           ))}
       </div>
 
-      {/* Contact Section — min-height preserved to prevent jarring layout shifts */}
+      {/* Contact Section — min-height preserved to prevent layout shifts */}
       <div className="min-h-[44px]">
         {contactOpen || hasContacts ? (
           <ContactSection
@@ -240,20 +256,65 @@ export function LeadCard({
         )}
       </div>
 
-      {/* Actions: Standardized design tokens & minimum 44px touch targets */}
+      {/* Simplified, High-Contrast Action Triggers (Min 44px Touch Targets) */}
       <div
-        className="flex flex-wrap items-center gap-2 pt-1"
+        className="flex flex-wrap items-center gap-2.5 border-t border-border/30 pt-3"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.stopPropagation()}
       >
+        {/* Trigger 1: Draft Outreach */}
         <button
+          type="button"
           onClick={onDraft}
-          className="flex min-h-[44px] items-center gap-2 rounded-lg bg-primary px-4 text-xs font-semibold text-primary-foreground shadow-sm transition-all duration-150 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+          className="flex min-h-[44px] items-center gap-2 rounded-lg bg-primary px-3.5 text-xs font-semibold text-primary-foreground shadow-sm transition-all duration-150 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
         >
           <Sparkles className="h-4 w-4" />
           <span>Draft outreach</span>
         </button>
 
+        {/* Trigger 2: Enrich with Apollo */}
+        <button
+          type="button"
+          onClick={handleOpenContact}
+          className="flex min-h-[44px] items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-3.5 text-xs font-semibold text-primary transition-all duration-150 hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+        >
+          {isOpeningContact ? (
+            <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          ) : (
+            <UserRound className="h-4 w-4" />
+          )}
+          <span>Enrich with Apollo</span>
+        </button>
+
+        {/* Trigger 3: Generate Pitch Deck */}
+        {onPitchDeck && (
+          <button
+            type="button"
+            onClick={() => onPitchDeck(lead)}
+            className="flex min-h-[44px] items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3.5 text-xs font-semibold text-emerald-400 transition-all duration-150 hover:bg-emerald-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+          >
+            <Presentation className="h-4 w-4" />
+            <span>Generate Pitch Deck</span>
+          </button>
+        )}
+
+        {/* Trigger 4: Mark Contacted */}
+        {onToggleContacted && (
+          <button
+            type="button"
+            onClick={() => onToggleContacted(lead)}
+            className={`flex min-h-[44px] items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 ${
+              contacted
+                ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25"
+                : "border-border/60 bg-surface/60 text-muted-foreground hover:bg-surface hover:text-foreground"
+            }`}
+          >
+            <CheckCircle2 className={`h-4 w-4 ${contacted ? "text-emerald-400" : "text-muted-foreground"}`} />
+            <span>{contacted ? "Contacted ✓" : "Mark Contacted"}</span>
+          </button>
+        )}
+
+        {/* Overflow Menu: Secondary Actions */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button

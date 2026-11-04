@@ -52,6 +52,8 @@ import { LeadCard } from "@/components/dashboard/LeadCard";
 import { LeadDetailModal } from "@/components/dashboard/LeadDetailModal";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { OutreachDraftDialog } from "@/components/dashboard/OutreachDraftDialog";
+import { PitchDeckModal } from "@/components/dashboard/PitchDeckModal";
+import { ExecutiveBriefingNarrative } from "@/components/dashboard/ExecutiveBriefingNarrative";
 import { SavedSearchesDrawer } from "@/components/dashboard/SavedSearchesDrawer";
 import { AlertsBell } from "@/components/dashboard/AlertsBell";
 import { CopilotPanel } from "@/components/dashboard/CopilotPanel";
@@ -123,6 +125,7 @@ function Dashboard() {
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [active, setActive] = useState<Lead | null>(null);
   const [draftFor, setDraftFor] = useState<Lead | null>(null);
+  const [pitchDeckFor, setPitchDeckFor] = useState<Lead | null>(null);
   const [searchesOpen, setSearchesOpen] = useState(false);
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [showDismissed, setShowDismissed] = useState(false);
@@ -616,6 +619,7 @@ function Dashboard() {
         <SummaryCard
           total={discoveredToday}
           highPriority={highPriority}
+          leads={filtered.length ? filtered : scopedActiveLeads}
           isLive={refreshQ.data?.isLive ?? false}
           lastSucceededAt={refreshQ.data?.lastSucceededAt ?? null}
           refreshFailed={refreshQ.data?.status === "failed"}
@@ -699,6 +703,15 @@ function Dashboard() {
 
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
           <div>
+            <ExecutiveBriefingNarrative
+              leads={filtered.length ? filtered : scopedActiveLeads}
+              highPriorityCount={highPriority}
+              onOpenLead={setActive}
+              onDraftOutreach={setDraftFor}
+              onOpenPitchDeck={(lead) => setPitchDeckFor(lead)}
+              onOpenCopilot={() => setCopilotOpen(true)}
+            />
+
             <FilterBar
               filters={filters}
               onChange={setFilters}
@@ -866,6 +879,7 @@ function Dashboard() {
                     physicians={physiciansByLead.get(lead.id) ?? []}
                     onView={setActive}
                     saved={savedIds.has(lead.id)}
+                    contacted={contactedIds.has(lead.id)}
                     onSave={() =>
                       act.mutate({
                         lead_id: lead.id,
@@ -875,6 +889,22 @@ function Dashboard() {
                     }
                     onDismiss={() => act.mutate({ lead_id: lead.id, action: "dismissed" })}
                     onDraft={() => setDraftFor(lead)}
+                    onPitchDeck={(targetLead) => setPitchDeckFor(targetLead)}
+                    onToggleContacted={(targetLead) => {
+                      const isContacted = contactedIds.has(targetLead.id);
+                      act.mutate(
+                        { lead_id: targetLead.id, action: "contacted", remove: isContacted },
+                        {
+                          onSuccess: () => {
+                            toast.success(
+                              isContacted
+                                ? `Marked "${targetLead.hospital || targetLead.title}" as uncontacted`
+                                : `Marked "${targetLead.hospital || targetLead.title}" as contacted`,
+                            );
+                          },
+                        },
+                      );
+                    }}
                     selectMode={selectMode}
                     selected={selected.has(lead.id)}
                     onToggleSelect={() => toggleLeadSelection(lead.id)}
@@ -940,6 +970,15 @@ function Dashboard() {
         onClose={() => setActive(null)}
       />
       <OutreachDraftDialog lead={draftFor} open={!!draftFor} onClose={() => setDraftFor(null)} />
+      <PitchDeckModal
+        lead={pitchDeckFor}
+        open={Boolean(pitchDeckFor)}
+        onOpenChange={(open) => !open && setPitchDeckFor(null)}
+        onDraftOutreach={(lead) => {
+          setPitchDeckFor(null);
+          setDraftFor(lead);
+        }}
+      />
       <SavedSearchesDrawer
         open={searchesOpen}
         onClose={() => setSearchesOpen(false)}
