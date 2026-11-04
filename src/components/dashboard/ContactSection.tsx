@@ -369,10 +369,19 @@ export function ContactSection({
 
       {empty && !enrichFound && (
         <div className="space-y-2 px-1 py-1">
-          <p className="text-xs text-muted-foreground">
-            No decision-maker on file yet for this account.
-          </p>
-          {leadId && <ApolloCTA onClick={runApollo} loading={enrichLoading} />}
+          {enrichLoading ? (
+            <div className="space-y-2 py-1">
+              <div className="h-4 w-3/4 animate-pulse rounded bg-surface-3/60" />
+              <div className="h-3 w-1/2 animate-pulse rounded bg-surface-3/40" />
+            </div>
+          ) : (
+            <>
+              <p className="text-xs text-muted-foreground">
+                No decision-maker on file yet for this account.
+              </p>
+              {leadId && <ApolloCTA onClick={runApollo} loading={enrichLoading} />}
+            </>
+          )}
         </div>
       )}
 

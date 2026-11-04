@@ -186,16 +186,16 @@ function FilterButton({
       <button
         type="button"
         onClick={onClick}
-        className={`flex h-9 items-center gap-2 rounded-md border px-3 text-sm transition-colors ${
+        className={`flex min-h-[44px] items-center gap-2 rounded-lg border px-3 text-xs font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 ${
           active
-            ? "border-primary bg-primary/10 text-primary"
-            : "border-border bg-surface-2 text-foreground hover:bg-surface-3"
+            ? "border-primary/60 bg-primary/10 text-primary shadow-sm"
+            : "border-border/40 bg-card/40 text-foreground/85 hover:border-border/80 hover:bg-card hover:text-foreground"
         }`}
       >
         {icon}
         <span>{label}</span>
         {count ? (
-          <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground">
+          <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-primary-foreground">
             {count}
           </span>
         ) : null}
@@ -328,7 +328,7 @@ export function FilterBar({
       : "Date";
 
   return (
-    <div className="sticky top-16 z-30 -mx-6 mb-6 border-b border-border bg-background/90 px-6 py-3 backdrop-blur">
+    <div className="sticky top-16 z-30 -mx-6 mb-6 border-b border-border/50 bg-background/90 px-6 py-3 backdrop-blur-md">
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -345,19 +345,19 @@ export function FilterBar({
                   : filters.datePreset,
             });
           }}
-          className={`flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium transition-colors ${
+          className={`flex min-h-[44px] items-center gap-2 rounded-lg border px-3 text-xs font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 ${
             filters.onlyToday
-              ? "border-primary bg-primary/15 text-primary"
-              : "border-border bg-surface-2 text-foreground hover:bg-surface-3"
+              ? "border-primary/60 bg-primary/10 text-primary shadow-sm"
+              : "border-border/40 bg-card/40 text-foreground/85 hover:border-border/80 hover:bg-card hover:text-foreground"
           }`}
         >
           <CalendarClock className="h-3.5 w-3.5" />
-          <span>Leads Today</span>
+          <span>Leads today</span>
           <span
-            className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+            className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${
               filters.onlyToday
                 ? "bg-primary text-primary-foreground"
-                : "bg-surface text-muted-foreground"
+                : "bg-surface-2 text-muted-foreground"
             }`}
           >
             {todayCount}
@@ -368,17 +368,19 @@ export function FilterBar({
           type="button"
           aria-pressed={filters.onlyHighPriority}
           onClick={() => onChange({ ...filters, onlyHighPriority: !filters.onlyHighPriority })}
-          className={`flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium transition-colors ${
+          className={`flex min-h-[44px] items-center gap-2 rounded-lg border px-3 text-xs font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-2 ${
             filters.onlyHighPriority
-              ? "border-danger/70 bg-danger/15 text-danger"
-              : "border-border bg-surface-2 text-foreground hover:bg-surface-3"
+              ? "border-danger/60 bg-danger/10 text-danger shadow-sm"
+              : "border-border/40 bg-card/40 text-foreground/85 hover:border-border/80 hover:bg-card hover:text-foreground"
           }`}
         >
           <AlertTriangle className="h-3.5 w-3.5" />
-          <span>Priority Leads</span>
+          <span>Priority leads</span>
           <span
-            className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
-              filters.onlyHighPriority ? "bg-danger text-white" : "bg-surface text-muted-foreground"
+            className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${
+              filters.onlyHighPriority
+                ? "bg-danger text-white"
+                : "bg-surface-2 text-muted-foreground"
             }`}
           >
             {highPriorityCount}
@@ -389,26 +391,26 @@ export function FilterBar({
           type="button"
           aria-pressed={filters.onlyRural}
           onClick={() => onChange({ ...filters, onlyRural: !filters.onlyRural })}
-          className={`flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium transition-colors ${
+          className={`flex min-h-[44px] items-center gap-2 rounded-lg border px-3 text-xs font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 ${
             filters.onlyRural
-              ? "border-emerald-500/70 bg-emerald-500/15 text-emerald-300"
-              : "border-border bg-surface-2 text-foreground hover:bg-surface-3"
+              ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-300 shadow-sm"
+              : "border-border/40 bg-card/40 text-foreground/85 hover:border-border/80 hover:bg-card hover:text-foreground"
           }`}
         >
           <HeartPulse className="h-3.5 w-3.5" />
           <span>Rural RHT</span>
           <span
-            className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+            className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${
               filters.onlyRural
                 ? "bg-emerald-500 text-slate-950"
-                : "bg-surface text-muted-foreground"
+                : "bg-surface-2 text-muted-foreground"
             }`}
           >
             {ruralCount}
           </span>
         </button>
 
-        <div className="mx-1 hidden h-5 w-px bg-border sm:block" />
+        <div className="mx-1 hidden h-5 w-px bg-border/60 sm:block" />
 
         <FilterButton
           icon={<CalendarRange className="h-3.5 w-3.5" />}
@@ -601,7 +603,7 @@ export function FilterBar({
           <button
             type="button"
             onClick={() => setOpenMenu(openMenu === "sort" ? null : "sort")}
-            className="flex h-9 items-center gap-1.5 rounded-md border border-border bg-surface-2 px-3 text-xs font-medium text-foreground/90 transition-colors hover:bg-surface-3"
+            className="flex min-h-[44px] items-center gap-1.5 rounded-lg border border-border/40 bg-card/40 px-3 text-xs font-medium text-foreground/85 transition-all duration-150 hover:border-border/80 hover:bg-card hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
             title="Sort leads"
           >
             <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />

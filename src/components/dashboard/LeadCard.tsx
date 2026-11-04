@@ -90,39 +90,70 @@ export function LeadCard({
   const conf = confidenceColor(lead.confidence);
   const hasContacts = (lead.sourceContacts?.length ?? 0) > 0 || physicians.length > 0;
   const [contactOpen, setContactOpen] = useState(hasContacts);
+  const [isOpeningContact, setIsOpeningContact] = useState(false);
+
+  const handleOpenContact = () => {
+    setIsOpeningContact(true);
+    setContactOpen(true);
+  };
+
+  const formattedValue =
+    lead.estimatedValueUsd != null && lead.estimatedValueUsd > 0
+      ? lead.estimatedValueUsd >= 1e6
+        ? `Est. $${(lead.estimatedValueUsd / 1e6).toFixed(1)}M`
+        : `Est. $${Math.round(lead.estimatedValueUsd / 1000)}k`
+      : null;
 
   return (
     <article
-      className={`fade-up group rounded-md border bg-surface-2 p-4 transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:bg-surface-3 hover:shadow-card-hover ${
-        selected ? "border-primary/60 ring-1 ring-primary/40" : "border-border"
+      className={`fade-up group rounded-xl border bg-card/50 p-4 sm:p-5 backdrop-blur-sm transition-all duration-200 hover:scale-[1.01] hover:border-primary/40 hover:bg-card/80 hover:shadow-lg ${
+        selected ? "border-primary/60 ring-1 ring-primary/40" : "border-border/40"
       } ${dismissed ? "opacity-60" : ""}`}
-      style={{ animationDelay: `${Math.min(index * 40, 400)}ms` }}
+      style={{ animationDelay: `${Math.min(index * 30, 300)}ms` }}
     >
-      {/* Top row: Source + Confidence + Date */}
-      <div className="mb-2 flex items-center gap-3">
+      {/* Top row: Badges + Tabular metrics + Timestamp */}
+      <div className="mb-2.5 flex flex-wrap items-center gap-2">
         {selectMode && (
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={onToggleSelect}
-            onClick={(e) => e.stopPropagation()}
-            aria-label="Select lead"
-            className="h-4 w-4 cursor-pointer accent-primary"
-          />
+          <div className="flex min-h-[32px] items-center">
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={onToggleSelect}
+              onClick={(e) => e.stopPropagation()}
+              aria-label="Select lead"
+              className="h-4 w-4 cursor-pointer accent-primary"
+            />
+          </div>
         )}
         <span
-          className={`rounded-sm border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${meta.cls}`}
+          className={`rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${meta.cls}`}
         >
           {meta.label}
         </span>
-        <span className="hidden rounded-sm border border-border/80 bg-surface px-2 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline-block">
+        <span className="hidden rounded-md border border-border/70 bg-surface/70 px-2 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline-block">
           {LEAD_TYPE_LABELS[classifyLeadType(lead)]}
         </span>
-        <div className="flex items-center gap-1.5">
-          <span className={`inline-block h-3 w-3 rounded-full ${conf.split(" ")[1]}`} />
-          <span className="text-xs font-semibold">{lead.confidence}% Confidence</span>
+
+        {/* Tabular figures: Confidence & Deal Value grouped together */}
+        <div className="flex items-center gap-2 rounded-md border border-border/40 bg-surface/40 px-2 py-0.5">
+          <span className={`inline-block h-2 w-2 rounded-full ${conf.split(" ")[1]}`} />
+          <span className="text-xs font-semibold tabular-nums text-foreground">
+            {lead.confidence}%
+          </span>
+          <span className="text-[10px] text-muted-foreground">conf.</span>
         </div>
-        <span className="ml-auto text-[11px] text-muted-foreground">
+
+        {formattedValue ? (
+          <span className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold tabular-nums text-emerald-400">
+            {formattedValue}
+          </span>
+        ) : (
+          <span className="rounded-md border border-border/30 bg-surface/30 px-2 py-0.5 text-xs tabular-nums text-muted-foreground/80">
+            Est. value TBD
+          </span>
+        )}
+
+        <span className="ml-auto text-xs tabular-nums text-muted-foreground">
           {timeAgo(lead.dateDiscovered)}
         </span>
       </div>
@@ -139,7 +170,7 @@ export function LeadCard({
           }
         }}
         aria-label={`View details for ${lead.title}`}
-        className="-mx-1 cursor-pointer rounded-sm px-1 outline-none focus-visible:ring-1 focus-visible:ring-primary"
+        className="-mx-1 cursor-pointer rounded-lg px-1 py-0.5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary"
       >
         {/* Title */}
         <h3 className="mb-1.5 font-display text-base font-semibold leading-snug text-foreground transition-colors group-hover:text-primary">
@@ -147,86 +178,80 @@ export function LeadCard({
         </h3>
 
         {/* Summary */}
-        <p className="line-clamp-2 text-sm text-muted-foreground">{lead.summary}</p>
+        <p className="line-clamp-2 text-sm leading-relaxed text-muted-foreground">{lead.summary}</p>
       </div>
 
       {/* Entity chips */}
-      <div className="mb-3 mt-3 flex flex-wrap gap-1.5">
+      <div className="mb-3.5 mt-3 flex flex-wrap items-center gap-1.5">
         {lead.hospital && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[11px] text-foreground/80">
+          <span className="inline-flex items-center gap-1 rounded-full border border-border/40 bg-surface/60 px-2.5 py-0.5 text-xs text-foreground/85">
             <Building2 className="h-3 w-3 text-muted-foreground" />
             {lead.hospital}
           </span>
         )}
         {lead.specialty && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[11px] text-foreground/80">
+          <span className="inline-flex items-center gap-1 rounded-full border border-border/40 bg-surface/60 px-2.5 py-0.5 text-xs text-foreground/85">
             <Stethoscope className="h-3 w-3 text-muted-foreground" />
             {lead.specialty}
-          </span>
-        )}
-        {lead.estimatedValueUsd != null && lead.estimatedValueUsd > 0 ? (
-          <span className="rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[11px] text-success">
-            Est.{" "}
-            {lead.estimatedValueUsd >= 1e6
-              ? `$${(lead.estimatedValueUsd / 1e6).toFixed(1)}M`
-              : `$${Math.round(lead.estimatedValueUsd / 1000)}k`}
-          </span>
-        ) : (
-          <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] text-muted-foreground">
-            Est. value TBD
           </span>
         )}
         {lead.entities.equipment.slice(0, 2).map((equip) => (
           <span
             key={`eq:${equip}`}
-            className="inline-flex items-center gap-1 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-300"
+            className="inline-flex items-center gap-1 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-0.5 text-xs text-emerald-300"
           >
             <Cpu className="h-3 w-3" />
             {equip}
           </span>
         ))}
         {lead.entities.equipment.length === 0 &&
-          lead.entities.keywords.slice(0, 2).map((k) => (
+          lead.entities.keywords.slice(0, 2).map((keyword) => (
             <span
-              key={k}
-              className="rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[11px] text-primary"
+              key={keyword}
+              className="rounded-full border border-primary/20 bg-primary/5 px-2.5 py-0.5 text-xs text-primary"
             >
-              {k}
+              {keyword}
             </span>
           ))}
       </div>
 
-      {/* Contact — visible immediately when contacts exist on file; otherwise enriches on click */}
-      {contactOpen || hasContacts ? (
-        <ContactSection
-          sourceContacts={lead.sourceContacts ?? []}
-          physicians={physicians}
-          leadId={lead.id}
-          autoEnrichOnOpen={!hasContacts}
-        />
-      ) : (
-        <button
-          type="button"
-          onClick={() => setContactOpen(true)}
-          className="mb-3 flex w-full items-center gap-2 rounded-md border border-dashed border-border bg-surface/40 px-3 py-2 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-surface-3 hover:text-foreground"
-        >
-          <UserRound className="h-3.5 w-3.5" />
-          Show contact &amp; enrich decision-maker
-        </button>
-      )}
+      {/* Contact Section — min-height preserved to prevent jarring layout shifts */}
+      <div className="min-h-[44px]">
+        {contactOpen || hasContacts ? (
+          <ContactSection
+            sourceContacts={lead.sourceContacts ?? []}
+            physicians={physicians}
+            leadId={lead.id}
+            autoEnrichOnOpen={!hasContacts}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={handleOpenContact}
+            className="mb-3 flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border/70 bg-surface/30 px-3.5 py-2.5 text-xs font-medium text-muted-foreground transition-all duration-150 hover:border-primary/40 hover:bg-surface/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+          >
+            {isOpeningContact ? (
+              <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            ) : (
+              <UserRound className="h-3.5 w-3.5 text-muted-foreground" />
+            )}
+            <span>Show contact &amp; enrich decision-maker</span>
+          </button>
+        )}
+      </div>
 
-      {/* Actions — clicks here must not bubble up to the card body */}
+      {/* Actions: Standardized design tokens & minimum 44px touch targets */}
       <div
-        className="flex flex-wrap items-center gap-2"
+        className="flex flex-wrap items-center gap-2 pt-1"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.stopPropagation()}
       >
         <button
           onClick={onDraft}
-          className="flex h-8 items-center gap-1.5 rounded-sm border border-primary/40 bg-primary/10 px-3 text-xs text-primary transition-colors hover:bg-primary/20"
+          className="flex min-h-[44px] items-center gap-2 rounded-lg bg-primary px-4 text-xs font-semibold text-primary-foreground shadow-sm transition-all duration-150 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
         >
-          <Sparkles className="h-3.5 w-3.5" />
-          Draft outreach
+          <Sparkles className="h-4 w-4" />
+          <span>Draft outreach</span>
         </button>
 
         <DropdownMenu>
@@ -235,7 +260,7 @@ export function LeadCard({
               type="button"
               aria-label="More actions"
               title="More actions"
-              className="ml-auto flex h-8 w-8 items-center justify-center rounded-sm border border-border text-foreground/80 transition-colors hover:bg-surface-3 hover:text-foreground"
+              className="ml-auto flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-border/50 bg-card/60 text-muted-foreground transition-all duration-150 hover:bg-card hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
             >
               <MoreHorizontal className="h-4 w-4" />
             </button>

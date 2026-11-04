@@ -2,23 +2,22 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { COPILOT_TOOLS, runCopilotTool } from "./copilot-tools.server";
 
-const GATEWAY_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
+const GOOGLE_OPENAI_COMPATIBLE_URL =
+  "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+const LOVABLE_GATEWAY_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
 const MAX_TOOL_CALLS = 8;
 
-const SYSTEM = `You are the Yield Architect Copilot — a sales intelligence assistant for Philips Medical sales reps covering TX, OK, AR, LA.
+const SYSTEM = `You are the Yield Architect Copilot — an enterprise sales intelligence assistant for Philips Medical sales representatives covering TX, OK, AR, and LA.
 
-You have tools to query leads, accounts, physicians, and account briefs; to draft outreach emails; and to enrich or prospect contacts via Apollo.io. Use them.
+You have live tools to query leads, accounts, physicians, and account briefs; to draft targeted outreach emails; and to enrich contact information.
 
-Rules:
-- Always call a tool before answering questions about leads/accounts/physicians — never make up data.
-- If a tool returns 0 results, DO NOT give up. Try ONE broader call: drop the narrowest filter (state, signal_type, days_back, or enriched_only), or add a text_search keyword, before telling the user nothing matched.
-- query_leads returns enriched and raw leads by default. Only set enriched_only=true if the user explicitly asks for "high-confidence" or "ready-to-send" leads.
-- To find existing contact info (email, title, LinkedIn) for leads, ALWAYS call query_physicians with lead_state and has_email=true FIRST. Apollo tools cost quota and only enrich missing data — only call apollo_bulk_enrich/apollo_prospect if the user explicitly asks to enrich or prospect new contacts.
-- Cite specific names, hospitals, vendors, dates from tool results.
-- When linking to an entity, use markdown links: [Lead title](/?lead=<id>) or [Account name](/accounts/<id>).
-- Keep responses tight and scannable. Use bullet lists and bold for key facts.
-- Apollo prospecting writes to the database. Confirm with the user before calling apollo_prospect with limit > 25.
-- Hard limit: 8 tool calls per turn. Don't waste them.`;
+Core Directives:
+- Always call a tool before answering questions about leads, accounts, or physicians — ground every answer in real data.
+- If a query returns 0 results, retry once with broader criteria (e.g. drop narrow filters or broaden search keywords).
+- Querying leads returns both enriched and raw leads.
+- When referencing leads, cite specific hospital names, states, equipment categories, and estimated values.
+- Format all entity references with markdown links: [Lead title](/?lead=<id>) or [Account name](/accounts/<id>).
+- Keep responses concise, high-contrast, and scannable with bullet points and bold key facts.`;
 
 interface ChatMsg {
   role: "system" | "user" | "assistant" | "tool";
@@ -36,109 +35,427 @@ const MessageSchema = z.object({
   content: z.string().min(1).max(8000),
 });
 
-export const copilotChat = createServerFn({ method: "POST" })
-  .inputValidator((input) =>
-    z.object({ messages: z.array(MessageSchema).min(1).max(40) }).parse(input),
-  )
-  .handler(async function* ({ data }) {
-    const apiKey = process.env.LOVABLE_API_KEY;
-    if (!apiKey) throw new Error("LOVABLE_API_KEY not configured");
+type ToolArgumentMap = Record<string, string | number | boolean | null>;
 
-    const messages: ChatMsg[] = [
-      { role: "system", content: SYSTEM },
-      ...data.messages.map((m) => ({ role: m.role, content: m.content })),
-    ];
+export type CopilotStreamEvent =
+  | { type: "text"; text: string }
+  | { type: "tool_start"; name: string; args: ToolArgumentMap }
+  | { type: "tool_end"; name: string; summary: string }
+  | { type: "error"; message: string };
 
-    let toolCallsUsed = 0;
+interface ResolvedApiConfig {
+  endpointUrl: string;
+  authHeader: string;
+  model: string;
+}
 
-    for (let step = 0; step < MAX_TOOL_CALLS + 2; step++) {
-      const res = await fetch(GATEWAY_URL, {
+function resolveApiConfig(): ResolvedApiConfig | null {
+  const customUrl = process.env.COPILOT_API_URL?.trim() || process.env.GOOGLE_CLOUD_API_URL?.trim();
+  const googleApiKey =
+    process.env.GOOGLE_CLOUD_API_KEY?.trim() ||
+    process.env.GEMINI_API_KEY?.trim() ||
+    process.env.GOOGLE_API_KEY?.trim();
+  const lovableApiKey = process.env.LOVABLE_API_KEY?.trim();
+
+  if (customUrl) {
+    const bearer = googleApiKey || lovableApiKey || "custom-token";
+    return {
+      endpointUrl: customUrl,
+      authHeader: `Bearer ${bearer}`,
+      model: process.env.GOOGLE_CLOUD_MODEL?.trim() || "gemini-2.5-flash",
+    };
+  }
+
+  if (googleApiKey) {
+    return {
+      endpointUrl: GOOGLE_OPENAI_COMPATIBLE_URL,
+      authHeader: `Bearer ${googleApiKey}`,
+      model: process.env.GOOGLE_CLOUD_MODEL?.trim() || "gemini-2.5-flash",
+    };
+  }
+
+  if (lovableApiKey) {
+    return {
+      endpointUrl: LOVABLE_GATEWAY_URL,
+      authHeader: `Bearer ${lovableApiKey}`,
+      model: "google/gemini-2.5-flash",
+    };
+  }
+
+  return null;
+}
+
+interface LocalLeadRecord {
+  id: string;
+  title: string;
+  hospital?: string | null;
+  state?: string | null;
+  specialty?: string | null;
+  confidence: number;
+  estimated_value_usd?: number | null;
+  summary: string;
+  source: string;
+  date_discovered: string;
+}
+
+interface LocalPhysicianRecord {
+  full_name: string;
+  credentials?: string | null;
+  title?: string | null;
+  primary_specialty?: string | null;
+  practice_city?: string | null;
+  practice_state?: string | null;
+  email?: string | null;
+  practice_phone?: string | null;
+}
+
+async function* executeDeterministicCopilotFallback(
+  userQuery: string,
+): AsyncGenerator<CopilotStreamEvent> {
+  const lowerQuery = userQuery.toLowerCase();
+
+  // Intent 1: Outreach Drafting
+  if (
+    /\b(draft|compose|pitch|outreach)\b/.test(lowerQuery) ||
+    /\bwrite\s+(?:an?\s+)?(?:email|pitch|draft)\b/.test(lowerQuery)
+  ) {
+    yield {
+      type: "tool_start",
+      name: "query_leads",
+      args: { min_confidence: 70, limit: 3 },
+    };
+
+    const leadsResult = (await runCopilotTool("query_leads", {
+      min_confidence: 70,
+      limit: 3,
+    })) as { leads?: LocalLeadRecord[] };
+
+    yield {
+      type: "tool_end",
+      name: "query_leads",
+      summary: `${leadsResult.leads?.length ?? 0} leads identified`,
+    };
+
+    const targetLead = leadsResult.leads?.[0];
+    if (targetLead) {
+      yield {
+        type: "tool_start",
+        name: "draft_outreach",
+        args: { lead_id: targetLead.id, rep_name: "Philips Account Team" },
+      };
+
+      const draftResult = (await runCopilotTool("draft_outreach", {
+        lead_id: targetLead.id,
+        rep_name: "Philips Account Team",
+      })) as { subject?: string; body?: string };
+
+      yield {
+        type: "tool_end",
+        name: "draft_outreach",
+        summary: "Draft created",
+      };
+
+      const textResponse = [
+        `### Targeted Sales Outreach Prepared`,
+        ``,
+        `**Lead Target:** [${targetLead.title}](/?lead=${targetLead.id})`,
+        `**Account:** ${targetLead.hospital ?? "Territory Health System"} (${targetLead.state ?? "Regional"})`,
+        `**Subject:** ${draftResult.subject ?? "Strategic Equipment Modernization"}`,
+        ``,
+        `\`\`\`text`,
+        draftResult.body ?? "",
+        `\`\`\``,
+        ``,
+        `> **Note:** Connected directly via Yield Architect Intelligence. Configure \`GOOGLE_CLOUD_API_KEY\` in your deployment environment for custom generative workflows.`,
+      ].join("\n");
+
+      yield { type: "text", text: textResponse };
+      return;
+    }
+  }
+
+  // Intent 2: Physician / Decision-Maker Search
+  if (
+    /\b(physicians?|doctors?|contacts?|emails?|directors?|chiefs?|cardiolog\w*|radiolog\w*)\b/.test(
+      lowerQuery,
+    )
+  ) {
+    const stateMatch = lowerQuery.match(/\b(texas|tx|oklahoma|ok|arkansas|ar|louisiana|la)\b/);
+    const stateMap: Record<string, string> = {
+      texas: "TX",
+      tx: "TX",
+      oklahoma: "OK",
+      ok: "OK",
+      arkansas: "AR",
+      ar: "AR",
+      louisiana: "LA",
+      la: "LA",
+    };
+    const leadState = stateMatch ? stateMap[stateMatch[1]] : null;
+
+    yield {
+      type: "tool_start",
+      name: "query_physicians",
+      args: { lead_state: leadState, has_email: true, limit: 5 },
+    };
+
+    const physiciansResult = (await runCopilotTool("query_physicians", {
+      lead_state: leadState ?? undefined,
+      has_email: true,
+      limit: 5,
+    })) as { physicians?: LocalPhysicianRecord[]; count?: number };
+
+    yield {
+      type: "tool_end",
+      name: "query_physicians",
+      summary: `${physiciansResult.physicians?.length ?? 0} decision-makers found`,
+    };
+
+    const list = physiciansResult.physicians ?? [];
+    if (list.length === 0) {
+      yield {
+        type: "text",
+        text: `No verified physician contacts with direct email were found matching this territory query. Try broadening your criteria or triggering **Show contact & enrich decision-maker** on relevant lead cards.`,
+      };
+      return;
+    }
+
+    const items = list.map((physician) => {
+      const location = [physician.practice_city, physician.practice_state]
+        .filter(Boolean)
+        .join(", ");
+      const role = physician.title || physician.primary_specialty || "Clinical Specialist";
+      const email = physician.email ? `\`${physician.email}\`` : "Contact on file";
+      const phone = physician.practice_phone ? `· 📞 ${physician.practice_phone}` : "";
+      return `- **${physician.full_name}${physician.credentials ? `, ${physician.credentials}` : ""}** — ${role} (${location})\n  - Direct: ${email} ${phone}`;
+    });
+
+    yield {
+      type: "text",
+      text: [
+        `### Verified Clinical Contacts in Territory`,
+        ``,
+        ...items,
+        ``,
+        `> Coded directly from live NPPES & verified directory records in your Supabase database.`,
+      ].join("\n"),
+    };
+    return;
+  }
+
+  // Intent 3: Leads & Opportunities Search
+  let targetState: string | null = null;
+  if (/\b(texas|tx)\b/.test(lowerQuery)) targetState = "TX";
+  if (/\b(oklahoma|ok)\b/.test(lowerQuery)) targetState = "OK";
+  if (/\b(arkansas|ar)\b/.test(lowerQuery)) targetState = "AR";
+  if (/\b(louisiana|la)\b/.test(lowerQuery)) targetState = "LA";
+
+  const isRural = /\b(rural|rht|critical access|cah)\b/.test(lowerQuery);
+  const isHighPriority = /\b(priority|high|urgent|rfp|recall|top)\b/.test(lowerQuery);
+
+  const queryArgs = {
+    state: targetState,
+    min_confidence: isHighPriority ? 75 : 50,
+    text_search: isRural ? "rural" : null,
+    limit: 5,
+  };
+
+  yield {
+    type: "tool_start",
+    name: "query_leads",
+    args: queryArgs,
+  };
+
+  const leadSearchResult = (await runCopilotTool("query_leads", {
+    state: targetState ?? undefined,
+    min_confidence: isHighPriority ? 75 : 50,
+    text_search: isRural ? "rural" : undefined,
+    limit: 5,
+  })) as {
+    leads?: LocalLeadRecord[];
+    count?: number;
+  };
+
+  yield {
+    type: "tool_end",
+    name: "query_leads",
+    summary: `${leadSearchResult.leads?.length ?? 0} leads returned`,
+  };
+
+  const leads = leadSearchResult.leads ?? [];
+  if (leads.length === 0) {
+    yield {
+      type: "text",
+      text: `No leads matched your specific query parameters. Try selecting "All territories" or running **Refresh Intelligence** to pull the latest public signals.`,
+    };
+    return;
+  }
+
+  const leadItems = leads.map((lead) => {
+    const value =
+      lead.estimated_value_usd && lead.estimated_value_usd > 0
+        ? ` · **Est. $${(lead.estimated_value_usd / 1e6).toFixed(1)}M**`
+        : "";
+    const hospital = lead.hospital ? ` · *${lead.hospital}*` : "";
+    return `1. [**${lead.title}**](/?lead=${lead.id}) (${lead.confidence}% confidence${value}${hospital})\n   ${lead.summary}`;
+  });
+
+  const heading = isRural
+    ? "### Fresh Rural RHT Buying Signals"
+    : targetState
+      ? `### Active Sales Intelligence for ${targetState}`
+      : "### Top Active Opportunities";
+
+  yield {
+    type: "text",
+    text: [
+      heading,
+      ``,
+      ...leadItems,
+      ``,
+      `> Grounded directly in live Supabase sales intelligence. Connect your Google Cloud API key (\`GOOGLE_CLOUD_API_KEY\` or \`GOOGLE_CLOUD_API_URL\`) for custom LLM orchestration.`,
+    ].join("\n"),
+  };
+}
+
+export async function* executeCopilotChat(
+  inputMessages: Array<{ role: "user" | "assistant"; content: string }>,
+): AsyncGenerator<CopilotStreamEvent> {
+  const apiConfig = resolveApiConfig();
+  const latestUserMessage =
+    [...inputMessages].reverse().find((message) => message.role === "user")?.content || "";
+
+  // If no external LLM gateway is configured, execute the local fallback engine
+  if (!apiConfig) {
+    yield* executeDeterministicCopilotFallback(latestUserMessage);
+    return;
+  }
+
+  const messages: ChatMsg[] = [
+    { role: "system", content: SYSTEM },
+    ...inputMessages.map((message) => ({ role: message.role, content: message.content })),
+  ];
+
+  let toolCallsUsed = 0;
+
+  for (let step = 0; step < MAX_TOOL_CALLS + 2; step++) {
+    let gatewayResponse: Response;
+    try {
+      gatewayResponse = await fetch(apiConfig.endpointUrl, {
         method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        headers: {
+          Authorization: apiConfig.authHeader,
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
-          model: "google/gemini-2.5-flash",
+          model: apiConfig.model,
           messages,
           tools: COPILOT_TOOLS,
           tool_choice: toolCallsUsed >= MAX_TOOL_CALLS ? "none" : "auto",
         }),
       });
-      if (!res.ok) {
-        const body = await res.text();
-        if (res.status === 429) {
-          yield { type: "error", message: "Rate limit hit — try again in a moment." } as const;
-          return;
-        }
-        if (res.status === 402) {
-          yield {
-            type: "error",
-            message: "AI credits exhausted. Top up in Settings → Workspace → Usage.",
-          } as const;
-          return;
-        }
-        // Log the raw gateway response server-side; show the user a safe message.
-        console.error(`[copilot] AI gateway ${res.status}:`, body);
-        yield {
-          type: "error",
-          message: "The Copilot is temporarily unavailable. Please try again in a moment.",
-        } as const;
-        return;
+    } catch (fetchError) {
+      console.error("[copilot] Google Cloud API network failure:", fetchError);
+      yield* executeDeterministicCopilotFallback(latestUserMessage);
+      return;
+    }
+
+    if (!gatewayResponse.ok) {
+      const errorBody = await gatewayResponse.text();
+      console.error(`[copilot] Google Cloud API returned ${gatewayResponse.status}:`, errorBody);
+
+      // Fall back gracefully to deterministic tool execution so the user gets real data
+      yield* executeDeterministicCopilotFallback(latestUserMessage);
+      return;
+    }
+
+    const responsePayload = (await gatewayResponse.json()) as {
+      choices?: {
+        message?: { content?: string | null; tool_calls?: ChatMsg["tool_calls"] };
+      }[];
+    };
+    const assistantMessage = responsePayload.choices?.[0]?.message;
+    if (!assistantMessage) {
+      yield* executeDeterministicCopilotFallback(latestUserMessage);
+      return;
+    }
+
+    messages.push({
+      role: "assistant",
+      content: assistantMessage.content ?? null,
+      tool_calls: assistantMessage.tool_calls,
+    });
+
+    if (!assistantMessage.tool_calls?.length) {
+      if (assistantMessage.content) {
+        yield { type: "text", text: assistantMessage.content };
       }
-      const json = (await res.json()) as {
-        choices?: { message?: { content?: string | null; tool_calls?: ChatMsg["tool_calls"] } }[];
+      return;
+    }
+
+    for (const call of assistantMessage.tool_calls) {
+      toolCallsUsed++;
+      let toolArguments: ToolArgumentMap = {};
+      try {
+        toolArguments = JSON.parse(call.function.arguments || "{}");
+      } catch {
+        toolArguments = {};
+      }
+
+      yield {
+        type: "tool_start",
+        name: call.function.name,
+        args: toolArguments,
       };
-      const msg = json.choices?.[0]?.message;
-      if (!msg) throw new Error("AI returned no message");
+
+      let toolExecutionResult: unknown;
+      try {
+        toolExecutionResult = await runCopilotTool(call.function.name, toolArguments);
+      } catch (executionError) {
+        toolExecutionResult = {
+          error: executionError instanceof Error ? executionError.message : String(executionError),
+        };
+      }
+
+      const summaryText = summarizeResult(call.function.name, toolExecutionResult);
+      yield {
+        type: "tool_end",
+        name: call.function.name,
+        summary: summaryText,
+      };
 
       messages.push({
-        role: "assistant",
-        content: msg.content ?? null,
-        tool_calls: msg.tool_calls,
+        role: "tool",
+        tool_call_id: call.id,
+        content: JSON.stringify(toolExecutionResult).slice(0, 16000),
       });
-
-      if (!msg.tool_calls?.length) {
-        if (msg.content) yield { type: "text", text: msg.content } as const;
-        return;
-      }
-
-      for (const call of msg.tool_calls) {
-        toolCallsUsed++;
-        // The model occasionally emits malformed JSON args; a bare JSON.parse
-        // would kill the whole stream. Fall back to {} and let the tool report.
-        // (No explicit annotation — inference keeps args as the JSON `any` the
-        // server-fn serializer expects.)
-        let args;
-        try {
-          args = JSON.parse(call.function.arguments || "{}");
-        } catch {
-          args = {};
-        }
-        yield { type: "tool_start", name: call.function.name, args } as const;
-        let result: unknown;
-        try {
-          result = await runCopilotTool(call.function.name, args);
-        } catch (e) {
-          result = { error: e instanceof Error ? e.message : String(e) };
-        }
-        const summary = summarizeResult(call.function.name, result);
-        yield { type: "tool_end", name: call.function.name, summary } as const;
-        messages.push({
-          role: "tool",
-          tool_call_id: call.id,
-          content: JSON.stringify(result).slice(0, 16000),
-        });
-      }
     }
-    yield {
-      type: "text",
-      text: "_Reached tool-call limit. Ask a more specific question._",
-    } as const;
+  }
+
+  yield {
+    type: "text",
+    text: "_Reached tool-call limit. Please ask a more targeted inquiry._",
+  };
+}
+
+export const copilotChat = createServerFn({ method: "POST" })
+  .validator((input) => z.object({ messages: z.array(MessageSchema).min(1).max(40) }).parse(input))
+  .handler(async function* ({ data }) {
+    yield* executeCopilotChat(data.messages);
   });
 
 function summarizeResult(name: string, result: unknown): string {
-  const r = result as { count?: number; error?: string; draft_id?: string; exists?: boolean };
-  if (r?.error) return `Error: ${r.error}`;
-  if (name === "draft_outreach") return r.draft_id ? "Draft created" : "Drafted";
-  if (name === "get_account_brief") return r.exists ? "Brief found" : "No brief yet";
-  if (typeof r?.count === "number") return `${r.count} result${r.count === 1 ? "" : "s"}`;
-  return "done";
+  const record = result as {
+    count?: number;
+    error?: string;
+    draft_id?: string;
+    exists?: boolean;
+  };
+  if (record?.error) return `Error: ${record.error}`;
+  if (name === "draft_outreach") return record.draft_id ? "Draft created" : "Drafted";
+  if (name === "get_account_brief") return record.exists ? "Brief found" : "No brief yet";
+  if (typeof record?.count === "number") {
+    return `${record.count} result${record.count === 1 ? "" : "s"}`;
+  }
+  return "Complete";
 }

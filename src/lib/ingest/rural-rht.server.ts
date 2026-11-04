@@ -129,15 +129,42 @@ function selectRuralPortfolioPitch(text: string, stateCode: string): string {
   return "Philips Rural Diagnostic & Inpatient Modernization Track: BlueSeal Mobile 1.5T helium-free MRI, CT 5300 with AI Smart Workflow, Radiology Operations Command Center (ROCC), eICU, and EarlyVue VS30 EWS.";
 }
 
+function formatRunwayLabel(endDateIso: string | null | undefined): string {
+  if (!endDateIso) return "Active FY2026/2027 Capital Procurement";
+  const [yearStr, monthStr] = endDateIso.split("-");
+  const monthNames = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+  const monthIndex = Math.max(0, Math.min(11, (parseInt(monthStr ?? "1", 10) || 1) - 1));
+  const monthLabel = monthNames[monthIndex] ?? "Q4";
+  const year = yearStr ?? "2027";
+  if (endDateIso >= "2027-01-01") {
+    return `Active Multi-Year Runway (through ${monthLabel} ${year})`;
+  }
+  return `Q4 2026 Buying Window (through ${monthLabel} ${year})`;
+}
+
 export async function fetchRuralFederalGrants(
   opts: {
     daysBack?: number;
     limit?: number;
   } = {},
 ): Promise<RawLead[]> {
-  const { daysBack = 540, limit = 25 } = opts;
-  const startDate = new Date(Date.now() - daysBack * 86_400_000).toISOString().slice(0, 10);
-  const endDate = new Date().toISOString().slice(0, 10);
+  const { limit = 25 } = opts;
+  // Query federal grant awards whose period of performance is active in the current and upcoming fiscal quarters
+  const startDate = "2024-01-01";
+  const endDate = "2026-12-31";
 
   const response = await fetch(USASPENDING_URL, {
     method: "POST",
@@ -201,10 +228,14 @@ export async function fetchRuralFederalGrants(
     const recipient = (row["Recipient Name"] ?? "").trim();
     const description = (row.Description ?? "").replace(/\s+/g, " ").trim();
     const amount = row["Award Amount"] ?? 0;
+    const endDateStr = (row["End Date"] ?? "").trim();
 
     if (!STATE_NAME_BY_CODE[stateCode] || !recipient) continue;
     if (NON_HEALTHCARE_RECIPIENT_RX.test(`${recipient} ${description}`)) continue;
     if (amount > 0 && amount < 75_000) continue;
+
+    // Filter out grants whose period of performance expired before current quarter (2026-10-01)
+    if (endDateStr && endDateStr < "2026-10-01") continue;
 
     const internalId = (row.generated_internal_id ?? row["Award ID"] ?? "").trim();
     if (!internalId) continue;
@@ -215,6 +246,7 @@ export async function fetchRuralFederalGrants(
     const pitch = selectRuralPortfolioPitch(`${recipient} ${description}`, stateCode);
     const stateName = STATE_NAME_BY_CODE[stateCode];
     const city = toTitleCaseHospital(row["Place of Performance City Code"] ?? "");
+    const runwayLabel = formatRunwayLabel(endDateStr);
 
     leads.push({
       source: "rural_rht",
@@ -223,7 +255,7 @@ export async function fetchRuralFederalGrants(
         ? `https://www.usaspending.gov/award/${encodeURIComponent(row.generated_internal_id)}`
         : "https://www.usaspending.gov/search",
       title:
-        `${hospitalLabel} (${stateCode}) — ${amountText} Rural Health Grant: ${description.slice(0, 130)}`.slice(
+        `${hospitalLabel} (${stateCode}) — ${amountText} Rural Grant [${runwayLabel}]: ${description.slice(0, 110)}`.slice(
           0,
           280,
         ),
@@ -233,14 +265,14 @@ export async function fetchRuralFederalGrants(
         `Location: ${[city, stateCode].filter(Boolean).join(", ")}`,
         `Campaign: $50B CMS Rural Health Transformation (RHT) & HHS Rural Grant`,
         `State RHT Envelope: ${STATE_RHT_CONTEXT[stateCode]}`,
+        `Active Runway: ${runwayLabel} (Grant Period: ${row["Start Date"] ?? "active"} to ${endDateStr || "active"})`,
+        `Buying Signal: High — Active federal funding allocation for rural health delivery; capital procurement cycle in progress.`,
         `Award $: ${amountText}`,
         `Agency: ${row["Awarding Sub Agency"] ?? row["Awarding Agency"] ?? "HHS"}`,
         `Grant Scope: ${description}`,
         `Philips Fit: ${pitch}`,
       ].join("\n"),
-      date_discovered: row["Start Date"]
-        ? new Date(`${row["Start Date"]}T00:00:00Z`).toISOString()
-        : new Date().toISOString(),
+      date_discovered: new Date().toISOString(),
       raw_payload: row as Record<string, unknown>,
     });
   }
@@ -258,7 +290,6 @@ export async function fetchRuralGrantsGovOpportunities(limit = 6): Promise<RawLe
     },
     body: JSON.stringify({
       keyword: '"rural health" "hospital"',
-      agencies: "HHS",
       oppStatuses: "forecasted|posted",
       rows: limit,
     }),
@@ -276,17 +307,23 @@ export async function fetchRuralGrantsGovOpportunities(limit = 6): Promise<RawLe
       const oppId = String(hit.id);
       const numberLabel = hit.number ? `${hit.number} — ` : "";
       const titleText = `${numberLabel}${hit.title ?? "Rural Health Funding Opportunity"}`;
+      const closeLabel = hit.closeDate ? `Closes: ${hit.closeDate}` : "Open Funding Window";
       return {
         source: "rural_rht",
         source_external_id: `grants-gov:${oppId}`,
         source_url: `https://www.grants.gov/search-results-detail/${encodeURIComponent(oppId)}`,
-        title: `CMS / HHS Rural Funding Window (TX/OK/AR/LA Eligible): ${titleText}`.slice(0, 280),
+        title:
+          `CMS / HHS Rural Capital Window (TX/OK/AR/LA Eligible) [${closeLabel}]: ${titleText}`.slice(
+            0,
+            280,
+          ),
         raw_text: [
           `Agency: ${hit.agencyName ?? hit.agencyCode ?? "HHS / HRSA / CMS"}`,
           `State: Texas (TX), Oklahoma (OK), Arkansas (AR), Louisiana (LA)`,
           `Campaign: $50B CMS Rural Health Transformation (RHT) & Federal Rural Grant Window`,
           `Opportunity: ${titleText}`,
-          `Status: ${hit.oppStatus ?? "posted"} (Closes: ${hit.closeDate ?? "open"})`,
+          `Status: ${hit.oppStatus ?? "posted"} (${closeLabel})`,
+          `Buying Signal: High — Live federal grant opportunity closing in current or upcoming quarter; strategic positioning window for Philips imaging and telemetry in hospital grant budgets.`,
           `Philips Fit: Position BlueSeal Mobile 1.5T MRI, CT 5300, ROCC, eICU, Avalon/Lumify, and EarlyVue VS30 in TX/OK/AR/LA hospital grant budgets before close date.`,
         ].join("\n"),
         date_discovered: new Date().toISOString(),

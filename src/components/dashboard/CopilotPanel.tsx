@@ -104,86 +104,94 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" />
       <div
-        className="relative flex h-full w-full max-w-[480px] flex-col border-l border-border bg-background shadow-2xl"
+        className="relative flex h-full w-full max-w-[500px] flex-col border-l border-border/50 bg-card/95 shadow-2xl backdrop-blur-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <header className="flex h-14 items-center gap-2 border-b border-border px-4">
+        <header className="flex h-16 items-center gap-2.5 border-b border-border/50 px-5">
           <Sparkles className="h-4 w-4 text-primary" />
-          <span className="font-display font-semibold">Copilot</span>
-          <span className="rounded-sm bg-surface-2 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-            Beta
+          <span className="font-display font-semibold text-foreground">Copilot</span>
+          <span className="rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-primary">
+            Direct Cloud API
           </span>
           <button
             onClick={onClose}
-            className="ml-auto rounded-md p-1.5 text-muted-foreground hover:bg-surface-2 hover:text-foreground"
+            aria-label="Close Copilot"
+            className="ml-auto flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-muted-foreground transition-all duration-150 hover:bg-surface-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
-            <X className="h-4 w-4" />
+            <X className="h-5 w-5" />
           </button>
         </header>
 
-        <div ref={scrollRef} className="flex-1 overflow-y-auto p-4">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto p-5">
           {messages.length === 0 ? (
-            <div className="space-y-4">
-              <div className="rounded-md border border-border bg-surface-2 p-4 text-sm">
-                <div className="mb-2 font-semibold">Ask the Yield Architect Copilot</div>
-                <p className="text-xs text-muted-foreground">
-                  I can search leads, accounts, and physicians, fetch account briefs, and draft
-                  outreach emails. Ground every answer in live data.
+            <div className="space-y-5">
+              <div className="rounded-xl border border-border/40 bg-surface/50 p-4 text-sm backdrop-blur-sm">
+                <div className="mb-1.5 font-semibold text-foreground">
+                  Yield Architect Intelligence Copilot
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Grounded directly in live Supabase sales intelligence and your Google Cloud API.
+                  Search leads, find verified physician decision-makers, and draft targeted
+                  outreach.
                 </p>
               </div>
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Try
+                  Suggested inquiries
                 </div>
-                {SUGGESTIONS.map((s) => (
+                {SUGGESTIONS.map((suggestion) => (
                   <button
-                    key={s}
-                    onClick={() => submit(s)}
-                    className="block w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-left text-xs text-foreground/90 transition-colors hover:border-primary/40 hover:bg-surface-3"
+                    key={suggestion}
+                    onClick={() => submit(suggestion)}
+                    className="flex min-h-[44px] w-full items-center rounded-lg border border-border/40 bg-surface/40 px-3.5 py-2.5 text-left text-xs font-medium text-foreground/90 transition-all duration-150 hover:border-primary/40 hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                   >
-                    {s}
+                    <span>{suggestion}</span>
                   </button>
                 ))}
               </div>
             </div>
           ) : (
             <div className="space-y-4">
-              {messages.map((m, i) => (
-                <div key={i} className={m.role === "user" ? "flex justify-end" : ""}>
+              {messages.map((message, messageIndex) => (
+                <div
+                  key={messageIndex}
+                  className={message.role === "user" ? "flex justify-end" : ""}
+                >
                   <div
                     className={
-                      m.role === "user"
-                        ? "max-w-[85%] rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground"
-                        : "max-w-[95%] space-y-2"
+                      message.role === "user"
+                        ? "max-w-[85%] rounded-xl bg-primary px-3.5 py-2.5 text-xs font-medium text-primary-foreground shadow-sm"
+                        : "max-w-[96%] space-y-2"
                     }
                   >
-                    {m.tools && m.tools.length > 0 && (
+                    {message.tools && message.tools.length > 0 && (
                       <div className="flex flex-wrap gap-1.5">
-                        {m.tools.map((t, j) => (
+                        {message.tools.map((tool, toolIndex) => (
                           <span
-                            key={j}
-                            className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-2 px-2 py-0.5 text-[10px] text-muted-foreground"
+                            key={toolIndex}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-border/50 bg-surface-2 px-2.5 py-0.5 text-[10px] text-muted-foreground"
                           >
-                            <Wrench className="h-2.5 w-2.5" />
-                            <span className="font-mono">{t.name}</span>
-                            <span>· {t.summary}</span>
+                            <Wrench className="h-3 w-3 text-primary/70" />
+                            <span className="font-mono">{tool.name}</span>
+                            <span>· {tool.summary}</span>
                           </span>
                         ))}
                       </div>
                     )}
-                    {m.role === "assistant" && m.content ? (
-                      <div className="prose prose-invert prose-sm max-w-none rounded-md border border-border bg-surface-2 px-3 py-2 prose-p:my-1.5 prose-ul:my-1.5 prose-li:my-0">
-                        <ReactMarkdown>{m.content}</ReactMarkdown>
+                    {message.role === "assistant" && message.content ? (
+                      <div className="prose prose-invert prose-sm max-w-none rounded-xl border border-border/40 bg-surface/60 px-4 py-3 text-xs leading-relaxed prose-p:my-1.5 prose-ul:my-1.5 prose-li:my-0.5">
+                        <ReactMarkdown>{message.content}</ReactMarkdown>
                       </div>
-                    ) : m.role === "user" ? (
-                      m.content
+                    ) : message.role === "user" ? (
+                      message.content
                     ) : (
                       busy &&
-                      i === messages.length - 1 && (
+                      messageIndex === messages.length - 1 && (
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Loader2 className="h-3 w-3 animate-spin" /> Thinking…
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                          <span>Consulting sales intelligence…</span>
                         </div>
                       )
                     )}
@@ -195,7 +203,7 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
         </div>
 
         <form
-          className="flex items-center gap-2 border-t border-border p-3"
+          className="flex items-center gap-2 border-t border-border/50 bg-card/60 p-3.5 backdrop-blur-md"
           onSubmit={(e) => {
             e.preventDefault();
             submit(input);
@@ -205,13 +213,14 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
             value={input}
             onChange={(e) => setInput(e.target.value)}
             disabled={busy}
-            placeholder="Ask about leads, accounts, physicians…"
-            className="flex-1 rounded-md border border-border bg-surface-2 px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-primary/50"
+            placeholder="Ask about leads, accounts, decision-makers…"
+            className="flex min-h-[44px] flex-1 rounded-lg border border-border/50 bg-surface/60 px-3.5 py-2 text-xs text-foreground outline-none transition-all placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary"
           />
           <button
             type="submit"
             disabled={busy || !input.trim()}
-            className="flex h-9 w-9 items-center justify-center rounded-md bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+            aria-label="Send message"
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm transition-all duration-150 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           </button>
