@@ -177,4 +177,85 @@ describe("Restructured Copilot Direct Google Cloud API & Fallback", () => {
       { type: "text"; text: string } | undefined;
     expect(textEvent?.text).toContain("Resilient Fallback Lead");
   });
+
+  it("handles multi-step tool calls and preserves Google thought_signature across turns", async () => {
+    vi.stubEnv("GOOGLE_CLOUD_API_KEY", "test-gcp-api-key");
+
+    let turn = 0;
+    const capturedBodies: string[] = [];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      turn++;
+      const bodyStr = String(init?.body ?? "");
+      capturedBodies.push(bodyStr);
+
+      if (turn === 1) {
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  tool_calls: [
+                    {
+                      id: "call_abc123",
+                      type: "function",
+                      function: {
+                        name: "query_leads",
+                        arguments: JSON.stringify({ state: "TX" }),
+                      },
+                      extra_content: {
+                        google: {
+                          thought_signature: "sig_abc123_test",
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                role: "assistant",
+                content: "Found 1 top Texas lead: Memorial Hermann Cath Lab Modernization ($1.7M).",
+                tool_calls: null,
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+
+    vi.spyOn(copilotTools, "runCopilotTool").mockResolvedValue({
+      count: 1,
+      leads: [{ id: "tx-1", title: "Memorial Hermann", state: "TX" }],
+    });
+
+    const stream = executeCopilotChat([
+      { role: "user", content: "Show me Texas opportunities" },
+    ]);
+
+    const events: Array<{ type: string; [key: string]: unknown }> = [];
+    for await (const event of stream) {
+      events.push(event);
+    }
+
+    expect(capturedBodies.length).toBe(2);
+    // Verify second request contains the thought_signature in the assistant's previous tool_call
+    expect(capturedBodies[1]).toContain("sig_abc123_test");
+    expect(capturedBodies[1]).toContain("call_abc123");
+
+    const textEvent = events.find((e) => e.type === "text") as
+      { type: "text"; text: string } | undefined;
+    expect(textEvent?.text).toContain("Found 1 top Texas lead");
+  });
 });

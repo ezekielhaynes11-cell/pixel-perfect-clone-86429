@@ -26,6 +26,7 @@ interface ChatMsg {
     id: string;
     type: "function";
     function: { name: string; arguments: string };
+    extra_content?: unknown;
   }>;
   tool_call_id?: string;
 }
