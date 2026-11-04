@@ -211,10 +211,18 @@ export async function draftOutreachEmail(
   input: DraftInput,
 ): Promise<{ subject: string; body: string }> {
   const tone = input.tone ?? defaultToneForLead(input.lead);
-  const apiKey = process.env.LOVABLE_API_KEY?.trim();
+  const googleApiKey =
+    process.env.GOOGLE_CLOUD_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim();
+  const lovableApiKey = process.env.LOVABLE_API_KEY?.trim();
+  const apiKey = googleApiKey || lovableApiKey;
   if (!apiKey) {
     return buildDeterministicOutreachDraft(input, tone);
   }
+
+  const endpointUrl = googleApiKey
+    ? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+    : GATEWAY_URL;
+  const modelName = googleApiKey ? "gemini-3.8-flash" : "google/gemini-2.5-flash";
 
   const userMsg = `Lead title: ${input.lead.title}
 Hospital: ${input.lead.hospital ?? "unknown"}
@@ -235,11 +243,11 @@ Rep name to sign as: ${input.repName}
 ${TONE_GUIDE[tone]}`;
 
   try {
-    const response = await fetch(GATEWAY_URL, {
+    const response = await fetch(endpointUrl, {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: modelName,
         messages: [
           { role: "system", content: SYSTEM },
           { role: "user", content: userMsg },

@@ -638,6 +638,8 @@ describe("CMS $50B Rural Health Transformation (rural_rht) ingestion, enrichment
 
   it("drafts benchmark-backed CMS $50B RHT outreach when LOVABLE_API_KEY is unset", async () => {
     vi.stubEnv("LOVABLE_API_KEY", "");
+    vi.stubEnv("GOOGLE_CLOUD_API_KEY", "");
+    vi.stubEnv("GEMINI_API_KEY", "");
     const leadBrief = {
       title: "Big Bend Regional Medical Center (Alpine, TX) — CMS RHT Critical Access Hospital",
       summary: "Verified Critical Access Hospital eligible for Texas $50B CMS RHT modernization.",

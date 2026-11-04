@@ -137,7 +137,7 @@ describe("Restructured Copilot Direct Google Cloud API & Fallback", () => {
 
     expect(capturedUrl).toContain("generativelanguage.googleapis.com");
     expect(capturedAuth).toBe("Bearer test-gcp-api-key");
-    expect(capturedBody).toContain("gemini-2.5-flash");
+    expect(capturedBody).toContain("gemini-3.8-flash");
 
     const textEvent = events.find((e) => e.type === "text") as
       { type: "text"; text: string } | undefined;

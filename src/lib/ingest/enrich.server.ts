@@ -206,10 +206,18 @@ export async function enrichRawLead(raw: RawLead): Promise<EnrichmentResult> {
     });
   }
 
-  const apiKey = process.env.LOVABLE_API_KEY?.trim();
+  const googleApiKey =
+    process.env.GOOGLE_CLOUD_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim();
+  const lovableApiKey = process.env.LOVABLE_API_KEY?.trim();
+  const apiKey = googleApiKey || lovableApiKey;
   if (!apiKey) {
     return deterministicEnrichRawLead(raw, vendors, products);
   }
+
+  const endpointUrl = googleApiKey
+    ? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+    : GATEWAY_URL;
+  const modelName = googleApiKey ? "gemini-3.8-flash" : "google/gemini-2.5-flash";
 
   const hintBlock = `Known vendors of interest: ${vendors.join(", ")}
 Known product models: ${products.join(", ")}
@@ -224,11 +232,11 @@ ${hintBlock}
 ${raw.raw_text}`;
 
   try {
-    const response = await fetch(GATEWAY_URL, {
+    const response = await fetch(endpointUrl, {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: modelName,
         messages: [
           { role: "system", content: BASE_SYSTEM },
           { role: "user", content: userMsg },

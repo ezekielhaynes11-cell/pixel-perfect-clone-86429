@@ -62,7 +62,7 @@ function resolveApiConfig(): ResolvedApiConfig | null {
     return {
       endpointUrl: customUrl,
       authHeader: `Bearer ${bearer}`,
-      model: process.env.GOOGLE_CLOUD_MODEL?.trim() || "gemini-2.5-flash",
+      model: process.env.GOOGLE_CLOUD_MODEL?.trim() || "gemini-3.8-flash",
     };
   }
 
@@ -70,7 +70,7 @@ function resolveApiConfig(): ResolvedApiConfig | null {
     return {
       endpointUrl: GOOGLE_OPENAI_COMPATIBLE_URL,
       authHeader: `Bearer ${googleApiKey}`,
-      model: process.env.GOOGLE_CLOUD_MODEL?.trim() || "gemini-2.5-flash",
+      model: process.env.GOOGLE_CLOUD_MODEL?.trim() || "gemini-3.8-flash",
     };
   }
 
