@@ -155,23 +155,33 @@ function Dashboard() {
   const leadsQ = useQuery({
     queryKey: ["leads", effectiveIncludeArchived],
     queryFn: () => fetchLeads({ data: { includeArchived: effectiveIncludeArchived } }),
+    retry: 2,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 3000),
   });
   const archivedCountQ = useQuery({
     queryKey: ["archived_lead_count"],
     queryFn: () => fetchArchivedCount(),
+    retry: 2,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 3000),
   });
   const actionsQ = useQuery({
     queryKey: ["lead_actions"],
     queryFn: () => fetchActions(),
+    retry: 2,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 3000),
   });
   const runsQ = useQuery({
     queryKey: ["ingestion_runs"],
     queryFn: () => fetchRuns(),
     refetchInterval: 30_000,
+    retry: 2,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 3000),
   });
   const physiciansQ = useQuery({
     queryKey: ["lead_physicians"],
     queryFn: () => fetchPhysicians(),
+    retry: 2,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 3000),
   });
   const fetchRefreshStatus = useServerFn(getRefreshStatus);
   const startRefresh = useServerFn(beginRefresh);

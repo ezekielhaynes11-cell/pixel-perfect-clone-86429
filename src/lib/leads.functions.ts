@@ -27,6 +27,92 @@ function getActiveCutoffIso(): string {
   return new Date(Date.now() - ACTIVE_LEAD_WINDOW_MS).toISOString();
 }
 
+export async function fetchActiveLeadsWithRetry(activeCutoff: string, retries = 2) {
+  let attempt = 0;
+  while (attempt <= retries) {
+    try {
+      const res = await supabaseAdmin
+        .from("leads")
+        .select(LEAD_LIST_COLUMNS)
+        .eq("enriched", true)
+        .gte("date_ingested", activeCutoff)
+        .gte("confidence", MIN_QUALIFIED_CONFIDENCE)
+        .order("confidence", { ascending: false })
+        .order("date_ingested", { ascending: false })
+        .limit(500);
+
+      if (res.error) {
+        if (
+          attempt < retries &&
+          (res.error.code === "PGRST205" ||
+            res.error.code === "42P01" ||
+            res.error.message.includes("schema cache") ||
+            res.error.message.includes("fetch failed"))
+        ) {
+          logWarn("leads.list", "Transient Supabase schema/network error, retrying...", {
+            code: res.error.code,
+            message: res.error.message,
+            attempt: attempt + 1,
+          });
+          await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+          attempt++;
+          continue;
+        }
+        throwIfError(res.error);
+      }
+
+      // If data is returned but empty (e.g., date_ingested cutoff excluded all rows):
+      if ((res.data ?? []).length === 0) {
+        const fallbackRes = await supabaseAdmin
+          .from("leads")
+          .select(LEAD_LIST_COLUMNS)
+          .eq("enriched", true)
+          .gte("confidence", MIN_QUALIFIED_CONFIDENCE)
+          .order("confidence", { ascending: false })
+          .limit(200);
+
+        if (!fallbackRes.error && (fallbackRes.data ?? []).length > 0) {
+          logWarn("leads.list", "Active cutoff returned 0 leads, serving latest qualified leads", {
+            fallbackCount: fallbackRes.data?.length,
+          });
+          return fallbackRes.data ?? [];
+        }
+      }
+
+      return res.data ?? [];
+    } catch (err) {
+      if (attempt < retries) {
+        logWarn("leads.list", "Exception during leads fetch, retrying...", {
+          error: err instanceof Error ? err.message : String(err),
+          attempt: attempt + 1,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+        attempt++;
+      } else {
+        logWarn("leads.list", "Exhausted retries fetching leads, attempting broad fallback", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        try {
+          const emergencyRes = await supabaseAdmin
+            .from("leads")
+            .select(LEAD_LIST_COLUMNS)
+            .order("date_discovered", { ascending: false })
+            .limit(100);
+          if (!emergencyRes.error && emergencyRes.data) {
+            return emergencyRes.data;
+          }
+        } catch (inner) {
+          logWarn("leads.list", "Emergency fallback also failed", {
+            error: inner instanceof Error ? inner.message : String(inner),
+          });
+        }
+        throw err;
+      }
+    }
+  }
+  return [];
+}
+
 // Active leads exclude historical pulls older than ACTIVE_LEAD_WINDOW_MS (archiving
 // the original May–September batches without deleting rows). Passing includeArchived=true
 // appends historical archived leads on demand.
@@ -36,24 +122,13 @@ export const listLeads = createServerFn({ method: "GET" })
   )
   .handler(async ({ data }) => {
     const activeCutoff = getActiveCutoffIso();
-    const activePromise = supabaseAdmin
-      .from("leads")
-      .select(LEAD_LIST_COLUMNS)
-      .eq("enriched", true)
-      .gte("date_ingested", activeCutoff)
-      .gte("confidence", MIN_QUALIFIED_CONFIDENCE)
-      .order("confidence", { ascending: false })
-      .order("date_ingested", { ascending: false })
-      .limit(500);
 
     if (!data.includeArchived) {
-      const activeRes = await activePromise;
-      throwIfError(activeRes.error);
-      return activeRes.data ?? [];
+      return await fetchActiveLeadsWithRetry(activeCutoff);
     }
 
-    const [activeRes, archivedRes] = await Promise.all([
-      activePromise,
+    const [activeLeads, archivedRes] = await Promise.all([
+      fetchActiveLeadsWithRetry(activeCutoff),
       supabaseAdmin
         .from("leads")
         .select(LEAD_LIST_COLUMNS)
@@ -63,21 +138,37 @@ export const listLeads = createServerFn({ method: "GET" })
         .order("date_discovered", { ascending: false })
         .limit(500),
     ]);
-    throwIfError(activeRes.error);
-    throwIfError(archivedRes.error);
+    if (archivedRes.error) {
+      logWarn("leads.list", "Failed to fetch archived leads, returning active only", {
+        error: archivedRes.error.message,
+      });
+      return activeLeads;
+    }
 
-    return [...(activeRes.data ?? []), ...(archivedRes.data ?? [])];
+    return [...activeLeads, ...(archivedRes.data ?? [])];
   });
 
 export const getArchivedLeadCount = createServerFn({ method: "GET" }).handler(async () => {
-  const activeCutoff = getActiveCutoffIso();
-  const { count, error } = await supabaseAdmin
-    .from("leads")
-    .select("id", { count: "exact", head: true })
-    .eq("enriched", true)
-    .lt("date_ingested", activeCutoff);
-  throwIfError(error);
-  return { count: count ?? 0 };
+  try {
+    const activeCutoff = getActiveCutoffIso();
+    const { count, error } = await supabaseAdmin
+      .from("leads")
+      .select("id", { count: "exact", head: true })
+      .eq("enriched", true)
+      .lt("date_ingested", activeCutoff);
+    if (error) {
+      logWarn("leads.archived_count", "Failed to retrieve archived lead count", {
+        error: error.message,
+      });
+      return { count: 0 };
+    }
+    return { count: count ?? 0 };
+  } catch (err) {
+    logWarn("leads.archived_count", "Exception in getArchivedLeadCount", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { count: 0 };
+  }
 });
 
 export const triggerIngestion = createServerFn({ method: "POST" }).handler(async () => {
@@ -97,12 +188,22 @@ export const triggerIngestionForSource = createServerFn({ method: "POST" })
   });
 
 export const listLeadActions = createServerFn({ method: "GET" }).handler(async () => {
-  const { data, error } = await supabaseAdmin
-    .from("lead_actions")
-    .select("lead_id, action, note, created_at")
-    .eq("user_id", OWNER_ID);
-  throwIfError(error);
-  return data ?? [];
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("lead_actions")
+      .select("lead_id, action, note, created_at")
+      .eq("user_id", OWNER_ID);
+    if (error) {
+      logWarn("leads.actions", "Failed to list lead actions", { error: error.message });
+      return [];
+    }
+    return data ?? [];
+  } catch (err) {
+    logWarn("leads.actions", "Exception in listLeadActions", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return [];
+  }
 });
 
 // Workflow actions the rep can toggle on a lead. 'note' is persisted separately
@@ -513,18 +614,28 @@ export const getPipelineForecast = createServerFn({ method: "GET" }).handler(asy
 /* -------------------- Ingestion runs -------------------- */
 
 export const getRecentIngestionRuns = createServerFn({ method: "GET" }).handler(async () => {
-  const { data, error } = await supabaseAdmin
-    .from("ingestion_runs")
-    .select(
-      "source, started_at, finished_at, status, fetched_count, new_count, enriched_count, error",
-    )
-    .order("started_at", { ascending: false })
-    .limit(12);
-  if (error) throw new Error(error.message);
-  return (data ?? []).map((row) => ({
-    ...row,
-    error: row.error ? sanitizeErrorText(row.error, 240) : null,
-  }));
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("ingestion_runs")
+      .select(
+        "source, started_at, finished_at, status, fetched_count, new_count, enriched_count, error",
+      )
+      .order("started_at", { ascending: false })
+      .limit(12);
+    if (error) {
+      logWarn("leads.runs", "Failed to get recent ingestion runs", { error: error.message });
+      return [];
+    }
+    return (data ?? []).map((row) => ({
+      ...row,
+      error: row.error ? sanitizeErrorText(row.error, 240) : null,
+    }));
+  } catch (err) {
+    logWarn("leads.runs", "Exception in getRecentIngestionRuns", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return [];
+  }
 });
 
 /* -------------------- Physician contacts -------------------- */
@@ -550,51 +661,63 @@ export interface LeadPhysician {
 
 export const listLeadPhysicians = createServerFn({ method: "GET" }).handler(
   async (): Promise<LeadPhysician[]> => {
-    const { data, error } = await supabaseAdmin
-      .from("lead_physicians")
-      .select(
-        "lead_id, role, match_confidence, physician_contacts!inner(npi, full_name, credentials, primary_specialty, practice_city, practice_state, practice_phone, practice_address, practice_zip, email, title, linkedin_url, apollo_enriched_at)",
-      )
-      .limit(2000);
-    if (error) throw new Error(error.message);
-    type Row = {
-      lead_id: string;
-      role: string;
-      match_confidence: number;
-      physician_contacts: {
-        npi: string;
-        full_name: string;
-        credentials: string | null;
-        primary_specialty: string | null;
-        practice_city: string | null;
-        practice_state: string | null;
-        practice_phone: string | null;
-        practice_address: string | null;
-        practice_zip: string | null;
-        email: string | null;
-        title: string | null;
-        linkedin_url: string | null;
-        apollo_enriched_at: string | null;
+    try {
+      const { data, error } = await supabaseAdmin
+        .from("lead_physicians")
+        .select(
+          "lead_id, role, match_confidence, physician_contacts!inner(npi, full_name, credentials, primary_specialty, practice_city, practice_state, practice_phone, practice_address, practice_zip, email, title, linkedin_url, apollo_enriched_at)",
+        )
+        .limit(2000);
+      if (error) {
+        logWarn("leads.physicians", "Failed to list lead physicians", { error: error.message });
+        return [];
+      }
+      type Row = {
+        lead_id: string;
+        role: string;
+        match_confidence: number;
+        physician_contacts: {
+          npi: string;
+          full_name: string;
+          credentials: string | null;
+          primary_specialty: string | null;
+          practice_city: string | null;
+          practice_state: string | null;
+          practice_phone: string | null;
+          practice_address: string | null;
+          practice_zip: string | null;
+          email: string | null;
+          title: string | null;
+          linkedin_url: string | null;
+          apollo_enriched_at: string | null;
+        };
       };
-    };
-    return ((data ?? []) as unknown as Row[]).map((r) => ({
-      lead_id: r.lead_id,
-      role: r.role,
-      match_confidence: r.match_confidence,
-      npi: r.physician_contacts.npi,
-      full_name: r.physician_contacts.full_name,
-      credentials: r.physician_contacts.credentials,
-      primary_specialty: r.physician_contacts.primary_specialty,
-      practice_city: r.physician_contacts.practice_city,
-      practice_state: r.physician_contacts.practice_state,
-      practice_phone: r.physician_contacts.practice_phone,
-      practice_address: r.physician_contacts.practice_address,
-      practice_zip: r.physician_contacts.practice_zip,
-      email: r.physician_contacts.email,
-      title: r.physician_contacts.title,
-      linkedin_url: r.physician_contacts.linkedin_url,
-      apollo_enriched_at: r.physician_contacts.apollo_enriched_at,
-    }));
+      return ((data ?? []) as unknown as Row[])
+        .filter((r) => r.physician_contacts != null)
+        .map((r) => ({
+          lead_id: r.lead_id,
+          role: r.role,
+          match_confidence: r.match_confidence,
+          npi: r.physician_contacts.npi,
+          full_name: r.physician_contacts.full_name,
+          credentials: r.physician_contacts.credentials,
+          primary_specialty: r.physician_contacts.primary_specialty,
+          practice_city: r.physician_contacts.practice_city,
+          practice_state: r.physician_contacts.practice_state,
+          practice_phone: r.physician_contacts.practice_phone,
+          practice_address: r.physician_contacts.practice_address,
+          practice_zip: r.physician_contacts.practice_zip,
+          email: r.physician_contacts.email,
+          title: r.physician_contacts.title,
+          linkedin_url: r.physician_contacts.linkedin_url,
+          apollo_enriched_at: r.physician_contacts.apollo_enriched_at,
+        }));
+    } catch (err) {
+      logWarn("leads.physicians", "Exception in listLeadPhysicians", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return [];
+    }
   },
 );
 
