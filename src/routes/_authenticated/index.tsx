@@ -54,6 +54,7 @@ import { Sidebar } from "@/components/dashboard/Sidebar";
 import { OutreachDraftDialog } from "@/components/dashboard/OutreachDraftDialog";
 import { PitchDeckModal } from "@/components/dashboard/PitchDeckModal";
 import { ExecutiveBriefingNarrative } from "@/components/dashboard/ExecutiveBriefingNarrative";
+import { CacheDataErrorCard } from "@/components/dashboard/CacheDataErrorCard";
 import { SavedSearchesDrawer } from "@/components/dashboard/SavedSearchesDrawer";
 import { AlertsBell } from "@/components/dashboard/AlertsBell";
 import { CopilotPanel } from "@/components/dashboard/CopilotPanel";
@@ -286,18 +287,17 @@ function Dashboard() {
     onSettled: () => qc.invalidateQueries({ queryKey: ["refresh_status"] }),
   });
 
-  // Auto-trigger first ingestion if the database is empty and nothing has ever run.
+  // Auto-trigger background ingestion if active pipeline is completely dry or un-synced.
   const autoRanRef = useRef(false);
   useEffect(() => {
     if (autoRanRef.current) return;
     if (leadsQ.isLoading || runsQ.isLoading || leadsQ.isError) return;
     const noLeads = (leadsQ.data ?? []).length === 0;
-    const noRuns = (runsQ.data ?? []).length === 0;
-    if (noLeads && noRuns && !ingest.isPending) {
+    if (noLeads && !ingest.isPending) {
       autoRanRef.current = true;
       ingest.mutate();
     }
-  }, [leadsQ.isLoading, leadsQ.isError, leadsQ.data, runsQ.isLoading, runsQ.data, ingest]);
+  }, [leadsQ.isLoading, leadsQ.isError, leadsQ.data, runsQ.isLoading, ingest]);
 
   const act = useMutation({
     mutationFn: (input: {
@@ -391,14 +391,21 @@ function Dashboard() {
   );
   const visibleLeads = showDismissed ? dismissedLeads : activeLeads;
 
+  // Anti-pipeline-starvation guard: if leads exist but all happen to be older than
+  // ACTIVE_LEAD_WINDOW_MS (e.g. over calendar turns or slow quarters), never wipe the screen blank.
+  const hasFreshLeads = useMemo(
+    () => activeLeads.some((l) => !isArchivedLead(l)),
+    [activeLeads],
+  );
+
   const scopedActiveLeads = useMemo(
     () =>
       activeLeads.filter((l) => {
-        if (!effectiveIncludeArchived && isArchivedLead(l)) return false;
+        if (!effectiveIncludeArchived && hasFreshLeads && isArchivedLead(l)) return false;
         if (!showAllTerritories && !leadInTerritoryScope(l, TERRITORY_STATES)) return false;
         return true;
       }),
-    [activeLeads, effectiveIncludeArchived, showAllTerritories],
+    [activeLeads, effectiveIncludeArchived, hasFreshLeads, showAllTerritories],
   );
 
   const facetSourceLeads = showDismissed ? dismissedLeads : scopedActiveLeads;
@@ -419,7 +426,7 @@ function Dashboard() {
 
   const filtered = useMemo(() => {
     const matched = visibleLeads.filter((l) => {
-      if (!effectiveIncludeArchived && isArchivedLead(l)) return false;
+      if (!effectiveIncludeArchived && hasFreshLeads && isArchivedLead(l)) return false;
       if (!showAllTerritories && filters.states.length === 0) {
         if (!leadInTerritoryScope(l, TERRITORY_STATES)) return false;
       }
@@ -838,18 +845,11 @@ function Dashboard() {
             </div>
 
             {leadsQ.isError ? (
-              <div className="rounded-md border border-destructive/40 bg-destructive/5 p-8 text-center text-sm">
-                <p className="text-destructive">
-                  Couldn't load leads:{" "}
-                  {leadsQ.error instanceof Error ? leadsQ.error.message : "unknown error"}
-                </p>
-                <button
-                  onClick={() => leadsQ.refetch()}
-                  className="mt-3 h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground"
-                >
-                  Retry
-                </button>
-              </div>
+              <CacheDataErrorCard
+                error={leadsQ.error}
+                onRetry={() => leadsQ.refetch()}
+                isRetrying={leadsQ.isFetching}
+              />
             ) : leadsQ.isLoading ? (
               <div className="space-y-3" aria-busy="true" aria-label="Loading leads">
                 {Array.from({ length: 4 }).map((_, i) => (

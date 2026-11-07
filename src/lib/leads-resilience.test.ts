@@ -128,4 +128,21 @@ describe("Leads functions resilience & fault-tolerance", () => {
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe("emergency-lead-1");
   });
+
+  it("serves curated baseline leads when all remote queries and fallbacks fail", async () => {
+    fromMock.mockImplementation(() => {
+      return {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        gte: vi.fn().mockReturnThis(),
+        order: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockRejectedValue(new Error("Supabase completely unreachable")),
+      };
+    });
+
+    const result = await fetchActiveLeadsWithRetry(new Date().toISOString(), 1);
+    expect(result.length).toBeGreaterThan(0);
+    expect(result[0]).toHaveProperty("title");
+    expect(result[0]).toHaveProperty("confidence");
+  });
 });
