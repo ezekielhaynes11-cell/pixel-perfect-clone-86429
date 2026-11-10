@@ -22,8 +22,6 @@ import {
   Square,
   PhoneCall,
   PhoneOff,
-  Mail,
-  Eye,
 } from "lucide-react";
 import {
   copilotChat,
@@ -561,11 +559,6 @@ function CopilotPanelInner({
 
   if (!open) return null;
 
-  const totalPipelineValue = leads.reduce((sum, l) => sum + (l.estimatedValueUsd ?? 0), 0);
-  const topPriorityLeads = [...leads]
-    .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))
-    .slice(0, 3);
-
   return (
     <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" />
@@ -668,182 +661,16 @@ function CopilotPanelInner({
           </div>
         </header>
 
-        {/* Live ElevenLabs Conversational Agent + Territory Strategy Body */}
+        {/* Live Conversation Body */}
         <div ref={scrollRef} className="flex-1 space-y-5 overflow-y-auto p-4 sm:p-5">
-          {/* Live Conversational Voice Stage (replaces static generic play-button brief) */}
-          <div className="overflow-hidden rounded-2xl border border-border/60 bg-card/90 p-4 sm:p-5 shadow-lg backdrop-blur-md">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (convStatus === "connected" || convStatus === "connecting") {
-                      endSession();
-                    } else {
-                      void startLiveVoiceConversation();
-                    }
-                  }}
-                  aria-label={
-                    convStatus === "connected"
-                      ? "End live voice conversation"
-                      : "Start live voice conversation with Copilot"
-                  }
-                  className={`relative flex h-14 w-14 shrink-0 items-center justify-center rounded-full border transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-                    convStatus === "connected"
-                      ? "border-emerald-400 bg-emerald-500/20 text-emerald-300 shadow-[0_0_24px_rgba(16,185,129,0.45)]"
-                      : "border-primary/50 bg-primary/15 text-primary hover:bg-primary hover:text-primary-foreground shadow-[0_0_18px_rgba(14,165,233,0.25)]"
-                  }`}
-                >
-                  {convStatus === "connected" && (
-                    <span className="absolute inset-0 rounded-full border border-emerald-400/70 animate-ping opacity-40" />
-                  )}
-                  {convStatus === "connecting" ? (
-                    <Loader2 className="h-6 w-6 animate-spin" />
-                  ) : convStatus === "connected" ? (
-                    <PhoneOff className="h-5 w-5" />
-                  ) : (
-                    <Mic className="h-6 w-6" />
-                  )}
-                </button>
-
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-primary">
-                      ElevenLabs + Gemini Live Agent
-                    </span>
-                    <span className="text-[11px] text-muted-foreground">
-                      · ${(totalPipelineValue / 1e6).toFixed(1)}M across {leads.length} accounts
-                    </span>
-                  </div>
-                  <h3 className="font-display text-sm font-semibold text-foreground mt-0.5">
-                    {convStatus === "connected"
-                      ? agentSpeaking
-                        ? `Briefing ${repName} live — interrupt anytime…`
-                        : `Listening to ${repName} — ask about any hospital or contact…`
-                      : `Talk live with your Philips Territory Strategist, ${repName}`}
-                  </h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {convStatus === "connected"
-                      ? "Connected to live territory tools: hospital leads, clinical contacts, and email drafting."
-                      : "Tap the mic orb to start a real-time two-way voice conversation about today's priority accounts."}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                {convStatus === "connected" ? (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      sendUserMessage(
-                        "Walk me through my top priority hospital accounts for today and who I should reach out to first.",
-                      )
-                    }
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground shadow-sm hover:bg-primary/90 transition-colors"
-                  >
-                    <Sparkles className="h-3.5 w-3.5" />
-                    <span>Ask for Live Brief</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => void startLiveVoiceConversation()}
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground shadow-sm hover:bg-primary/90 transition-colors"
-                  >
-                    <PhoneCall className="h-3.5 w-3.5" />
-                    <span>Talk with Agent</span>
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Priority Accounts Quick-Action Strip */}
-            {topPriorityLeads.length > 0 && (
-              <div className="mt-4 border-t border-border/50 pt-3.5">
-                <div className="mb-2 flex items-center justify-between">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Priority Accounts Ready for Live Discussion
-                  </span>
-                </div>
-                <div className="space-y-2">
-                  {topPriorityLeads.map((lead) => (
-                    <div
-                      key={lead.id}
-                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-xl border border-border/50 bg-surface/50 px-3 py-2.5 text-xs"
-                    >
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-foreground truncate">
-                            {lead.hospital || lead.title}
-                          </span>
-                          {lead.territory && (
-                            <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
-                              {lead.territory}
-                            </span>
-                          )}
-                          {lead.estimatedValueUsd && (
-                            <span className="text-[11px] font-mono text-emerald-400">
-                              ${(lead.estimatedValueUsd / 1e6).toFixed(1)}M
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">
-                          {lead.summary}
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const prompt = `Tell me about the opportunity at ${lead.hospital || lead.title} and how I should position Philips equipment.`;
-                            if (convStatus === "connected") {
-                              sendUserMessage(prompt);
-                            } else {
-                              void submit(prompt, { speakReply: true });
-                            }
-                          }}
-                          className="inline-flex items-center gap-1 rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary hover:bg-primary hover:text-primary-foreground transition-colors"
-                        >
-                          <Mic className="h-3 w-3" />
-                          <span>Discuss</span>
-                        </button>
-                        {onDraftLead && (
-                          <button
-                            type="button"
-                            onClick={() => onDraftLead(lead)}
-                            className="inline-flex items-center gap-1 rounded-lg border border-border/50 bg-surface px-2.5 py-1 text-[11px] font-medium text-foreground hover:border-primary/40 transition-colors"
-                          >
-                            <Mail className="h-3 w-3 text-primary" />
-                            <span>Draft Email</span>
-                          </button>
-                        )}
-                        {onViewLead && (
-                          <button
-                            type="button"
-                            onClick={() => onViewLead(lead)}
-                            className="inline-flex items-center gap-1 rounded-lg border border-border/50 bg-surface px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-                            title="View Account Dossier"
-                          >
-                            <Eye className="h-3 w-3" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Live Multi-Turn Gemini Intelligence Conversation */}
+          {/* Live Multi-Turn Strategy Conversation */}
           <div
             ref={conversationAnchorRef}
-            className="space-y-3 border-t border-border/40 pt-4"
+            className="space-y-3"
           >
             <div className="flex items-center justify-between">
               <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Live Gemini Strategy Conversation
+                Live Sales Copilot Conversation
               </div>
               {messages.length > 0 && (
                 <button
