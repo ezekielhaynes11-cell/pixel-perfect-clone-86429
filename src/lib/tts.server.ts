@@ -1,4 +1,8 @@
+import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
 import { logInfo, logWarn } from "./logger.server";
+
+export const DEFAULT_ELEVENLABS_AGENT_ID = "agent_0201m72b9x42fw1axsm4hjkynbzf";
+export const DEFAULT_ELEVENLABS_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"; // Sarah (warm, conversational executive voice)
 
 const GEMINI_TTS_ENDPOINT =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent";
@@ -86,7 +90,87 @@ export function pcm16ToWavBase64(pcmBase64: string, sampleRate = 24000): string 
 }
 
 /**
+ * Generates an authenticated ElevenLabs Conversational AI signed URL on the server.
+ * The ElevenLabsClient reads ELEVENLABS_API_KEY from process.env automatically.
+ */
+export async function getElevenLabsSignedSession(
+  customAgentId?: string,
+): Promise<{ signedUrl: string; agentId: string } | null> {
+  if (!process.env.ELEVENLABS_API_KEY?.trim()) {
+    logInfo("elevenlabs.session", "ELEVENLABS_API_KEY not set in environment");
+    return null;
+  }
+
+  const agentId =
+    customAgentId?.trim() ||
+    process.env.ELEVENLABS_AGENT_ID?.trim() ||
+    DEFAULT_ELEVENLABS_AGENT_ID;
+
+  try {
+    const client = new ElevenLabsClient();
+    const response = await client.conversationalAi.conversations.getSignedUrl({
+      agentId,
+    });
+    if (response?.signedUrl) {
+      return {
+        signedUrl: response.signedUrl,
+        agentId,
+      };
+    }
+  } catch (err) {
+    logWarn("elevenlabs.session", "Failed to get signed URL for agent", {
+      agentId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  return null;
+}
+
+/**
+ * Synthesizes natural conversational speech via ElevenLabs Flash v2.5 (`@elevenlabs/elevenlabs-js`).
+ * Reads ELEVENLABS_API_KEY automatically from process.env.
+ */
+export async function synthesizeSpeechElevenLabs(
+  scriptText: string,
+  voiceId = DEFAULT_ELEVENLABS_VOICE_ID,
+): Promise<string | null> {
+  if (!process.env.ELEVENLABS_API_KEY?.trim()) {
+    return null;
+  }
+
+  const cleanedText = cleanSpeechScript(scriptText);
+  if (!cleanedText) {
+    return null;
+  }
+
+  try {
+    const client = new ElevenLabsClient();
+    const audioStream = await client.textToSpeech.convert(voiceId, {
+      text: cleanedText,
+      modelId: "eleven_flash_v2_5",
+      voiceSettings: {
+        stability: 0.5,
+        similarityBoost: 0.8,
+      },
+    });
+
+    const arrayBuffer = await new Response(audioStream as unknown as ReadableStream).arrayBuffer();
+    if (arrayBuffer.byteLength > 0) {
+      return Buffer.from(arrayBuffer).toString("base64");
+    }
+  } catch (err) {
+    logWarn("elevenlabs.tts", "ElevenLabs TTS failed, falling back to secondary voice engine", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  return null;
+}
+
+/**
  * Synthesizes natural conversational speech using:
+ * 0. ElevenLabs Flash v2.5 Neural TTS (`@elevenlabs/elevenlabs-js`) when `ELEVENLABS_API_KEY` is present.
  * 1. Gemini 2.5 Flash Native Audio TTS (`generativelanguage.googleapis.com`) with the warm, executive Aoede voice.
  * 2. Google Cloud Neural2/Journey TTS (`texttospeech.googleapis.com`) with en-US-Journey-F.
  * 3. Returns `null` if no key is configured or credits are depleted, triggering enhanced client-side neural voice selection.
@@ -95,6 +179,19 @@ export async function synthesizeSpeechGoogleCloud(
   scriptText: string,
   customApiKey?: string,
 ): Promise<string | null> {
+  const cleanedText = cleanSpeechScript(scriptText);
+  if (!cleanedText) {
+    return null;
+  }
+
+  // Tier 0: ElevenLabs Neural TTS (when ELEVENLABS_API_KEY is configured in environment)
+  if (process.env.ELEVENLABS_API_KEY?.trim()) {
+    const elevenLabsAudio = await synthesizeSpeechElevenLabs(cleanedText);
+    if (elevenLabsAudio) {
+      return elevenLabsAudio;
+    }
+  }
+
   const apiKey =
     customApiKey?.trim() ||
     process.env.GOOGLE_CLOUD_API_KEY?.trim() ||
@@ -103,11 +200,6 @@ export async function synthesizeSpeechGoogleCloud(
 
   if (!apiKey) {
     logInfo("tts.synthesize", "Google Cloud / Gemini API key not configured; using client speech fallback");
-    return null;
-  }
-
-  const cleanedText = cleanSpeechScript(scriptText);
-  if (!cleanedText) {
     return null;
   }
 

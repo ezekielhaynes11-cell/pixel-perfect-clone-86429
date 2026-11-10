@@ -196,11 +196,13 @@ describe("Copilot Voice Agent — Structured Contract Validation", () => {
 
 describe("Copilot Voice Agent — Dual TTS Engine Resilience", () => {
   it("gracefully falls back to null when Google Cloud API key is absent without throwing", async () => {
+    const prevElevenKey = process.env.ELEVENLABS_API_KEY;
     const prevKey = process.env.GOOGLE_CLOUD_API_KEY;
     const prevGeminiKey = process.env.GEMINI_API_KEY;
     const prevGoogleKey = process.env.GOOGLE_API_KEY;
 
     try {
+      delete process.env.ELEVENLABS_API_KEY;
       delete process.env.GOOGLE_CLOUD_API_KEY;
       delete process.env.GEMINI_API_KEY;
       delete process.env.GOOGLE_API_KEY;
@@ -212,6 +214,7 @@ describe("Copilot Voice Agent — Dual TTS Engine Resilience", () => {
       // Must return null without throwing, allowing client Web Speech API to seamlessly activate
       expect(audioBase64).toBeNull();
     } finally {
+      if (prevElevenKey) process.env.ELEVENLABS_API_KEY = prevElevenKey;
       if (prevKey) process.env.GOOGLE_CLOUD_API_KEY = prevKey;
       if (prevGeminiKey) process.env.GEMINI_API_KEY = prevGeminiKey;
       if (prevGoogleKey) process.env.GOOGLE_API_KEY = prevGoogleKey;

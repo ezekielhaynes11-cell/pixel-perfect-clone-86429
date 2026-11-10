@@ -3,6 +3,13 @@ import ReactMarkdown from "react-markdown";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
+  ConversationProvider,
+  useConversationClientTool,
+  useConversationControls,
+  useConversationMode,
+  useConversationStatus,
+} from "@elevenlabs/react";
+import {
   Sparkles,
   Send,
   X,
@@ -13,17 +20,19 @@ import {
   Volume2,
   VolumeX,
   Square,
-  Key,
-  CheckCircle2,
-  AlertTriangle,
+  PhoneCall,
+  PhoneOff,
+  Mail,
+  Eye,
 } from "lucide-react";
 import {
   copilotChat,
   synthesizeCopilotSpeech,
   checkGeminiApiStatus,
+  getElevenLabsConversationToken,
+  executeCopilotVoiceTool,
 } from "@/lib/copilot.functions";
 import {
-  CopilotVoiceAgent,
   resolveAudioDataUri,
   selectBestNaturalVoice,
 } from "./CopilotVoiceAgent";
@@ -78,7 +87,38 @@ interface BrowserSpeechRecognition {
   onend: (() => void) | null;
 }
 
-export function CopilotPanel({
+type CopilotClientTools = {
+  query_territory_leads: (params: { state?: string; search?: string }) => Promise<string>;
+  find_clinical_contacts: (params: { state?: string; specialty?: string }) => Promise<string>;
+  draft_outreach_email: (params: { hospital: string }) => Promise<string>;
+};
+
+export function CopilotPanel(props: CopilotPanelProps) {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+
+  return (
+    <ConversationProvider
+      onMessage={(payload) => {
+        const text = payload.message?.trim();
+        if (!text) return;
+        const role: "user" | "assistant" = payload.source === "user" ? "user" : "assistant";
+        setMessages((prev) => [...prev, { role, content: text }]);
+      }}
+      onError={(err) => {
+        console.warn("[elevenlabs] conversation notice:", err);
+      }}
+    >
+      <CopilotPanelInner {...props} messages={messages} setMessages={setMessages} />
+    </ConversationProvider>
+  );
+}
+
+interface CopilotPanelInnerProps extends CopilotPanelProps {
+  messages: ChatMessage[];
+  setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
+}
+
+function CopilotPanelInner({
   open,
   onClose,
   repName = "Mike",
@@ -87,8 +127,9 @@ export function CopilotPanel({
   onDraftLead,
   onToggleContacted,
   contactedIds = new Set(),
-}: CopilotPanelProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  messages,
+  setMessages,
+}: CopilotPanelInnerProps) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -97,14 +138,89 @@ export function CopilotPanel({
   const [continuousVoice, setContinuousVoice] = useState(true);
   const [speakingMessageIdx, setSpeakingMessageIdx] = useState<number | null>(null);
 
-  // Gemini API key state & management
-  const [userApiKey, setUserApiKey] = useState<string>("");
-  const [keyModalOpen, setKeyModalOpen] = useState(false);
-  const [tempKeyInput, setTempKeyInput] = useState("");
-
   const send = useServerFn(copilotChat);
   const synthesizeReply = useServerFn(synthesizeCopilotSpeech);
   const checkStatus = useServerFn(checkGeminiApiStatus);
+  const fetchElevenLabsToken = useServerFn(getElevenLabsConversationToken);
+  const runVoiceTool = useServerFn(executeCopilotVoiceTool);
+
+  // ElevenLabs Conversational AI hooks
+  const { startSession, endSession, sendUserMessage, sendContextualUpdate } =
+    useConversationControls();
+  const { status: convStatus } = useConversationStatus();
+  const { isSpeaking: agentSpeaking, isListening: agentListening } = useConversationMode();
+
+  // Push live territory snapshot to the ElevenLabs Conversational Agent on connect
+  useEffect(() => {
+    if (convStatus !== "connected" || leads.length === 0) return;
+    const totalPipeline = leads.reduce((sum, l) => sum + (l.estimatedValueUsd ?? 0), 0);
+    const top3 = [...leads]
+      .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))
+      .slice(0, 3)
+      .map(
+        (l, idx) =>
+          `${idx + 1}. ${l.hospital || l.title} (${l.territory || "TX"}), Value: $${((l.estimatedValueUsd ?? 0) / 1e6).toFixed(1)}M, Signal: ${l.signalType}, Incumbent: ${l.competitorIncumbent || "Legacy"}, Summary: ${l.summary}`,
+      )
+      .join(" | ");
+    sendContextualUpdate(
+      `Live territory snapshot for ${repName} (Philips Sales Rep): $${(totalPipeline / 1e6).toFixed(1)}M across ${leads.length} active accounts. Top priority accounts today: ${top3}`,
+    );
+  }, [convStatus, leads, repName, sendContextualUpdate]);
+
+  // Register live Philips territory tools for the ElevenLabs Conversational Agent
+  useConversationClientTool<CopilotClientTools>("query_territory_leads", async (params) => {
+    const res = await runVoiceTool({
+      data: {
+        toolName: "query_territory_leads",
+        parameters: params,
+      },
+    });
+    return JSON.stringify(res);
+  });
+
+  useConversationClientTool<CopilotClientTools>("find_clinical_contacts", async (params) => {
+    const res = await runVoiceTool({
+      data: {
+        toolName: "find_clinical_contacts",
+        parameters: params,
+      },
+    });
+    return JSON.stringify(res);
+  });
+
+  useConversationClientTool<CopilotClientTools>("draft_outreach_email", async (params) => {
+    const res = (await runVoiceTool({
+      data: {
+        toolName: "draft_outreach_email",
+        parameters: params,
+      },
+    })) as {
+      drafted?: boolean;
+      leadId?: string;
+      hospital?: string;
+      subject?: string;
+      body?: string;
+    };
+
+    if (res?.drafted && res.body) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `### Personal Outreach Drafted from Mike (${res.hospital ?? "Hospital Account"})\n\n**Subject:** ${res.subject ?? ""}\n\n\`\`\`text\n${res.body}\n\`\`\``,
+          tools: [{ name: "draft_outreach_email", summary: `Drafted for ${res.hospital ?? "account"}` }],
+        },
+      ]);
+      if (res.leadId && onDraftLead) {
+        const matched = leads.find((l) => l.id === res.leadId);
+        if (matched) {
+          onDraftLead(matched);
+        }
+      }
+    }
+
+    return JSON.stringify(res);
+  });
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const conversationAnchorRef = useRef<HTMLDivElement>(null);
@@ -118,19 +234,9 @@ export function CopilotPanel({
     continuousVoiceRef.current = continuousVoice;
   }, [continuousVoice]);
 
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem("gemini_user_api_key") || "";
-      if (stored) {
-        setUserApiKey(stored);
-        setTempKeyInput(stored);
-      }
-    }
-  }, []);
-
-  const { data: apiStatus, refetch: refetchStatus } = useQuery({
-    queryKey: ["gemini_api_status", userApiKey],
-    queryFn: () => checkStatus({ data: { apiKey: userApiKey || undefined } }),
+  const { data: apiStatus } = useQuery({
+    queryKey: ["gemini_api_status"],
+    queryFn: () => checkStatus({ data: {} }),
     staleTime: 60 * 1000,
   });
 
@@ -244,7 +350,7 @@ export function CopilotPanel({
 
       try {
         const res = await synthesizeReply({
-          data: { text, apiKey: userApiKey || undefined },
+          data: { text },
         });
         if (speechTokenRef.current !== token) return;
 
@@ -254,7 +360,6 @@ export function CopilotPanel({
           audio.onended = () => {
             if (speechTokenRef.current === token) {
               setSpeakingMessageIdx(null);
-              // Continuous hands-free loop: reopen mic when Gemini finishes speaking
               if (continuousVoiceRef.current) {
                 setTimeout(() => {
                   startListening();
@@ -285,7 +390,6 @@ export function CopilotPanel({
           utterance.onend = () => {
             if (speechTokenRef.current === token) {
               setSpeakingMessageIdx(null);
-              // Continuous hands-free loop: reopen mic when speech ends
               if (continuousVoiceRef.current) {
                 setTimeout(() => {
                   startListening();
@@ -308,7 +412,7 @@ export function CopilotPanel({
         }
       }
     },
-    [startListening, stopReplySpeech, synthesizeReply, userApiKey],
+    [startListening, stopReplySpeech, synthesizeReply],
   );
 
   const submit = useCallback(
@@ -317,6 +421,12 @@ export function CopilotPanel({
       if (!trimmed || busy) return;
 
       stopReplySpeech();
+
+      if (convStatus === "connected") {
+        setInput("");
+        sendUserMessage(trimmed);
+        return;
+      }
 
       const userMsg: ChatMessage = { role: "user", content: trimmed };
       const history = [...messages, userMsg];
@@ -336,7 +446,6 @@ export function CopilotPanel({
         const stream = await send({
           data: {
             messages: history.map((m) => ({ role: m.role, content: m.content })),
-            apiKey: userApiKey || undefined,
           },
         });
         for await (const event of stream as AsyncIterable<
@@ -406,10 +515,43 @@ export function CopilotPanel({
         }, 80);
       }
     },
-    [busy, messages, send, speakAssistantReply, stopReplySpeech, userApiKey, voiceRepliesEnabled],
+    [
+      busy,
+      convStatus,
+      messages,
+      send,
+      sendUserMessage,
+      setMessages,
+      speakAssistantReply,
+      stopReplySpeech,
+      voiceRepliesEnabled,
+    ],
   );
 
+  const startLiveVoiceConversation = useCallback(async () => {
+    try {
+      stopReplySpeech();
+      stopListening();
+      const tokenRes = await fetchElevenLabsToken({ data: {} });
+      if (tokenRes?.signedUrl) {
+        startSession({ signedUrl: tokenRes.signedUrl });
+      } else if (tokenRes?.agentId) {
+        startSession({ agentId: tokenRes.agentId });
+      }
+    } catch {
+      startListening();
+    }
+  }, [fetchElevenLabsToken, startListening, startSession, stopListening, stopReplySpeech]);
+
   const toggleMic = () => {
+    if (convStatus === "connected" || convStatus === "connecting") {
+      endSession();
+      return;
+    }
+    if (apiStatus?.elevenLabsActive) {
+      void startLiveVoiceConversation();
+      return;
+    }
     if (isListening) {
       stopListening();
       return;
@@ -417,20 +559,12 @@ export function CopilotPanel({
     startListening();
   };
 
-  const handleSaveCustomKey = () => {
-    const trimmed = tempKeyInput.trim();
-    if (trimmed) {
-      localStorage.setItem("gemini_user_api_key", trimmed);
-      setUserApiKey(trimmed);
-    } else {
-      localStorage.removeItem("gemini_user_api_key");
-      setUserApiKey("");
-    }
-    setKeyModalOpen(false);
-    void refetchStatus();
-  };
-
   if (!open) return null;
+
+  const totalPipelineValue = leads.reduce((sum, l) => sum + (l.estimatedValueUsd ?? 0), 0);
+  const topPriorityLeads = [...leads]
+    .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))
+    .slice(0, 3);
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
@@ -445,47 +579,43 @@ export function CopilotPanel({
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 sm:gap-2">
               <span className="font-display text-xs sm:text-sm font-semibold text-foreground">
-                Gemini Sales Copilot
+                Philips Conversational Copilot
               </span>
               <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
-                Mike · Philips
+                {repName} · Territory Rep
               </span>
             </div>
           </div>
 
           <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
-            {/* Live Gemini Connection Status Badge */}
-            {apiStatus?.status === "active" ? (
+            {/* ElevenLabs Real-Time Conversational Agent Call Button */}
+            {convStatus === "connected" || convStatus === "connecting" ? (
               <button
                 type="button"
-                onClick={() => setKeyModalOpen(true)}
-                title="Google Gemini 2.5 Flash and Aoede voice are active. Click to manage key."
-                className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-400 hover:bg-emerald-500/20"
+                onClick={() => endSession()}
+                className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/20 px-2.5 py-1 text-[11px] font-semibold text-emerald-300 shadow-sm hover:bg-red-500/20 hover:border-red-500/40 hover:text-red-300 transition-colors"
               >
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="hidden sm:inline">Gemini Live · Aoede</span>
-                <span className="sm:hidden">Aoede</span>
-              </button>
-            ) : apiStatus?.status === "credits_depleted" ? (
-              <button
-                type="button"
-                onClick={() => setKeyModalOpen(true)}
-                title="Google AI Studio prepayment credits depleted (HTTP 402). Click to enter a fresh API key."
-                className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-300 hover:bg-amber-500/25"
-              >
-                <AlertTriangle className="h-3 w-3 shrink-0" />
-                <span className="hidden sm:inline">Credits Depleted · Enter Key</span>
-                <span className="sm:hidden">Key</span>
+                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
+                <span>
+                  {convStatus === "connecting"
+                    ? "Connecting…"
+                    : agentSpeaking
+                      ? "Agent Speaking…"
+                      : agentListening
+                        ? "Listening to Mike…"
+                        : "Live Voice Active"}
+                </span>
+                <PhoneOff className="h-3 w-3 ml-0.5" />
               </button>
             ) : (
               <button
                 type="button"
-                onClick={() => setKeyModalOpen(true)}
-                title="Configure Gemini API Key"
-                className="inline-flex items-center gap-1 rounded-full border border-border/50 bg-surface/60 px-2 py-0.5 text-[10px] font-semibold text-muted-foreground hover:text-foreground"
+                onClick={() => void startLiveVoiceConversation()}
+                title="Start real-time conversational voice session with your Copilot"
+                className="inline-flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/15 px-2.5 py-1 text-[11px] font-semibold text-primary hover:bg-primary hover:text-primary-foreground transition-colors"
               >
-                <Key className="h-3 w-3" />
-                <span>API Key</span>
+                <PhoneCall className="h-3 w-3" />
+                <span>Start Voice Session</span>
               </button>
             )}
 
@@ -496,7 +626,7 @@ export function CopilotPanel({
               aria-label={continuousVoice ? "Continuous conversation active" : "Push-to-talk mode"}
               title={
                 continuousVoice
-                  ? "Continuous Voice: ON (Gemini automatically listens after speaking)"
+                  ? "Continuous Voice: ON (Automatically listens after speaking)"
                   : "Push-to-talk mode (tap mic to speak)"
               }
               className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors ${
@@ -538,131 +668,173 @@ export function CopilotPanel({
           </div>
         </header>
 
-        {/* Modal: Gemini API Key Setup */}
-        {keyModalOpen && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-md">
-            <div className="w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-2xl space-y-4">
-              <div className="flex items-center justify-between border-b border-border/40 pb-3">
-                <div className="flex items-center gap-2">
-                  <Key className="h-4 w-4 text-primary" />
-                  <h3 className="font-display text-sm font-semibold text-foreground">
-                    Google Gemini API Key
-                  </h3>
-                </div>
+        {/* Live ElevenLabs Conversational Agent + Territory Strategy Body */}
+        <div ref={scrollRef} className="flex-1 space-y-5 overflow-y-auto p-4 sm:p-5">
+          {/* Live Conversational Voice Stage (replaces static generic play-button brief) */}
+          <div className="overflow-hidden rounded-2xl border border-border/60 bg-card/90 p-4 sm:p-5 shadow-lg backdrop-blur-md">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3.5">
                 <button
                   type="button"
-                  onClick={() => setKeyModalOpen(false)}
-                  className="rounded-md p-1 text-muted-foreground hover:text-foreground"
+                  onClick={() => {
+                    if (convStatus === "connected" || convStatus === "connecting") {
+                      endSession();
+                    } else {
+                      void startLiveVoiceConversation();
+                    }
+                  }}
+                  aria-label={
+                    convStatus === "connected"
+                      ? "End live voice conversation"
+                      : "Start live voice conversation with Copilot"
+                  }
+                  className={`relative flex h-14 w-14 shrink-0 items-center justify-center rounded-full border transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+                    convStatus === "connected"
+                      ? "border-emerald-400 bg-emerald-500/20 text-emerald-300 shadow-[0_0_24px_rgba(16,185,129,0.45)]"
+                      : "border-primary/50 bg-primary/15 text-primary hover:bg-primary hover:text-primary-foreground shadow-[0_0_18px_rgba(14,165,233,0.25)]"
+                  }`}
                 >
-                  <X className="h-4 w-4" />
+                  {convStatus === "connected" && (
+                    <span className="absolute inset-0 rounded-full border border-emerald-400/70 animate-ping opacity-40" />
+                  )}
+                  {convStatus === "connecting" ? (
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                  ) : convStatus === "connected" ? (
+                    <PhoneOff className="h-5 w-5" />
+                  ) : (
+                    <Mic className="h-6 w-6" />
+                  )}
                 </button>
+
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-primary">
+                      ElevenLabs + Gemini Live Agent
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">
+                      · ${(totalPipelineValue / 1e6).toFixed(1)}M across {leads.length} accounts
+                    </span>
+                  </div>
+                  <h3 className="font-display text-sm font-semibold text-foreground mt-0.5">
+                    {convStatus === "connected"
+                      ? agentSpeaking
+                        ? `Briefing ${repName} live — interrupt anytime…`
+                        : `Listening to ${repName} — ask about any hospital or contact…`
+                      : `Talk live with your Philips Territory Strategist, ${repName}`}
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {convStatus === "connected"
+                      ? "Connected to live territory tools: hospital leads, clinical contacts, and email drafting."
+                      : "Tap the mic orb to start a real-time two-way voice conversation about today's priority accounts."}
+                  </p>
+                </div>
               </div>
 
-              {apiStatus?.status === "credits_depleted" && (
-                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200 leading-relaxed">
-                  <strong>Notice:</strong> The project associated with your existing key has depleted its prepayment
-                  credits. You can create a free key at{" "}
-                  <a
-                    href="https://aistudio.google.com/app/apikey"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="underline font-semibold text-amber-100 hover:text-white"
-                  >
-                    Google AI Studio
-                  </a>{" "}
-                  and paste it below to restore live Gemini conversation and Aoede voice immediately.
-                </div>
-              )}
-
-              {apiStatus?.status === "active" && (
-                <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-2.5 text-xs text-emerald-300">
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
-                  <span>Gemini 2.5 Flash and Aoede voice are currently connected and active.</span>
-                </div>
-              )}
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-foreground">
-                  Gemini API Key (Google AI Studio)
-                </label>
-                <input
-                  type="password"
-                  value={tempKeyInput}
-                  onChange={(e) => setTempKeyInput(e.target.value)}
-                  placeholder="AIzaSy..."
-                  className="w-full rounded-lg border border-border/60 bg-surface px-3 py-2 text-xs font-mono text-foreground outline-none focus:border-primary"
-                />
-                <p className="text-[11px] text-muted-foreground">
-                  Saved securely in your browser session. Free API keys can be generated at{" "}
-                  <a
-                    href="https://aistudio.google.com/app/apikey"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-primary hover:underline"
-                  >
-                    aistudio.google.com
-                  </a>.
-                </p>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2">
-                {userApiKey && (
+              <div className="flex items-center gap-2 shrink-0">
+                {convStatus === "connected" ? (
                   <button
                     type="button"
-                    onClick={() => {
-                      localStorage.removeItem("gemini_user_api_key");
-                      setUserApiKey("");
-                      setTempKeyInput("");
-                      setKeyModalOpen(false);
-                      void refetchStatus();
-                    }}
-                    className="mr-auto text-xs text-muted-foreground hover:text-red-400"
+                    onClick={() =>
+                      sendUserMessage(
+                        "Walk me through my top priority hospital accounts for today and who I should reach out to first.",
+                      )
+                    }
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground shadow-sm hover:bg-primary/90 transition-colors"
                   >
-                    Clear Custom Key
+                    <Sparkles className="h-3.5 w-3.5" />
+                    <span>Ask for Live Brief</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void startLiveVoiceConversation()}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground shadow-sm hover:bg-primary/90 transition-colors"
+                  >
+                    <PhoneCall className="h-3.5 w-3.5" />
+                    <span>Talk with Agent</span>
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => setKeyModalOpen(false)}
-                  className="rounded-lg border border-border/50 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSaveCustomKey}
-                  className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 shadow-sm"
-                >
-                  Save Key
-                </button>
               </div>
             </div>
-          </div>
-        )}
 
-        {/* Unified Gemini Voice Briefing + Live Conversation Body */}
-        <div ref={scrollRef} className="flex-1 space-y-5 overflow-y-auto p-4 sm:p-5">
-          {/* Calm Gemini Morning Briefing + Priority Target Cards */}
-          <CopilotVoiceAgent
-            repName={repName}
-            territoryStates={["TX", "OK", "AR", "LA"]}
-            leads={leads}
-            apiKey={userApiKey || undefined}
-            onViewLead={onViewLead}
-            onDraftLead={onDraftLead}
-            onToggleContacted={onToggleContacted}
-            onAskGeminiAboutLead={(prompt) => {
-              void submit(prompt, { speakReply: voiceRepliesEnabled });
-            }}
-            onFinishedBriefing={() => {
-              if (continuousVoiceRef.current) {
-                setTimeout(() => {
-                  startListening();
-                }, 400);
-              }
-            }}
-            contactedIds={contactedIds}
-          />
+            {/* Priority Accounts Quick-Action Strip */}
+            {topPriorityLeads.length > 0 && (
+              <div className="mt-4 border-t border-border/50 pt-3.5">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Priority Accounts Ready for Live Discussion
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {topPriorityLeads.map((lead) => (
+                    <div
+                      key={lead.id}
+                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-xl border border-border/50 bg-surface/50 px-3 py-2.5 text-xs"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-foreground truncate">
+                            {lead.hospital || lead.title}
+                          </span>
+                          {lead.territory && (
+                            <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                              {lead.territory}
+                            </span>
+                          )}
+                          {lead.estimatedValueUsd && (
+                            <span className="text-[11px] font-mono text-emerald-400">
+                              ${(lead.estimatedValueUsd / 1e6).toFixed(1)}M
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">
+                          {lead.summary}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const prompt = `Tell me about the opportunity at ${lead.hospital || lead.title} and how I should position Philips equipment.`;
+                            if (convStatus === "connected") {
+                              sendUserMessage(prompt);
+                            } else {
+                              void submit(prompt, { speakReply: true });
+                            }
+                          }}
+                          className="inline-flex items-center gap-1 rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary hover:bg-primary hover:text-primary-foreground transition-colors"
+                        >
+                          <Mic className="h-3 w-3" />
+                          <span>Discuss</span>
+                        </button>
+                        {onDraftLead && (
+                          <button
+                            type="button"
+                            onClick={() => onDraftLead(lead)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-border/50 bg-surface px-2.5 py-1 text-[11px] font-medium text-foreground hover:border-primary/40 transition-colors"
+                          >
+                            <Mail className="h-3 w-3 text-primary" />
+                            <span>Draft Email</span>
+                          </button>
+                        )}
+                        {onViewLead && (
+                          <button
+                            type="button"
+                            onClick={() => onViewLead(lead)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-border/50 bg-surface px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                            title="View Account Dossier"
+                          >
+                            <Eye className="h-3 w-3" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Live Multi-Turn Gemini Intelligence Conversation */}
           <div

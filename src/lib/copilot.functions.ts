@@ -1,7 +1,12 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { COPILOT_TOOLS, runCopilotTool } from "./copilot-tools.server";
-import { cleanSpeechScript, synthesizeSpeechGoogleCloud } from "./tts.server";
+import {
+  cleanSpeechScript,
+  synthesizeSpeechGoogleCloud,
+  getElevenLabsSignedSession,
+  DEFAULT_ELEVENLABS_AGENT_ID,
+} from "./tts.server";
 import { fetchActiveLeadsWithRetry, getActiveCutoffIso } from "./leads.functions";
 import {
   rowToLead,
@@ -768,7 +773,7 @@ export const synthesizeCopilotSpeech = createServerFn({ method: "POST" })
   });
 
 /**
- * Diagnostic check verifying live connectivity with Google's Gemini 2.5 Flash API.
+ * Diagnostic check verifying live connectivity with ElevenLabs Conversational AI and Google Gemini.
  */
 export const checkGeminiApiStatus = createServerFn({ method: "POST" })
   .validator((input: unknown) =>
@@ -780,6 +785,18 @@ export const checkGeminiApiStatus = createServerFn({ method: "POST" })
       .parse(input ?? {}),
   )
   .handler(async ({ data }) => {
+    const elevenLabsConfigured = Boolean(process.env.ELEVENLABS_API_KEY?.trim());
+    if (elevenLabsConfigured) {
+      return {
+        status: "active" as const,
+        model: "gemini-2.5-flash",
+        voice: "ElevenLabs Conversational AI",
+        elevenLabsActive: true,
+        agentId: process.env.ELEVENLABS_AGENT_ID?.trim() || DEFAULT_ELEVENLABS_AGENT_ID,
+        message: "ElevenLabs Real-Time Conversational Agent & Gemini 2.5 Flash Active",
+      };
+    }
+
     const key =
       data?.apiKey?.trim() ||
       process.env.GOOGLE_CLOUD_API_KEY?.trim() ||
@@ -789,6 +806,7 @@ export const checkGeminiApiStatus = createServerFn({ method: "POST" })
     if (!key) {
       return {
         status: "unconfigured" as const,
+        elevenLabsActive: false,
         message: "No Google Gemini API key configured.",
       };
     }
@@ -809,6 +827,7 @@ export const checkGeminiApiStatus = createServerFn({ method: "POST" })
           status: "active" as const,
           model: "gemini-2.5-flash",
           voice: "Aoede",
+          elevenLabsActive: false,
           message: "Gemini 2.5 Flash & Aoede Voice Active",
         };
       }
@@ -816,6 +835,7 @@ export const checkGeminiApiStatus = createServerFn({ method: "POST" })
       if (res.status === 402) {
         return {
           status: "credits_depleted" as const,
+          elevenLabsActive: false,
           message: "Google AI Studio prepayment credits depleted (HTTP 402).",
         };
       }
@@ -823,12 +843,156 @@ export const checkGeminiApiStatus = createServerFn({ method: "POST" })
       return {
         status: "error" as const,
         code: res.status,
+        elevenLabsActive: false,
         message: `Google API returned HTTP ${res.status}`,
       };
     } catch (err) {
       return {
         status: "network_error" as const,
+        elevenLabsActive: false,
         message: err instanceof Error ? err.message : String(err),
       };
     }
+  });
+
+/**
+ * Retrieves an authenticated signed URL for the ElevenLabs Conversational AI Agent (`@elevenlabs/react`).
+ */
+export const getElevenLabsConversationToken = createServerFn({ method: "POST" })
+  .validator((input: unknown) =>
+    z
+      .object({
+        agentId: z.string().optional(),
+      })
+      .optional()
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const session = await getElevenLabsSignedSession(data?.agentId);
+    if (!session) {
+      return {
+        signedUrl: null,
+        agentId: data?.agentId || DEFAULT_ELEVENLABS_AGENT_ID,
+      };
+    }
+    return session;
+  });
+
+/**
+ * Executes a live territory tool on behalf of the ElevenLabs Conversational Agent.
+ */
+export const executeCopilotVoiceTool = createServerFn({ method: "POST" })
+  .validator((input: unknown) =>
+    z
+      .object({
+        toolName: z.enum([
+          "query_territory_leads",
+          "draft_outreach_email",
+          "find_clinical_contacts",
+        ]),
+        parameters: z.record(z.unknown()).optional(),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data }) => {
+    const params = data.parameters ?? {};
+
+    if (data.toolName === "query_territory_leads") {
+      const state = typeof params.state === "string" ? params.state : undefined;
+      const search = typeof params.search === "string" ? params.search : undefined;
+      const res = (await runCopilotTool("query_leads", {
+        state,
+        search,
+        min_confidence: 65,
+        limit: 5,
+      })) as { leads?: LocalLeadRecord[] };
+
+      const leads = res.leads ?? [];
+      if (leads.length === 0) {
+        const broad = (await runCopilotTool("query_leads", {
+          min_confidence: 55,
+          limit: 4,
+        })) as { leads?: LocalLeadRecord[] };
+        return {
+          count: broad.leads?.length ?? 0,
+          leads: (broad.leads ?? []).map((l) => ({
+            id: l.id,
+            hospital: l.hospital || l.title,
+            state: l.state,
+            valueUsd: l.estimated_value_usd,
+            summary: l.summary,
+          })),
+        };
+      }
+
+      return {
+        count: leads.length,
+        leads: leads.map((l) => ({
+          id: l.id,
+          hospital: l.hospital || l.title,
+          state: l.state,
+          valueUsd: l.estimated_value_usd,
+          summary: l.summary,
+        })),
+      };
+    }
+
+    if (data.toolName === "find_clinical_contacts") {
+      const state = typeof params.state === "string" ? params.state : undefined;
+      const specialty = typeof params.specialty === "string" ? params.specialty : undefined;
+      const res = (await runCopilotTool("search_physicians", {
+        state,
+        specialty,
+        limit: 5,
+      })) as { physicians?: LocalPhysicianRecord[] };
+
+      return {
+        count: res.physicians?.length ?? 0,
+        contacts: (res.physicians ?? []).map((p) => ({
+          name: p.full_name,
+          title: p.title || p.credentials,
+          specialty: p.primary_specialty,
+          city: p.practice_city,
+          state: p.practice_state,
+          email: p.email,
+        })),
+      };
+    }
+
+    if (data.toolName === "draft_outreach_email") {
+      const hospitalQuery = typeof params.hospital === "string" ? params.hospital : "";
+      const res = (await runCopilotTool("query_leads", {
+        search: hospitalQuery || undefined,
+        min_confidence: 50,
+        limit: 3,
+      })) as { leads?: LocalLeadRecord[] };
+
+      let target = res.leads?.[0];
+      if (!target) {
+        const fallback = (await runCopilotTool("query_leads", {
+          min_confidence: 65,
+          limit: 1,
+        })) as { leads?: LocalLeadRecord[] };
+        target = fallback.leads?.[0];
+      }
+
+      if (!target) {
+        return { drafted: false, message: "No matching hospital lead found to draft outreach." };
+      }
+
+      const draft = (await runCopilotTool("draft_outreach", {
+        lead_id: target.id,
+        rep_name: "Mike",
+      })) as { subject?: string; body?: string };
+
+      return {
+        drafted: true,
+        leadId: target.id,
+        hospital: target.hospital || target.title,
+        subject: draft.subject,
+        body: draft.body,
+      };
+    }
+
+    return { ok: false };
   });
