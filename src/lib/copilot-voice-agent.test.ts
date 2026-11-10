@@ -1,19 +1,22 @@
 import { describe, it, expect } from "vitest";
 import {
   cleanSpeechScript,
+  pcm16ToWavBase64,
   synthesizeSpeechGoogleCloud,
 } from "./tts.server";
+import { buildDeterministicOutreachDraft } from "./outreach.server";
 import {
   GamePlanItemSchema,
   VoiceAgentBriefingResponseSchema,
   inferRecommendedModalityAndAngle,
   type VoiceAgentBriefingResponse,
 } from "./copilot.functions";
+import { resolveAudioDataUri } from "@/components/dashboard/CopilotVoiceAgent";
 import type { Lead } from "@/data/leads";
 
 describe("Copilot Voice Agent — Speech Sanitization & Formatting", () => {
-  it("strips markdown headings, bold markers, and raw URLs from spoken script", () => {
-    const raw = `### Morning Briefing for Mike
+  it("strips markdown headings, bold markers, and raw URLs from spoken script without robotic word insertion", () => {
+    const raw = `### Morning Briefing for Mike Patrick
 **Good morning, Mike.** Here is your [daily recap](https://example.com/brief).
 * Target 1: Memorial Hermann - $1.2M Deal Value.
 Visit https://philips.com for details.`;
@@ -24,26 +27,38 @@ Visit https://philips.com for details.`;
     expect(cleaned).not.toContain("**");
     expect(cleaned).not.toContain("https://");
     expect(cleaned).not.toContain("[daily recap]");
+    expect(cleaned).not.toContain("Next, ");
     expect(cleaned).toContain("daily recap");
     expect(cleaned).toContain("Good morning, Mike.");
-    expect(cleaned).toContain("1.2 million dollars");
+    expect(cleaned).toContain("$1.2 million");
   });
 
-  it("expands medical and geographic abbreviations for smooth phonetic speech synthesis", () => {
+  it("expands medical and geographic abbreviations naturally without robotic letter spelling", () => {
     const raw = "VA hospital in TX evaluating POCUS and PET/CT equipment in AR and OK under RHTP.";
     const cleaned = cleanSpeechScript(raw);
 
     expect(cleaned).toContain("Texas");
     expect(cleaned).toContain("Arkansas");
     expect(cleaned).toContain("Oklahoma");
-    expect(cleaned).toContain("point of care ultrasound");
-    expect(cleaned).toContain("P-E-T C-T");
+    expect(cleaned).toContain("point-of-care ultrasound");
+    expect(cleaned).toContain("PET CT");
+    expect(cleaned).not.toContain("P-E-T C-T");
     expect(cleaned).toContain("Rural Health Transformation");
   });
 
   it("handles empty or whitespace strings gracefully", () => {
     expect(cleanSpeechScript("")).toBe("");
     expect(cleanSpeechScript("   ")).toBe("");
+  });
+
+  it("wraps raw 24kHz PCM16 audio into a valid RIFF WAV base64 payload and resolves data URI", () => {
+    const fakePcm = Buffer.alloc(480, 0).toString("base64");
+    const wavB64 = pcm16ToWavBase64(fakePcm, 24000);
+    const wavBytes = Buffer.from(wavB64, "base64");
+
+    expect(wavBytes.subarray(0, 4).toString("ascii")).toBe("RIFF");
+    expect(wavBytes.subarray(8, 12).toString("ascii")).toBe("WAVE");
+    expect(resolveAudioDataUri(wavB64)).toMatch(/^data:audio\/wav;base64,/);
   });
 });
 
@@ -134,7 +149,7 @@ describe("Copilot Voice Agent — Structured Contract Validation", () => {
     const mockBriefing: VoiceAgentBriefingResponse = {
       audioBase64: null,
       spokenScript:
-        "Good morning, Mike. I'm your Philips Sales Intelligence Copilot. Here is your morning recap and tactical game plan for today.",
+        "Good morning, Mike. Here is what's moving across your territory today.",
       durationEstimateSeconds: 45,
       leadCount: 12,
       pipelineValueUsd: 3900000,
@@ -201,5 +216,27 @@ describe("Copilot Voice Agent — Dual TTS Engine Resilience", () => {
       if (prevGeminiKey) process.env.GEMINI_API_KEY = prevGeminiKey;
       if (prevGoogleKey) process.env.GOOGLE_API_KEY = prevGoogleKey;
     }
+  });
+
+  it("drafts personalized outreach emails signed by Mike Patrick as Philips Healthcare Sales Rep", () => {
+    const draft = buildDeterministicOutreachDraft(
+      {
+        lead: {
+          title: "Cardiac Cath Lab Biplane Modernization",
+          summary: "Replacing aging biplane angiography system",
+          hospital: "Baylor Scott & White Medical Center",
+          specialty: "Cardiology",
+          entities: {
+            physicians: ["Dr. Marcus Vance (Director of Interventional Cardiology)"],
+            equipment: ["Azurion 7 Biplane"],
+          },
+        },
+      },
+      "discovery",
+    );
+
+    expect(draft.body).toContain("Hi Dr. Marcus Vance,");
+    expect(draft.body).toContain("I'm Mike Patrick, your Philips Healthcare representative");
+    expect(draft.body).toContain("Mike Patrick\nPhilips Healthcare · Territory Sales Representative (TX · OK · AR · LA)");
   });
 });

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Sparkles, Building2, TrendingUp, ShieldCheck, ArrowRight, FileText } from "lucide-react";
+import { Sparkles, Building2, TrendingUp, ShieldCheck, ArrowRight } from "lucide-react";
 import type { Lead } from "@/data/leads";
 
 function formatCurrency(val: number | null | undefined): string {
@@ -15,14 +15,12 @@ export function ExecutiveBriefingNarrative({
   highPriorityCount,
   onOpenLead,
   onDraftOutreach,
-  onOpenPitchDeck,
   onOpenCopilot,
 }: {
   leads: Lead[];
   highPriorityCount: number;
   onOpenLead: (lead: Lead) => void;
   onDraftOutreach: (lead: Lead) => void;
-  onOpenPitchDeck?: (lead: Lead) => void;
   onOpenCopilot?: () => void;
 }) {
   const telemetry = useMemo(() => {
@@ -205,17 +203,6 @@ export function ExecutiveBriefingNarrative({
                   <Sparkles className="h-3 w-3" />
                   <span>Draft Outreach</span>
                 </button>
-
-                {onOpenPitchDeck && (
-                  <button
-                    type="button"
-                    onClick={() => onOpenPitchDeck(target)}
-                    className="flex min-h-[36px] items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 text-xs font-medium text-emerald-400 transition-all hover:bg-emerald-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-                  >
-                    <FileText className="h-3 w-3" />
-                    <span>Pitch Deck</span>
-                  </button>
-                )}
               </div>
             </li>
           ))}

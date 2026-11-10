@@ -4,9 +4,14 @@ import { sanitizeErrorText } from "./ingest/medical-gate";
 
 const GATEWAY_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
 const GATEWAY_TIMEOUT_MS = 12_000;
+export const DEFAULT_PHILIPS_REP_NAME = "Mike Patrick";
 
 export type OutreachTone =
-  "discovery" | "follow_up" | "executive_intro" | "switch_pitch" | "rht_grant_pitch";
+  | "discovery"
+  | "follow_up"
+  | "executive_intro"
+  | "switch_pitch"
+  | "rht_grant_pitch";
 
 export interface DraftInput {
   lead: {
@@ -20,35 +25,53 @@ export interface DraftInput {
     vendor_mentions?: string[] | null;
     entities: { physicians?: string[]; equipment?: string[]; keywords?: string[] };
   };
-  repName: string;
+  repName?: string;
   tone?: OutreachTone;
+}
+
+function resolveRepName(rawName?: string | null): string {
+  const trimmed = rawName?.trim();
+  if (
+    !trimmed ||
+    trimmed.toLowerCase() === "your philips rep" ||
+    trimmed.toLowerCase() === "philips account team" ||
+    trimmed.toLowerCase() === "sales rep"
+  ) {
+    return DEFAULT_PHILIPS_REP_NAME;
+  }
+  return trimmed;
 }
 
 const TONE_GUIDE: Record<OutreachTone, string> = {
   discovery:
-    "Tone: warm discovery email. Reference the specific public signal you found, ask one open-ended question to confirm timing/scope, and propose a 15-minute intro call.",
+    "Tone: warm, personal discovery note written in first-person by Mike Patrick as the dedicated Philips Healthcare Sales Representative. Reference the specific signal at their facility, ask one thoughtful question about their timeline, and propose a brief 15-minute intro call.",
   follow_up:
-    "Tone: short follow-up to a prior thread. Reference the original signal, add ONE new insight or benchmark, and ask if next week works for a brief call.",
+    "Tone: personal, concise follow-up from Mike Patrick at Philips Healthcare. Reference the original clinical/capital initiative, share one relevant regional benchmark, and ask if next week works for a quick call.",
   executive_intro:
-    "Tone: peer-to-peer executive introduction (C-suite / VP). Confident, brief, business-outcome focused. Reference the strategic implication of the signal. Propose a 20-minute conversation with a named Philips executive sponsor.",
+    "Tone: peer-to-peer executive note from Mike Patrick, Philips Healthcare Territory Representative. Confident, warm, and outcome-focused. Reference the strategic impact of the signal and propose a 20-minute conversation alongside our regional Philips clinical specialist.",
   switch_pitch:
-    "Tone: empathetic switch-pitch. Name the specific incumbent vendor / model and the disruptive event (FDA recall, end-of-life, vendor M&A, manufacturing change). Offer a stable Philips alternative as a like-for-like replacement, mention installed-base support and clinical continuity, and propose a 15-minute technical briefing this week.",
+    "Tone: consultative, empathetic switch-pitch from Mike Patrick at Philips Healthcare. Name the specific incumbent vendor/model and disruptive event (FDA recall, end-of-life, vendor transition). Offer a dependable Philips replacement with installed-base continuity and biomed onboarding, and propose a 15-minute technical review this week.",
   rht_grant_pitch:
-    "Tone: strategic CMS $50B Rural Health Transformation (RHT) grant advisor. Align the hospital's rural mission with Philips' RHT-eligible portfolio: BlueSeal Mobile 1.5T helium-free MRI, CT 5300 Smart Workflow, Radiology Operations Command Center (ROCC — benchmark: Arkansas Children's Hospital 73 cardiac MRIs/CTs in Year 1), eCareManager/eICU (Emory 2.1% 60-day readmission reduction), Avalon/Lumify maternal tele-ultrasound (Michigan DHHS 32,000 families), and EarlyVue VS30. Offer a 15-minute grant-scoping review.",
+    "Tone: personal CMS $50B Rural Health Transformation (RHT) advisory note from Mike Patrick at Philips Healthcare. Align the hospital's rural mission with Philips' RHT-eligible solutions: BlueSeal Mobile 1.5T helium-free MRI, CT 5300 Smart Workflow, Radiology Operations Command Center (ROCC — benchmark: Arkansas Children's Hospital 73 cardiac MRIs/CTs in Year 1), eCareManager/eICU (Emory 2.1% 60-day readmission reduction), Avalon/Lumify maternal tele-ultrasound (Michigan DHHS 32,000 families), and EarlyVue VS30. Offer a 15-minute grant-scoping review.",
 };
 
-const SYSTEM = `You are an elite enterprise medical-device sales rep at Philips Medical. Draft a short, specific, non-spammy outreach email tailored to the lead. Reference the actual signal (RFQ, recall, CMS $50B RHT grant, capital project, vendor disruption, etc.). Keep it under 150 words, plain text, signed by the rep. Open with the recipient's specific situation, not generic flattery. End with one clear ask. Never invent facts not present in the brief.`;
+const SYSTEM = `You are writing a personal, one-to-one outreach email on behalf of Mike Patrick, Philips Healthcare Sales Representative covering Texas, Oklahoma, Arkansas, and Louisiana.
+Write in a natural, warm, human first-person voice ("I'm Mike Patrick with Philips Healthcare...") tailored to the specific hospital and clinical decision-maker.
+Reference the real clinical or procurement signal (RFQ, recall, CMS $50B RHT grant, capital expansion, or incumbent transition).
+Keep it under 150 words, plain text, with zero generic marketing fluff.
+Sign off personally with the rep's name and title: "Philips Healthcare | Territory Sales Representative (TX · OK · AR · LA)".
+Never invent facts not present in the brief.`;
 
 const TOOL = {
   type: "function" as const,
   function: {
     name: "compose_email",
-    description: "Compose an outreach email.",
+    description: "Compose a personalized outreach email from the Philips sales rep.",
     parameters: {
       type: "object",
       properties: {
-        subject: { type: "string", description: "<= 80 chars, specific not generic" },
-        body: { type: "string", description: "<= 150 words plain text" },
+        subject: { type: "string", description: "<= 80 chars, specific and personal" },
+        body: { type: "string", description: "<= 155 words plain text signed by the rep" },
       },
       required: ["subject", "body"],
       additionalProperties: false,
@@ -103,16 +126,40 @@ function selectRuralBenchmarkLine(lead: DraftInput["lead"]): string {
   return "At Arkansas Children's Hospital, Philips Radiology Operations Command Center (ROCC) supported 73 complex cardiac MRIs/CTs in Year 1 remotely, while Emory Healthcare cut 60-day readmissions by 2.1% with Philips eICU.";
 }
 
-function buildDeterministicOutreachDraft(
+function resolveGreetingRecipient(lead: DraftInput["lead"]): string {
+  const rawContact = lead.entities.physicians?.[0]?.trim();
+  if (rawContact) {
+    // Strip role hints like "Dr. Sarah Lin (Cardiology Chair)" -> "Dr. Sarah Lin"
+    const cleanName = rawContact.replace(/\s*\([^)]*\)\s*$/, "").split("—")[0]?.trim();
+    if (cleanName) return `Hi ${cleanName},`;
+  }
+  if (lead.hospital?.trim()) {
+    return `Hi ${lead.hospital.trim()} Team,`;
+  }
+  return "Hi there,";
+}
+
+function buildSignature(repName: string): string {
+  return [
+    `Best regards,`,
+    `${repName}`,
+    `Philips Healthcare · Territory Sales Representative (TX · OK · AR · LA)`,
+  ].join("\n");
+}
+
+export function buildDeterministicOutreachDraft(
   input: DraftInput,
   tone: OutreachTone,
 ): { subject: string; body: string } {
+  const repName = resolveRepName(input.repName);
   const hospital = input.lead.hospital?.trim() || "your clinical team";
+  const greeting = resolveGreetingRecipient(input.lead);
+  const signature = buildSignature(repName);
   const modality =
     input.lead.entities.equipment?.slice(0, 2).join(" and ") ||
     (input.lead.specialty
       ? `${input.lead.specialty} systems`
-      : "diagnostic imaging and monitoring");
+      : "diagnostic imaging and patient monitoring");
   const incumbent = input.lead.competitor_incumbent?.trim() || "incumbent equipment";
 
   if (tone === "rht_grant_pitch") {
@@ -120,36 +167,34 @@ function buildDeterministicOutreachDraft(
     return {
       subject: `${hospital} — CMS $50B Rural Health Transformation & Philips`.slice(0, 80),
       body: [
-        `Hi Team,`,
+        greeting,
         ``,
-        `I'm reaching out regarding ${hospital}'s eligibility and active positioning around the $50B CMS Rural Health Transformation (RHT) Program.`,
+        `I'm ${repName}, your regional Philips Healthcare representative. I'm reaching out personally regarding ${hospital}'s positioning around the $50B CMS Rural Health Transformation (RHT) Program.`,
         ``,
-        `Philips is helping rural hospitals scope grant-ready bundles across ${modality} — including BlueSeal helium-free Mobile 1.5T MRI, ROCC remote scanning, eICU, and EarlyVue VS30.`,
+        `I'm helping rural hospitals across our territory scope grant-ready bundles across ${modality} — including BlueSeal helium-free Mobile 1.5T MRI, ROCC remote scanning, eICU, and EarlyVue VS30.`,
         ``,
         benchmark,
         ``,
-        `Would a 15-minute call next week be helpful to review RHT budget specifications for ${hospital}?`,
+        `Would you have 15 minutes next week for us to review RHT budget specifications for ${hospital}?`,
         ``,
-        `Best,`,
-        input.repName,
+        signature,
       ].join("\n"),
     };
   }
 
   if (tone === "switch_pitch") {
     return {
-      subject: `Clinical continuity support for ${incumbent} notice — ${hospital}`.slice(0, 80),
+      subject: `Personal support for ${incumbent} notice — ${hospital}`.slice(0, 80),
       body: [
-        `Hi Team,`,
+        greeting,
         ``,
-        `Following the recent ${incumbent} ${input.lead.signal_type === "recall" ? "FDA recall notice" : "platform transition"} impacting ${modality}, I wanted to share how Philips is supporting clinical engineering and specialty teams across TX, OK, AR, and LA.`,
+        `I'm ${repName} with Philips Healthcare covering your region. Following the recent ${incumbent} ${input.lead.signal_type === "recall" ? "FDA recall notice" : "platform transition"} impacting ${modality}, I wanted to reach out personally to see how your clinical engineering and specialty teams are navigating it.`,
         ``,
-        `We can provide like-for-like ${modality} evaluation units, rapid biomed onboarding, and trade-in protection to avoid procedural downtime.`,
+        `I can coordinate like-for-like Philips ${modality} evaluation units, rapid biomed onboarding, and trade-in protection so ${hospital} avoids any procedural downtime.`,
         ``,
-        `Are you open to a brief 15-minute technical briefing this week to confirm whether your fleet is affected?`,
+        `Do you have 15 minutes this week for a quick conversation to confirm whether your fleet is affected?`,
         ``,
-        `Best,`,
-        input.repName,
+        signature,
       ].join("\n"),
     };
   }
@@ -158,51 +203,48 @@ function buildDeterministicOutreachDraft(
     return {
       subject: `Strategic ${modality} alignment — ${hospital}`.slice(0, 80),
       body: [
-        `Hello,`,
+        greeting,
         ``,
-        `I noted ${hospital}'s recent initiative (${input.lead.summary || input.lead.title}).`,
+        `I'm ${repName}, Philips Healthcare Territory Representative for your region. I noted ${hospital}'s recent initiative (${input.lead.summary || input.lead.title}).`,
         ``,
-        `Philips is partnering with health systems across the South-Central region to standardize ${modality} workflows, reduce total cost of ownership, and expand specialist capacity.`,
+        `I'm working directly with health systems across TX, OK, AR, and LA to standardize ${modality} workflows, lower total cost of ownership, and expand clinical capacity.`,
         ``,
-        `Could we schedule a 20-minute executive discussion next week alongside our regional Philips clinical sponsor to align on your capital roadmap?`,
+        `Could we schedule a brief 20-minute conversation next week alongside my Philips clinical specialist to align on your capital roadmap?`,
         ``,
-        `Regards,`,
-        input.repName,
+        signature,
       ].join("\n"),
     };
   }
 
   if (tone === "follow_up") {
     return {
-      subject: `Following up: ${modality} at ${hospital}`.slice(0, 80),
+      subject: `Following up from Mike Patrick (Philips): ${modality} at ${hospital}`.slice(0, 80),
       body: [
-        `Hi Team,`,
+        greeting,
         ``,
-        `Following up on ${hospital}'s ${input.lead.specialty?.toLowerCase() ?? "clinical"} initiative (${input.lead.title.slice(0, 90)}).`,
+        `This is ${repName} with Philips Healthcare following up on ${hospital}'s ${input.lead.specialty?.toLowerCase() ?? "clinical"} initiative (${input.lead.title.slice(0, 90)}).`,
         ``,
-        `Peer hospitals in TX/OK/AR/LA are pairing Philips ${modality} with remote clinical support to shorten turnaround times without adding FTEs.`,
+        `Peer hospitals across our TX/OK/AR/LA territory are pairing Philips ${modality} with remote clinical support to shorten turnaround times without adding staff burden.`,
         ``,
-        `Does Tuesday or Thursday next week work for a quick 15-minute check-in?`,
+        `Does Tuesday or Thursday next week work for a quick 15-minute check-in with me?`,
         ``,
-        `Best,`,
-        input.repName,
+        signature,
       ].join("\n"),
     };
   }
 
   return {
-    subject: `${hospital} — ${modality} planning`.slice(0, 80),
+    subject: `${hospital} — ${modality} planning (Mike Patrick · Philips)`.slice(0, 80),
     body: [
-      `Hi Team,`,
+      greeting,
       ``,
-      `I saw the recent update regarding ${hospital} (${input.lead.summary || input.lead.title}).`,
+      `I'm ${repName}, your Philips Healthcare representative covering ${hospital}. I saw the recent update regarding your facility (${input.lead.summary || input.lead.title}).`,
       ``,
-      `As you evaluate clinical and capital priorities around ${modality}, how is your team approaching equipment timelines for the upcoming cycle?`,
+      `As your team evaluates clinical and capital priorities around ${modality}, I'd love to learn how you are approaching equipment timelines for the upcoming cycle and share how we can support you locally.`,
       ``,
-      `Happy to share relevant benchmarks in a quick 15-minute intro call next week if useful.`,
+      `Do you have 15 minutes next week for a quick introductory call?`,
       ``,
-      `Best,`,
-      input.repName,
+      signature,
     ].join("\n"),
   };
 }
@@ -211,18 +253,21 @@ export async function draftOutreachEmail(
   input: DraftInput,
 ): Promise<{ subject: string; body: string }> {
   const tone = input.tone ?? defaultToneForLead(input.lead);
+  const repName = resolveRepName(input.repName);
+  const normalizedInput: DraftInput = { ...input, repName };
+
   const googleApiKey =
     process.env.GOOGLE_CLOUD_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim();
   const lovableApiKey = process.env.LOVABLE_API_KEY?.trim();
   const apiKey = googleApiKey || lovableApiKey;
   if (!apiKey) {
-    return buildDeterministicOutreachDraft(input, tone);
+    return buildDeterministicOutreachDraft(normalizedInput, tone);
   }
 
   const endpointUrl = googleApiKey
     ? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
     : GATEWAY_URL;
-  const modelName = googleApiKey ? "gemini-3.8-flash" : "google/gemini-2.5-flash";
+  const modelName = googleApiKey ? "gemini-2.5-flash" : "google/gemini-2.5-flash";
 
   const userMsg = `Lead title: ${input.lead.title}
 Hospital: ${input.lead.hospital ?? "unknown"}
@@ -238,7 +283,7 @@ Signals: ${(input.lead.entities.keywords ?? []).join(", ") || "n/a"}
 Background:
 ${input.lead.summary}
 
-Rep name to sign as: ${input.repName}
+Sales Representative identity to write and sign as: ${repName}, Philips Healthcare Territory Sales Representative (TX, OK, AR, LA).
 
 ${TONE_GUIDE[tone]}`;
 
@@ -263,13 +308,13 @@ ${TONE_GUIDE[tone]}`;
         status: response.status,
         detail: sanitizeErrorText(await response.text(), 180),
       });
-      return buildDeterministicOutreachDraft(input, tone);
+      return buildDeterministicOutreachDraft(normalizedInput, tone);
     }
 
     const envelope = gatewayDraftEnvelopeSchema.parse(await response.json());
     const rawArguments = envelope.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
     if (!rawArguments) {
-      return buildDeterministicOutreachDraft(input, tone);
+      return buildDeterministicOutreachDraft(normalizedInput, tone);
     }
 
     return composedEmailSchema.parse(JSON.parse(rawArguments));
@@ -277,6 +322,6 @@ ${TONE_GUIDE[tone]}`;
     logWarn("outreach.draft", "AI gateway call failed; using deterministic template", {
       error: err instanceof Error ? err.message : String(err),
     });
-    return buildDeterministicOutreachDraft(input, tone);
+    return buildDeterministicOutreachDraft(normalizedInput, tone);
   }
 }

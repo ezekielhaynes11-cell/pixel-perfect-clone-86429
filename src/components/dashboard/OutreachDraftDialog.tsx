@@ -50,17 +50,34 @@ export function OutreachDraftDialog({
     enabled: !!lead && open,
   });
 
-  // Seed the editor from saved drafts ONCE per lead. A background refetch (e.g.
-  // window focus, or the invalidation after "Save edits") must not overwrite
-  // whatever the rep is currently typing.
+  const gen = useMutation({
+    mutationFn: (overrideTone?: Tone) =>
+      generate({ data: { lead_id: lead!.id, tone: overrideTone ?? tone } }),
+    onSuccess: (saved) => {
+      if (!saved) return;
+      setDraftId(saved.id);
+      setSubject(saved.subject);
+      setBody(saved.body);
+      qc.invalidateQueries({ queryKey: ["outreach_drafts", lead?.id] });
+      toast.success("Personalized draft ready for Mike Patrick");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Generation failed"),
+  });
+
+  // Seed the editor from saved drafts ONCE per lead. If no draft exists yet (or if
+  // an older draft had a generic placeholder signature), auto-generate a personal
+  // message from Mike Patrick right away.
   const seededLeadRef = useRef<string | null>(null);
   useEffect(() => {
     if (!lead || drafts.isLoading) return;
     if (seededLeadRef.current === lead.id) return;
     seededLeadRef.current = lead.id;
-    setTone(preferredToneForLead(lead));
+    const preferred = preferredToneForLead(lead);
+    setTone(preferred);
     const latest = drafts.data?.[0];
-    if (latest) {
+    const hasLegacyPlaceholder =
+      latest?.body?.includes("Your Philips rep") || latest?.body?.includes("Philips Account Team");
+    if (latest && !hasLegacyPlaceholder) {
       setDraftId(latest.id);
       setSubject(latest.subject);
       setBody(latest.body);
@@ -68,21 +85,9 @@ export function OutreachDraftDialog({
       setDraftId(null);
       setSubject("");
       setBody("");
+      gen.mutate(preferred);
     }
-  }, [lead, drafts.data, drafts.isLoading]);
-
-  const gen = useMutation({
-    mutationFn: () => generate({ data: { lead_id: lead!.id, tone } }),
-    onSuccess: (saved) => {
-      if (!saved) return;
-      setDraftId(saved.id);
-      setSubject(saved.subject);
-      setBody(saved.body);
-      qc.invalidateQueries({ queryKey: ["outreach_drafts", lead?.id] });
-      toast.success("Draft generated");
-    },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Generation failed"),
-  });
+  }, [lead, drafts.data, drafts.isLoading, gen]);
 
   const save = useMutation({
     mutationFn: () => update({ data: { id: draftId!, subject, body } }),
@@ -117,7 +122,7 @@ export function OutreachDraftDialog({
           <div>
             <div className="mb-1 flex items-center gap-1.5 text-xs uppercase tracking-wider text-muted-foreground">
               <Sparkles className="h-3.5 w-3.5 text-primary" />
-              AI-drafted outreach
+              Personal Outreach · Mike Patrick (Philips Sales Rep)
             </div>
             <h2 className="font-display text-lg font-semibold leading-tight">{lead.title}</h2>
             <div className="mt-1 text-xs text-muted-foreground">
@@ -138,7 +143,11 @@ export function OutreachDraftDialog({
             {(Object.keys(TONE_LABEL) as Tone[]).map((t) => (
               <button
                 key={t}
-                onClick={() => setTone(t)}
+                onClick={() => {
+                  setTone(t);
+                  gen.mutate(t);
+                }}
+                disabled={gen.isPending}
                 className={`rounded-md border px-3 py-1 text-xs transition-colors ${
                   tone === t
                     ? "border-primary bg-primary/10 text-primary"
@@ -149,7 +158,7 @@ export function OutreachDraftDialog({
               </button>
             ))}
             <button
-              onClick={() => gen.mutate()}
+              onClick={() => gen.mutate(tone)}
               disabled={gen.isPending}
               className="ml-auto flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
             >
@@ -159,8 +168,8 @@ export function OutreachDraftDialog({
                 <Sparkles className="h-3.5 w-3.5" />
               )}
               {gen.isPending
-                ? "Drafting…"
-                : drafts.data && drafts.data.length > 0
+                ? "Drafting as Mike Patrick…"
+                : subject || (drafts.data && drafts.data.length > 0)
                   ? "Regenerate"
                   : "Generate with AI"}
             </button>

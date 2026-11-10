@@ -10,7 +10,6 @@ import {
   UserRound,
   MoreHorizontal,
   Cpu,
-  Presentation,
   CheckCircle2,
 } from "lucide-react";
 
@@ -65,7 +64,6 @@ export function LeadCard({
   saved = false,
   onDismiss,
   onDraft,
-  onPitchDeck,
   onToggleContacted,
   contacted = false,
   selectMode = false,
@@ -82,7 +80,6 @@ export function LeadCard({
   saved?: boolean;
   onDismiss?: () => void;
   onDraft?: () => void;
-  onPitchDeck?: (lead: Lead) => void;
   onToggleContacted?: (lead: Lead) => void;
   contacted?: boolean;
   selectMode?: boolean;
@@ -294,19 +291,7 @@ export function LeadCard({
           <span>Enrich with Apollo</span>
         </button>
 
-        {/* Trigger 3: Generate Pitch Deck */}
-        {onPitchDeck && (
-          <button
-            type="button"
-            onClick={() => onPitchDeck(lead)}
-            className="flex min-h-[44px] items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3.5 text-xs font-semibold text-emerald-400 transition-all duration-150 hover:bg-emerald-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
-          >
-            <Presentation className="h-4 w-4" />
-            <span>Generate Pitch Deck</span>
-          </button>
-        )}
-
-        {/* Trigger 4: Mark Contacted */}
+        {/* Trigger 3: Mark Contacted */}
         {onToggleContacted && (
           <button
             type="button"

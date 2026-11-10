@@ -53,7 +53,6 @@ import { LeadCard } from "@/components/dashboard/LeadCard";
 import { LeadDetailModal } from "@/components/dashboard/LeadDetailModal";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { OutreachDraftDialog } from "@/components/dashboard/OutreachDraftDialog";
-import { PitchDeckModal } from "@/components/dashboard/PitchDeckModal";
 import { ExecutiveBriefingNarrative } from "@/components/dashboard/ExecutiveBriefingNarrative";
 import { CacheDataErrorCard } from "@/components/dashboard/CacheDataErrorCard";
 import { SavedSearchesDrawer } from "@/components/dashboard/SavedSearchesDrawer";
@@ -127,7 +126,6 @@ function Dashboard() {
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [active, setActive] = useState<Lead | null>(null);
   const [draftFor, setDraftFor] = useState<Lead | null>(null);
-  const [pitchDeckFor, setPitchDeckFor] = useState<Lead | null>(null);
   const [searchesOpen, setSearchesOpen] = useState(false);
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [showDismissed, setShowDismissed] = useState(false);
@@ -286,7 +284,7 @@ function Dashboard() {
     },
     onMutate: (trigger: "manual" | "auto" = "manual") => {
       if (trigger === "auto") {
-        toast.info("☀️ Good morning, Mike! Synchronizing today's sales intelligence...", {
+        toast.info("☀️ Good morning, Mike Patrick! Synchronizing today's Philips sales intelligence...", {
           id: "ingest",
           duration: 4500,
         });
@@ -802,7 +800,6 @@ function Dashboard() {
               highPriorityCount={highPriority}
               onOpenLead={setActive}
               onDraftOutreach={setDraftFor}
-              onOpenPitchDeck={(lead) => setPitchDeckFor(lead)}
               onOpenCopilot={() => setCopilotOpen(true)}
             />
 
@@ -976,7 +973,6 @@ function Dashboard() {
                     }
                     onDismiss={() => act.mutate({ lead_id: lead.id, action: "dismissed" })}
                     onDraft={() => setDraftFor(lead)}
-                    onPitchDeck={(targetLead) => setPitchDeckFor(targetLead)}
                     onToggleContacted={(targetLead) => {
                       const isContacted = contactedIds.has(targetLead.id);
                       act.mutate(
@@ -1057,15 +1053,6 @@ function Dashboard() {
         onClose={() => setActive(null)}
       />
       <OutreachDraftDialog lead={draftFor} open={!!draftFor} onClose={() => setDraftFor(null)} />
-      <PitchDeckModal
-        lead={pitchDeckFor}
-        open={Boolean(pitchDeckFor)}
-        onOpenChange={(open) => !open && setPitchDeckFor(null)}
-        onDraftOutreach={(lead) => {
-          setPitchDeckFor(null);
-          setDraftFor(lead);
-        }}
-      />
       <SavedSearchesDrawer
         open={searchesOpen}
         onClose={() => setSearchesOpen(false)}
@@ -1075,11 +1062,10 @@ function Dashboard() {
       <CopilotPanel
         open={copilotOpen}
         onClose={() => setCopilotOpen(false)}
-        repName="Mike"
+        repName="Mike Patrick"
         leads={scopedActiveLeads}
         onViewLead={(lead) => setActive(lead)}
         onDraftLead={(lead) => setDraftFor(lead)}
-        onPitchDeckLead={(lead) => setPitchDeckFor(lead)}
         onToggleContacted={(leadId) =>
           act.mutate({
             lead_id: leadId,

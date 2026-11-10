@@ -217,7 +217,7 @@ export async function enrichRawLead(raw: RawLead): Promise<EnrichmentResult> {
   const endpointUrl = googleApiKey
     ? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
     : GATEWAY_URL;
-  const modelName = googleApiKey ? "gemini-3.8-flash" : "google/gemini-2.5-flash";
+  const modelName = googleApiKey ? "gemini-2.5-flash" : "google/gemini-2.5-flash";
 
   const hintBlock = `Known vendors of interest: ${vendors.join(", ")}
 Known product models: ${products.join(", ")}

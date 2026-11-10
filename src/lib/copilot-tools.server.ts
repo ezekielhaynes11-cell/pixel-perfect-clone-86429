@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { OWNER_ID } from "./owner.server";
 import { draftOutreachEmail } from "./outreach.server";
+import { CURATED_BASELINE_LEADS } from "@/data/fallback-leads";
 import {
   apolloEnrichPhysician,
   apolloEnrichAccount,
@@ -430,12 +431,13 @@ export async function runCopilotTool(
     }
     case "draft_outreach": {
       const a = args as ToolArgs["draft_outreach"];
-      const { data: lead, error } = await supabaseAdmin
+      const { data: dbLead } = await supabaseAdmin
         .from("leads")
         .select("*")
         .eq("id", a.lead_id)
-        .single();
-      if (error || !lead) return { error: "Lead not found" };
+        .maybeSingle();
+      const lead = dbLead ?? CURATED_BASELINE_LEADS.find((l) => l.id === a.lead_id);
+      if (!lead) return { error: "Lead not found" };
       const { data: profile } = await supabaseAdmin
         .from("profiles")
         .select("display_name")
@@ -458,15 +460,15 @@ export async function runCopilotTool(
               keywords?: string[];
             }) ?? {},
         },
-        repName: profile?.display_name ?? "Your Philips rep",
+        repName: profile?.display_name ?? "Mike Patrick",
         tone: a.tone,
       });
       const { data: saved } = await supabaseAdmin
         .from("outreach_drafts")
         .insert({ lead_id: a.lead_id, user_id: OWNER_ID, subject: draft.subject, body: draft.body })
         .select()
-        .single();
-      return { draft_id: saved?.id, subject: draft.subject, body: draft.body };
+        .maybeSingle();
+      return { draft_id: saved?.id ?? a.lead_id, subject: draft.subject, body: draft.body };
     }
     case "apollo_enrich_physician": {
       const a = args as ToolArgs["apollo_enrich_physician"];
