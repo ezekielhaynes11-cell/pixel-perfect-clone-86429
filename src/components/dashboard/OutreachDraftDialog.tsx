@@ -122,11 +122,11 @@ export function OutreachDraftDialog({
           <div>
             <div className="mb-1 flex items-center gap-1.5 text-xs uppercase tracking-wider text-muted-foreground">
               <Sparkles className="h-3.5 w-3.5 text-primary" />
-              Personal Outreach · Mike Patrick (Philips Sales Rep)
+              Personal Outreach from Mike (Philips Healthcare)
             </div>
             <h2 className="font-display text-lg font-semibold leading-tight">{lead.title}</h2>
             <div className="mt-1 text-xs text-muted-foreground">
-              {lead.hospital ?? "—"} · {lead.specialty ?? "—"}
+              {[lead.hospital, lead.specialty].filter(Boolean).join(" · ")}
             </div>
           </div>
           <button

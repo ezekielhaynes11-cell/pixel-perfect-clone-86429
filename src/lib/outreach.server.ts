@@ -4,7 +4,7 @@ import { sanitizeErrorText } from "./ingest/medical-gate";
 
 const GATEWAY_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
 const GATEWAY_TIMEOUT_MS = 12_000;
-export const DEFAULT_PHILIPS_REP_NAME = "Mike Patrick";
+export const DEFAULT_PHILIPS_REP_NAME = "Mike";
 
 export type OutreachTone =
   | "discovery"
@@ -29,13 +29,36 @@ export interface DraftInput {
   tone?: OutreachTone;
 }
 
+/**
+ * Strips all em dashes (—), en dashes (–), double hyphens (--), bullet dots (·),
+ * and pipe symbols (|) from outreach text to ensure authentic, human communication.
+ */
+export function sanitizeOutreachDashes(text: string): string {
+  if (!text) return "";
+  return text
+    // Replace em dashes and en dashes with natural commas
+    .replace(/[^\S\r\n]*[—–][^\S\r\n]*/g, ", ")
+    // Replace double hyphens with a comma
+    .replace(/[^\S\r\n]*--[^\S\r\n]*/g, ", ")
+    // Remove stray bullet dots or pipes used in AI corporate signatures
+    .replace(/[^\S\r\n]*[·|][^\S\r\n]*/g, ", ")
+    // Clean up multiple commas or awkward punctuation
+    .replace(/,[^\S\r\n]*,/g, ",")
+    .replace(/[^\S\r\n]+,/g, ",")
+    .replace(/:[^\S\r\n]*,/g, ": ")
+    // Collapse multiple horizontal spaces without destroying line breaks
+    .replace(/[^\S\r\n]{2,}/g, " ")
+    .trim();
+}
+
 function resolveRepName(rawName?: string | null): string {
   const trimmed = rawName?.trim();
   if (
     !trimmed ||
     trimmed.toLowerCase() === "your philips rep" ||
     trimmed.toLowerCase() === "philips account team" ||
-    trimmed.toLowerCase() === "sales rep"
+    trimmed.toLowerCase() === "sales rep" ||
+    trimmed.toLowerCase() === "mike patrick"
   ) {
     return DEFAULT_PHILIPS_REP_NAME;
   }
@@ -44,22 +67,31 @@ function resolveRepName(rawName?: string | null): string {
 
 const TONE_GUIDE: Record<OutreachTone, string> = {
   discovery:
-    "Tone: warm, personal discovery note written in first-person by Mike Patrick as the dedicated Philips Healthcare Sales Representative. Reference the specific signal at their facility, ask one thoughtful question about their timeline, and propose a brief 15-minute intro call.",
+    "Tone: warm, personal discovery note written in first person by Mike with Philips Healthcare. Reference the specific signal at their facility, ask one thoughtful question about their timeline, and propose a brief 15-minute intro call. Never use em dashes.",
   follow_up:
-    "Tone: personal, concise follow-up from Mike Patrick at Philips Healthcare. Reference the original clinical/capital initiative, share one relevant regional benchmark, and ask if next week works for a quick call.",
+    "Tone: personal, concise follow-up from Mike at Philips Healthcare. Reference the original clinical or capital initiative, share one relevant regional benchmark, and ask if next week works for a quick call. Never use em dashes.",
   executive_intro:
-    "Tone: peer-to-peer executive note from Mike Patrick, Philips Healthcare Territory Representative. Confident, warm, and outcome-focused. Reference the strategic impact of the signal and propose a 20-minute conversation alongside our regional Philips clinical specialist.",
+    "Tone: peer-to-peer executive note from Mike with Philips Healthcare. Confident, warm, and outcome-focused. Reference the strategic impact of the signal and propose a 20-minute conversation alongside our regional Philips clinical specialist. Never use em dashes.",
   switch_pitch:
-    "Tone: consultative, empathetic switch-pitch from Mike Patrick at Philips Healthcare. Name the specific incumbent vendor/model and disruptive event (FDA recall, end-of-life, vendor transition). Offer a dependable Philips replacement with installed-base continuity and biomed onboarding, and propose a 15-minute technical review this week.",
+    "Tone: consultative, empathetic switch-pitch from Mike at Philips Healthcare. Name the specific incumbent vendor or model and disruptive event (FDA recall, end of life, vendor transition). Offer a dependable Philips replacement with installed-base continuity and biomed onboarding, and propose a 15-minute technical review this week. Never use em dashes.",
   rht_grant_pitch:
-    "Tone: personal CMS $50B Rural Health Transformation (RHT) advisory note from Mike Patrick at Philips Healthcare. Align the hospital's rural mission with Philips' RHT-eligible solutions: BlueSeal Mobile 1.5T helium-free MRI, CT 5300 Smart Workflow, Radiology Operations Command Center (ROCC — benchmark: Arkansas Children's Hospital 73 cardiac MRIs/CTs in Year 1), eCareManager/eICU (Emory 2.1% 60-day readmission reduction), Avalon/Lumify maternal tele-ultrasound (Michigan DHHS 32,000 families), and EarlyVue VS30. Offer a 15-minute grant-scoping review.",
+    "Tone: personal CMS $50B Rural Health Transformation (RHT) advisory note from Mike at Philips Healthcare. Align the hospital's rural mission with Philips' RHT-eligible solutions: BlueSeal Mobile 1.5T helium-free MRI, CT 5300 Smart Workflow, Radiology Operations Command Center (ROCC benchmark: Arkansas Children's Hospital 73 cardiac MRIs and CTs in Year 1), eCareManager/eICU (Emory 2.1% 60-day readmission reduction), Avalon/Lumify maternal tele-ultrasound (Michigan DHHS 32,000 families), and EarlyVue VS30. Offer a 15-minute grant-scoping review. Never use em dashes.",
 };
 
-const SYSTEM = `You are writing a personal, one-to-one outreach email on behalf of Mike Patrick, Philips Healthcare Sales Representative covering Texas, Oklahoma, Arkansas, and Louisiana.
-Write in a natural, warm, human first-person voice ("I'm Mike Patrick with Philips Healthcare...") tailored to the specific hospital and clinical decision-maker.
-Reference the real clinical or procurement signal (RFQ, recall, CMS $50B RHT grant, capital expansion, or incumbent transition).
-Keep it under 150 words, plain text, with zero generic marketing fluff.
-Sign off personally with the rep's name and title: "Philips Healthcare | Territory Sales Representative (TX · OK · AR · LA)".
+const SYSTEM = `You are writing a personal, one-to-one outreach email from Mike, a Philips Healthcare Sales Representative covering Texas, Oklahoma, Arkansas, and Louisiana.
+
+Core Requirements:
+- Write in a natural, warm, human first-person voice ("I'm Mike with Philips Healthcare...") tailored to the specific hospital and clinical decision-maker.
+- STRICT RULE: NO EM DASHES OR EN DASHES. Never use em dashes ("—") or en dashes ("–") or double hyphens ("--") anywhere in the subject or body. Write clear, natural sentences using commas, periods, or colons.
+- Keep it under 140 words, plain text, with zero generic marketing fluff or AI filler.
+- Reference the real clinical or procurement signal (RFQ, recall, CMS $50B RHT grant, capital expansion, or incumbent transition).
+- Address the email from "Mike".
+- Sign off cleanly as:
+Best regards,
+Mike
+Philips Healthcare
+
+Never add long corporate titles, territory codes, or bullet dots like "TX · OK · AR · LA" to the signature.
 Never invent facts not present in the brief.`;
 
 const TOOL = {
@@ -123,14 +155,14 @@ function selectRuralBenchmarkLine(lead: DraftInput["lead"]): string {
   if (/\b(blueseal|mobile\s+1\.5t|ct\s*5300|cancer|screening)\b/.test(combined)) {
     return "Through Project EDDY, Philips helium-free BlueSeal Mobile 1.5T MRI and CT 5300 Smart Workflow enabled 2,800+ rural screenings without fixed vault construction or liquid helium logistics.";
   }
-  return "At Arkansas Children's Hospital, Philips Radiology Operations Command Center (ROCC) supported 73 complex cardiac MRIs/CTs in Year 1 remotely, while Emory Healthcare cut 60-day readmissions by 2.1% with Philips eICU.";
+  return "At Arkansas Children's Hospital, Philips Radiology Operations Command Center (ROCC) supported 73 complex cardiac MRIs and CTs in Year 1 remotely, while Emory Healthcare cut 60-day readmissions by 2.1% with Philips eICU.";
 }
 
 function resolveGreetingRecipient(lead: DraftInput["lead"]): string {
   const rawContact = lead.entities.physicians?.[0]?.trim();
   if (rawContact) {
     // Strip role hints like "Dr. Sarah Lin (Cardiology Chair)" -> "Dr. Sarah Lin"
-    const cleanName = rawContact.replace(/\s*\([^)]*\)\s*$/, "").split("—")[0]?.trim();
+    const cleanName = rawContact.replace(/\s*\([^)]*\)\s*$/, "").split(/[—–-]/)[0]?.trim();
     if (cleanName) return `Hi ${cleanName},`;
   }
   if (lead.hospital?.trim()) {
@@ -140,10 +172,11 @@ function resolveGreetingRecipient(lead: DraftInput["lead"]): string {
 }
 
 function buildSignature(repName: string): string {
+  const shortName = resolveRepName(repName);
   return [
     `Best regards,`,
-    `${repName}`,
-    `Philips Healthcare · Territory Sales Representative (TX · OK · AR · LA)`,
+    `${shortName}`,
+    `Philips Healthcare`,
   ].join("\n");
 }
 
@@ -164,89 +197,94 @@ export function buildDeterministicOutreachDraft(
 
   if (tone === "rht_grant_pitch") {
     const benchmark = selectRuralBenchmarkLine(input.lead);
-    return {
-      subject: `${hospital} — CMS $50B Rural Health Transformation & Philips`.slice(0, 80),
-      body: [
+    const draft = {
+      subject: sanitizeOutreachDashes(`${hospital}: CMS $50B Rural Health Transformation with Philips`.slice(0, 80)),
+      body: sanitizeOutreachDashes([
         greeting,
         ``,
-        `I'm ${repName}, your regional Philips Healthcare representative. I'm reaching out personally regarding ${hospital}'s positioning around the $50B CMS Rural Health Transformation (RHT) Program.`,
+        `I'm ${repName} with Philips Healthcare. I'm reaching out personally regarding ${hospital}'s positioning around the $50B CMS Rural Health Transformation program.`,
         ``,
-        `I'm helping rural hospitals across our territory scope grant-ready bundles across ${modality} — including BlueSeal helium-free Mobile 1.5T MRI, ROCC remote scanning, eICU, and EarlyVue VS30.`,
+        `I'm helping rural hospitals across our region evaluate grant-ready solutions for ${modality}, including BlueSeal helium-free Mobile 1.5T MRI, ROCC remote scanning, eICU, and EarlyVue VS30.`,
         ``,
         benchmark,
         ``,
         `Would you have 15 minutes next week for us to review RHT budget specifications for ${hospital}?`,
         ``,
         signature,
-      ].join("\n"),
+      ].join("\n")),
     };
+    return draft;
   }
 
   if (tone === "switch_pitch") {
-    return {
-      subject: `Personal support for ${incumbent} notice — ${hospital}`.slice(0, 80),
-      body: [
+    const draft = {
+      subject: sanitizeOutreachDashes(`Philips support regarding ${hospital} ${incumbent} update`.slice(0, 80)),
+      body: sanitizeOutreachDashes([
         greeting,
         ``,
-        `I'm ${repName} with Philips Healthcare covering your region. Following the recent ${incumbent} ${input.lead.signal_type === "recall" ? "FDA recall notice" : "platform transition"} impacting ${modality}, I wanted to reach out personally to see how your clinical engineering and specialty teams are navigating it.`,
+        `I'm ${repName} with Philips Healthcare covering your region. Following the recent ${incumbent} ${input.lead.signal_type === "recall" ? "FDA recall notice" : "platform update"} impacting ${modality}, I wanted to reach out personally to see how your clinical engineering and specialty teams are navigating it.`,
         ``,
-        `I can coordinate like-for-like Philips ${modality} evaluation units, rapid biomed onboarding, and trade-in protection so ${hospital} avoids any procedural downtime.`,
+        `I can coordinate evaluation units, rapid biomed onboarding, and trade-in support so ${hospital} avoids any procedural downtime.`,
         ``,
         `Do you have 15 minutes this week for a quick conversation to confirm whether your fleet is affected?`,
         ``,
         signature,
-      ].join("\n"),
+      ].join("\n")),
     };
+    return draft;
   }
 
   if (tone === "executive_intro") {
-    return {
-      subject: `Strategic ${modality} alignment — ${hospital}`.slice(0, 80),
-      body: [
+    const draft = {
+      subject: sanitizeOutreachDashes(`${hospital} ${modality} planning`.slice(0, 80)),
+      body: sanitizeOutreachDashes([
         greeting,
         ``,
-        `I'm ${repName}, Philips Healthcare Territory Representative for your region. I noted ${hospital}'s recent initiative (${input.lead.summary || input.lead.title}).`,
+        `I'm ${repName} with Philips Healthcare. I noted ${hospital}'s recent clinical priorities for ${modality}.`,
         ``,
-        `I'm working directly with health systems across TX, OK, AR, and LA to standardize ${modality} workflows, lower total cost of ownership, and expand clinical capacity.`,
+        `I'm working directly with health systems across our region to standardize ${modality} workflows, lower total cost of ownership, and expand clinical capacity.`,
         ``,
-        `Could we schedule a brief 20-minute conversation next week alongside my Philips clinical specialist to align on your capital roadmap?`,
+        `Could we schedule a brief 20-minute conversation next week alongside our regional Philips clinical specialist to align on your capital roadmap?`,
         ``,
         signature,
-      ].join("\n"),
+      ].join("\n")),
     };
+    return draft;
   }
 
   if (tone === "follow_up") {
-    return {
-      subject: `Following up from Mike Patrick (Philips): ${modality} at ${hospital}`.slice(0, 80),
-      body: [
+    const draft = {
+      subject: sanitizeOutreachDashes(`Following up on ${hospital} ${modality}`.slice(0, 80)),
+      body: sanitizeOutreachDashes([
         greeting,
         ``,
-        `This is ${repName} with Philips Healthcare following up on ${hospital}'s ${input.lead.specialty?.toLowerCase() ?? "clinical"} initiative (${input.lead.title.slice(0, 90)}).`,
+        `This is ${repName} with Philips Healthcare following up on ${hospital}'s priorities for ${modality}.`,
         ``,
-        `Peer hospitals across our TX/OK/AR/LA territory are pairing Philips ${modality} with remote clinical support to shorten turnaround times without adding staff burden.`,
+        `Peer hospitals across our territory are pairing Philips ${modality} with remote clinical support to shorten turnaround times without adding staff burden.`,
         ``,
         `Does Tuesday or Thursday next week work for a quick 15-minute check-in with me?`,
         ``,
         signature,
-      ].join("\n"),
+      ].join("\n")),
     };
+    return draft;
   }
 
-  return {
-    subject: `${hospital} — ${modality} planning (Mike Patrick · Philips)`.slice(0, 80),
-    body: [
+  const draft = {
+    subject: sanitizeOutreachDashes(`${hospital} ${modality} priorities`.slice(0, 80)),
+    body: sanitizeOutreachDashes([
       greeting,
       ``,
-      `I'm ${repName}, your Philips Healthcare representative covering ${hospital}. I saw the recent update regarding your facility (${input.lead.summary || input.lead.title}).`,
+      `I'm ${repName} with Philips Healthcare covering ${hospital}. I saw the recent update regarding your facility.`,
       ``,
-      `As your team evaluates clinical and capital priorities around ${modality}, I'd love to learn how you are approaching equipment timelines for the upcoming cycle and share how we can support you locally.`,
+      `As your team evaluates clinical and capital priorities around ${modality}, I would love to learn how you are approaching equipment timelines for the upcoming cycle and share how we can support you locally.`,
       ``,
       `Do you have 15 minutes next week for a quick introductory call?`,
       ``,
       signature,
-    ].join("\n"),
+    ].join("\n")),
   };
+  return draft;
 }
 
 export async function draftOutreachEmail(
@@ -283,7 +321,7 @@ Signals: ${(input.lead.entities.keywords ?? []).join(", ") || "n/a"}
 Background:
 ${input.lead.summary}
 
-Sales Representative identity to write and sign as: ${repName}, Philips Healthcare Territory Sales Representative (TX, OK, AR, LA).
+Sales Representative identity to write and sign as: Mike with Philips Healthcare.
 
 ${TONE_GUIDE[tone]}`;
 
@@ -317,7 +355,11 @@ ${TONE_GUIDE[tone]}`;
       return buildDeterministicOutreachDraft(normalizedInput, tone);
     }
 
-    return composedEmailSchema.parse(JSON.parse(rawArguments));
+    const parsed = composedEmailSchema.parse(JSON.parse(rawArguments));
+    return {
+      subject: sanitizeOutreachDashes(parsed.subject),
+      body: sanitizeOutreachDashes(parsed.body),
+    };
   } catch (err) {
     logWarn("outreach.draft", "AI gateway call failed; using deterministic template", {
       error: err instanceof Error ? err.message : String(err),

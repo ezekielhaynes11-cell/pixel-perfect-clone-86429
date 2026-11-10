@@ -218,7 +218,7 @@ describe("Copilot Voice Agent — Dual TTS Engine Resilience", () => {
     }
   });
 
-  it("drafts personalized outreach emails signed by Mike Patrick as Philips Healthcare Sales Rep", () => {
+  it("drafts personalized outreach emails addressed from Mike with zero em dashes", () => {
     const draft = buildDeterministicOutreachDraft(
       {
         lead: {
@@ -236,7 +236,13 @@ describe("Copilot Voice Agent — Dual TTS Engine Resilience", () => {
     );
 
     expect(draft.body).toContain("Hi Dr. Marcus Vance,");
-    expect(draft.body).toContain("I'm Mike Patrick, your Philips Healthcare representative");
-    expect(draft.body).toContain("Mike Patrick\nPhilips Healthcare · Territory Sales Representative (TX · OK · AR · LA)");
+    expect(draft.body).toContain("I'm Mike with Philips Healthcare");
+    expect(draft.body).toContain("Best regards,\nMike\nPhilips Healthcare");
+    // Verify strict zero em-dashes / en-dashes
+    expect(draft.subject).not.toContain("—");
+    expect(draft.subject).not.toContain("–");
+    expect(draft.body).not.toContain("—");
+    expect(draft.body).not.toContain("–");
+    expect(draft.body).not.toContain("--");
   });
 });
