@@ -35,6 +35,7 @@ import {
   leadIsHighPriority,
   isArchivedLead,
   isDiscoveredToday,
+  isSameLocalCalendarDay,
   isRuralCampaignLead,
   classifyLeadType,
   leadMatchesDateFilter,
@@ -287,17 +288,57 @@ function Dashboard() {
     onSettled: () => qc.invalidateQueries({ queryKey: ["refresh_status"] }),
   });
 
-  // Auto-trigger background ingestion if active pipeline is completely dry or un-synced.
+  // Auto-trigger background morning freshness sync:
+  // If active pipeline is dry, or if today has not been synced yet (lastSucceededAt not today
+  // or > 8 hours ago), kick off a background morning sync once per day/session so Mike always
+  // wakes up to brand new, verified hospital leads.
   const autoRanRef = useRef(false);
   useEffect(() => {
     if (autoRanRef.current) return;
-    if (leadsQ.isLoading || runsQ.isLoading || leadsQ.isError) return;
+    if (leadsQ.isLoading || runsQ.isLoading || refreshQ.isLoading || leadsQ.isError) return;
+
     const noLeads = (leadsQ.data ?? []).length === 0;
-    if (noLeads && !ingest.isPending) {
+    const lastSucceeded = refreshQ.data?.lastSucceededAt;
+    const now = new Date();
+    const todayYmd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
+    let sessionSyncedDay: string | null = null;
+    try {
+      sessionSyncedDay = sessionStorage.getItem("yield_architect_morning_synced_day");
+    } catch {
+      // Ignore in non-browser/SSR environments
+    }
+
+    const needsMorningFreshness =
+      sessionSyncedDay !== todayYmd &&
+      (!lastSucceeded ||
+        !isSameLocalCalendarDay(lastSucceeded, now) ||
+        Date.now() - new Date(lastSucceeded).getTime() > 8 * 3600 * 1000);
+
+    if ((noLeads || needsMorningFreshness) && !ingest.isPending) {
       autoRanRef.current = true;
+      try {
+        sessionStorage.setItem("yield_architect_morning_synced_day", todayYmd);
+      } catch {
+        // Ignore in non-browser/SSR environments
+      }
+
+      toast.info("☀️ Good morning, Mike! Synchronizing today's sales intelligence...", {
+        id: "morning-freshness-sync",
+        duration: 4500,
+      });
+
       ingest.mutate();
     }
-  }, [leadsQ.isLoading, leadsQ.isError, leadsQ.data, runsQ.isLoading, ingest]);
+  }, [
+    leadsQ.isLoading,
+    leadsQ.isError,
+    leadsQ.data,
+    runsQ.isLoading,
+    refreshQ.isLoading,
+    refreshQ.data?.lastSucceededAt,
+    ingest,
+  ]);
 
   const act = useMutation({
     mutationFn: (input: {
@@ -995,7 +1036,23 @@ function Dashboard() {
         currentFilters={filters}
         onApply={setFilters}
       />
-      <CopilotPanel open={copilotOpen} onClose={() => setCopilotOpen(false)} />
+      <CopilotPanel
+        open={copilotOpen}
+        onClose={() => setCopilotOpen(false)}
+        repName="Mike"
+        leads={scopedActiveLeads}
+        onViewLead={(lead) => setActive(lead)}
+        onDraftLead={(lead) => setDraftFor(lead)}
+        onPitchDeckLead={(lead) => setPitchDeckFor(lead)}
+        onToggleContacted={(leadId) =>
+          act.mutate({
+            lead_id: leadId,
+            action: "contacted",
+            remove: contactedIds.has(leadId),
+          })
+        }
+        contactedIds={contactedIds}
+      />
     </div>
   );
 }

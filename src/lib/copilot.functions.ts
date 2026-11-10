@@ -1,6 +1,10 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { COPILOT_TOOLS, runCopilotTool } from "./copilot-tools.server";
+import { cleanSpeechScript, synthesizeSpeechGoogleCloud } from "./tts.server";
+import { fetchActiveLeadsWithRetry, getActiveCutoffIso } from "./leads.functions";
+import { rowToLead, leadStateCode, leadInTerritoryScope, type LeadRow, type Lead } from "@/data/leads";
+import { logInfo, logWarn } from "./logger.server";
 
 const GOOGLE_OPENAI_COMPATIBLE_URL =
   "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
@@ -460,3 +464,253 @@ function summarizeResult(name: string, result: unknown): string {
   }
   return "Complete";
 }
+
+/* -------------------- Voice Agent Morning Briefing & Game Plan -------------------- */
+
+export const GamePlanItemSchema = z.object({
+  leadId: z.string(),
+  hospital: z.string(),
+  state: z.string(),
+  estimatedValueUsd: z.number().nullable(),
+  priorityLevel: z.enum(["urgent", "high", "strategic"]),
+  contactName: z.string().nullable(),
+  contactTitle: z.string().nullable(),
+  recommendedModality: z.string(),
+  tacticalAngle: z.string(),
+  incumbentToDisplace: z.string().nullable(),
+});
+export type GamePlanItem = z.infer<typeof GamePlanItemSchema>;
+
+export const VoiceAgentBriefingResponseSchema = z.object({
+  audioBase64: z.string().nullable(),
+  spokenScript: z.string(),
+  durationEstimateSeconds: z.number(),
+  leadCount: z.number(),
+  pipelineValueUsd: z.number(),
+  gamePlan: z.array(GamePlanItemSchema),
+});
+export type VoiceAgentBriefingResponse = z.infer<typeof VoiceAgentBriefingResponseSchema>;
+
+export function inferRecommendedModalityAndAngle(lead: Lead): { modality: string; angle: string } {
+  const text = `${lead.title} ${lead.summary} ${lead.entities.equipment.join(" ")}`.toLowerCase();
+
+  if (lead.signalType === "recall" || /\b(recall|fda|defect)\b/i.test(text)) {
+    return {
+      modality: "EPIQ CVx / Affinity Ultrasound",
+      angle: "Highlight FDA regulatory compliance and patient safety advantage to displace recalled equipment.",
+    };
+  }
+  if (/\b(mri|magnetic resonance|magnet|blueseal|helium)\b/i.test(text)) {
+    return {
+      modality: "MR 5300 1.5T / BlueSeal Magnet",
+      angle: "Eliminate helium refill dependency and catastrophic quench vent pipe costs with BlueSeal 7-liter micro-cooling technology.",
+    };
+  }
+  if (/\b(cath|angio|angiography|cardio|biplane|interventional)\b/i.test(text)) {
+    return {
+      modality: "Azurion 7 Biplane IGT",
+      angle: "Position Philips Azurion 7 with ClarityIQ to reduce patient radiation dose by 73% while accelerating lab turnaround.",
+    };
+  }
+  if (/\b(ct|computed tomography|spectral|pet\/ct)\b/i.test(text)) {
+    return {
+      modality: "Spectral CT 7500",
+      angle: "Offer always-on detector-based spectral reconstruction without workflow compromise or extra radiation.",
+    };
+  }
+  if (lead.source === "rural_rht" || /\b(rural|critical access|rht|rhtp)\b/i.test(text)) {
+    return {
+      modality: "ClearVue / CX50 Point-of-Care Ultrasound",
+      angle: "Unlock CMS $50B Rural Health Transformation capital grant matching for immediate community care access.",
+    };
+  }
+  return {
+    modality: "Philips Enterprise Diagnostic Imaging",
+    angle: "Displace incumbent legacy equipment with bundled Philips fleet lifecycle service and predictable cost of ownership.",
+  };
+}
+
+export const getVoiceAgentBriefing = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        territoryStates: z.array(z.string()).default(["TX", "OK", "AR", "LA"]),
+        repName: z.string().default("Mike"),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }): Promise<VoiceAgentBriefingResponse> => {
+    const territorySet = new Set(data.territoryStates);
+    const activeCutoff = getActiveCutoffIso();
+    const rawRows = await fetchActiveLeadsWithRetry(activeCutoff);
+
+    const leads: Lead[] = rawRows
+      .map((r) => rowToLead(r as LeadRow))
+      .filter((l) => leadInTerritoryScope(l, territorySet));
+
+    const totalPipelineValue = leads.reduce((acc, l) => acc + (l.estimatedValueUsd ?? 0), 0);
+    const leadCount = leads.length;
+
+    // Pick top actionable leads (sorted by confidence & value)
+    const sortedLeads = [...leads].sort((a, b) => {
+      const aScore = (a.confidence || 0) + (a.estimatedValueUsd ? a.estimatedValueUsd / 20000 : 0);
+      const bScore = (b.confidence || 0) + (b.estimatedValueUsd ? b.estimatedValueUsd / 20000 : 0);
+      return bScore - aScore;
+    });
+
+    const topLeads = sortedLeads.slice(0, 3);
+
+    const gamePlan: GamePlanItem[] = topLeads.map((l, index) => {
+      const { modality, angle } = inferRecommendedModalityAndAngle(l);
+      const hospital = l.hospital || l.entities.hospitals?.[0] || "Regional Medical Center";
+      const state = leadStateCode(l) || "TX";
+      const contact = l.sourceContacts?.[0];
+      const physician = l.entities.physicians?.[0];
+
+      let contactName: string | null = contact?.name || null;
+      let contactTitle: string | null = contact?.title || null;
+
+      if (!contactName && physician) {
+        contactName = physician;
+        contactTitle = "Director of Clinical Operations";
+      }
+
+      const priorityLevel: "urgent" | "high" | "strategic" =
+        index === 0
+          ? "urgent"
+          : l.signalType === "recall" || (l.estimatedValueUsd ?? 0) >= 1_000_000
+            ? "high"
+            : "strategic";
+
+      return {
+        leadId: l.id,
+        hospital,
+        state,
+        estimatedValueUsd: l.estimatedValueUsd ?? null,
+        priorityLevel,
+        contactName,
+        contactTitle,
+        recommendedModality: modality,
+        tacticalAngle: angle,
+        incumbentToDisplace:
+          l.competitorIncumbent ||
+          (l.vendorMentions.find((v) => !v.toLowerCase().includes("philips")) ?? "Incumbent"),
+      };
+    });
+
+    const repGreeting = `Good morning, ${data.repName}. I'm your Philips Sales Intelligence Copilot.`;
+    let spokenScript = "";
+
+    const apiConfig = resolveApiConfig();
+    if (apiConfig && topLeads.length > 0) {
+      try {
+        const leadSummaries = gamePlan
+          .map(
+            (p, i) =>
+              `Target ${i + 1}: ${p.hospital} (${p.state}), Value: ${p.estimatedValueUsd ? `$${p.estimatedValueUsd.toLocaleString()}` : "Strategic"}, Modality: ${p.recommendedModality}, Displacing: ${p.incumbentToDisplace}, Angle: ${p.tacticalAngle}`,
+          )
+          .join("\n");
+
+        const prompt = `You are the Philips Sales Intelligence Voice Copilot briefing field sales representative ${data.repName} covering Texas, Oklahoma, Arkansas, and Louisiana.
+
+MANDATORY RULES:
+1. You MUST start your response with: "${repGreeting} Here is your morning recap and tactical game plan for today across Texas, Oklahoma, Arkansas, and Louisiana."
+2. Synthesize this data: Total active pipeline is $${(totalPipelineValue / 1e6).toFixed(1)}M across ${leadCount} accounts.
+3. Highlight the 3 top target opportunities below with their tactical displacement angles:
+${leadSummaries}
+4. Write in conversational, high-energy executive spoken cadence suitable for Text-to-Speech audio.
+5. NO MARKDOWN: Never use asterisks (**), hashtags (#), bullet points (-), or raw URLs. Format acronyms phonetically where needed.
+6. Keep length under 130 words so the audio brief stays punchy (under 60 seconds). Finish with an encouraging call to action for ${data.repName}.`;
+
+        const res = await fetch(apiConfig.endpointUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: apiConfig.authHeader,
+          },
+          body: JSON.stringify({
+            model: apiConfig.model,
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0.3,
+            max_tokens: 350,
+          }),
+        });
+
+        if (res.ok) {
+          const aiJson = (await res.json()) as {
+            choices?: Array<{ message?: { content?: string } }>;
+          };
+          const rawAiText = aiJson.choices?.[0]?.message?.content?.trim();
+          if (rawAiText) {
+            spokenScript = cleanSpeechScript(rawAiText);
+            // Verify that the opening addresses Mike
+            if (!spokenScript.toLowerCase().startsWith(`good morning, ${data.repName.toLowerCase()}`)) {
+              spokenScript = `${repGreeting} ${spokenScript}`;
+            }
+          }
+        } else {
+          logWarn("copilot.voice", "Upstream AI model returned non-200, using deterministic briefing", {
+            status: res.status,
+          });
+        }
+      } catch (err) {
+        logWarn("copilot.voice", "Exception calling AI for voice briefing, using deterministic briefing", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    // Deterministic fallback (guarantees zero downtime, always addresses Mike)
+    if (!spokenScript) {
+      const formattedPipeline =
+        totalPipelineValue >= 1e6
+          ? `${(totalPipelineValue / 1e6).toFixed(1)} million dollars`
+          : `${Math.round(totalPipelineValue / 1000)} thousand dollars`;
+
+      const parts: string[] = [
+        `${repGreeting} Here is your morning recap and tactical game plan for today across Texas, Oklahoma, Arkansas, and Louisiana.`,
+        `We are tracking ${formattedPipeline} in active pipeline across ${leadCount} qualified accounts.`,
+      ];
+
+      if (gamePlan.length > 0) {
+        parts.push("Here are your top attack priorities for today.");
+        gamePlan.forEach((item, idx) => {
+          const ord = idx === 0 ? "First" : idx === 1 ? "Second" : "Third";
+          const valDesc = item.estimatedValueUsd
+            ? `with an estimated ${item.estimatedValueUsd >= 1e6 ? `${(item.estimatedValueUsd / 1e6).toFixed(1)} million dollar` : `${Math.round(item.estimatedValueUsd / 1000)} thousand dollar`} deal value`
+            : "in strategic positioning";
+          parts.push(
+            `${ord}, at ${item.hospital} in ${item.state}, ${valDesc}. Your attack angle is to ${item.tacticalAngle}`,
+          );
+        });
+      } else {
+        parts.push(
+          "All regional accounts are monitored. I recommend reviewing rural health grant notices and hospital expansion tenders in Texas and Arkansas.",
+        );
+      }
+
+      parts.push(`Let's execute today, ${data.repName}. Select any account below to draft outreach or launch a pitch deck.`);
+      spokenScript = cleanSpeechScript(parts.join(" "));
+    }
+
+    // Synthesize Google Cloud TTS audio
+    const audioBase64 = await synthesizeSpeechGoogleCloud(spokenScript);
+    const wordCount = spokenScript.split(/\s+/).filter(Boolean).length;
+    const durationEstimateSeconds = Math.max(15, Math.round(wordCount / 2.4));
+
+    logInfo("copilot.voice", "Voice briefing generated successfully", {
+      repName: data.repName,
+      leadCount,
+      hasAudioBase64: Boolean(audioBase64),
+      durationEstimateSeconds,
+    });
+
+    return {
+      audioBase64,
+      spokenScript,
+      durationEstimateSeconds,
+      leadCount,
+      pipelineValueUsd: totalPipelineValue,
+      gamePlan,
+    };
+  });

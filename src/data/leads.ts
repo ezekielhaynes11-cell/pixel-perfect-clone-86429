@@ -343,7 +343,7 @@ export function sortLeads(leads: readonly Lead[], sortBy: SortOption): Lead[] {
   return copy.sort(compareLeadsByPriorityAndRecency);
 }
 
-function isSameLocalCalendarDay(iso: string | null | undefined, now: Date): boolean {
+export function isSameLocalCalendarDay(iso: string | null | undefined, now: Date): boolean {
   if (!iso) return false;
   const parsed = new Date(iso);
   if (Number.isNaN(parsed.getTime())) return false;

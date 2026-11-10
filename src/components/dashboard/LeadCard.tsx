@@ -22,7 +22,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { classifyLeadType, LEAD_TYPE_LABELS, type Lead, timeAgo } from "@/data/leads";
+import { classifyLeadType, LEAD_TYPE_LABELS, type Lead, timeAgo, isDiscoveredToday } from "@/data/leads";
 import type { LeadPhysician } from "@/lib/leads.functions";
 import { ContactSection } from "./ContactSection";
 
@@ -113,6 +113,8 @@ export function LeadCard({
         : `Est. $${Math.round(lead.estimatedValueUsd / 1000)}k`
       : null;
 
+  const isNewToday = isDiscoveredToday(lead.dateDiscovered, lead.dateIngested);
+
   return (
     <article
       className={`fade-up group rounded-2xl border bg-card/60 p-4 sm:p-5 backdrop-blur-sm transition-all duration-200 hover:scale-[1.01] hover:border-primary/40 hover:bg-card/90 hover:shadow-lg ${
@@ -139,6 +141,12 @@ export function LeadCard({
         >
           {meta.label}
         </span>
+        {isNewToday && (
+          <span className="inline-flex items-center gap-1 rounded-md border border-emerald-500/50 bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-300 shadow-sm">
+            <Sparkles className="h-3 w-3 text-emerald-300" />
+            New Today
+          </span>
+        )}
         <span className="hidden rounded-md border border-border/70 bg-surface/70 px-2 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline-block">
           {LEAD_TYPE_LABELS[classifyLeadType(lead)]}
         </span>

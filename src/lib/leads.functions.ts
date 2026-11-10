@@ -24,7 +24,7 @@ const LEAD_LIST_COLUMNS =
 
 const MIN_QUALIFIED_CONFIDENCE = 35;
 
-function getActiveCutoffIso(): string {
+export function getActiveCutoffIso(): string {
   return new Date(Date.now() - ACTIVE_LEAD_WINDOW_MS).toISOString();
 }
 
