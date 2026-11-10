@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { PostgrestError } from "@supabase/supabase-js";
 import {
   isSchemaCacheError,
   isTransientNetworkError,
@@ -6,6 +7,7 @@ import {
   DataCacheError,
   throwIfError,
 } from "./supabase-errors";
+import { shouldAutoHealRefreshState, shouldDedupeAutoRefresh } from "./refresh.functions";
 
 describe("Restructure Cache Data Error System", () => {
   it("identifies PostgREST schema cache errors by code PGRST205", () => {
@@ -48,17 +50,22 @@ describe("Restructure Cache Data Error System", () => {
     const error = {
       code: "PGRST205",
       message: "Could not find the table 'public.leads' in the schema cache",
-    } as any;
+      details: "",
+      hint: "",
+      name: "PostgrestError",
+    } satisfies PostgrestError;
 
     expect(() => throwIfError(error, "Lead Pipeline")).toThrowError(DataCacheError);
 
     try {
       throwIfError(error, "Lead Pipeline");
-    } catch (e: any) {
+    } catch (e: unknown) {
       expect(e).toBeInstanceOf(DataCacheError);
-      expect(e.category).toBe("schema_cache");
-      expect(e.isRetryable).toBe(true);
-      expect(e.userFacingTitle).toBe("Intelligence Cache Synchronizing");
+      if (e instanceof DataCacheError) {
+        expect(e.category).toBe("schema_cache");
+        expect(e.isRetryable).toBe(true);
+        expect(e.userFacingTitle).toBe("Intelligence Cache Synchronizing");
+      }
     }
   });
 
@@ -68,5 +75,38 @@ describe("Restructure Cache Data Error System", () => {
     expect(restructured.category).toBe("unknown");
     expect(restructured.userFacingTitle).toBe("Pricing Pipeline");
     expect(restructured.userFacingMessage).toContain("Custom calculation discrepancy");
+  });
+
+  it("auto-heals stale running refresh claims and legacy 'already running' errors", () => {
+    const now = Date.now();
+    const staleIso = new Date(now - 90_000).toISOString();
+    expect(
+      shouldAutoHealRefreshState(
+        { status: "running", updated_at: staleIso, error_message: null },
+        now,
+      ),
+    ).toBe(true);
+
+    expect(
+      shouldAutoHealRefreshState(
+        {
+          status: "failed",
+          updated_at: new Date(now - 5_000).toISOString(),
+          error_message: "A refresh is already running. Please wait for it to finish.",
+        },
+        now,
+      ),
+    ).toBe(true);
+  });
+
+  it("deduplicates concurrent auto-refresh calls without blocking manual refreshes", () => {
+    const now = Date.now();
+    const recentIso = new Date(now - 10_000).toISOString();
+    const activeRow = { status: "running", updated_at: recentIso };
+
+    // Auto trigger defers cleanly when a run started 10s ago
+    expect(shouldDedupeAutoRefresh("auto", activeRow, now)).toBe(true);
+    // Manual trigger never blocks or throws "already running"
+    expect(shouldDedupeAutoRefresh("manual", activeRow, now)).toBe(false);
   });
 });

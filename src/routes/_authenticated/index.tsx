@@ -210,10 +210,18 @@ function Dashboard() {
   }, [physiciansQ.data]);
 
   const ingest = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (trigger: "manual" | "auto" = "manual") => {
       // Claim the server-side lock first: prevents concurrent runs across tabs
       // and records the attempt even if the run later fails.
-      await startRefresh({ data: { trigger: "manual" as const } });
+      const claim = await startRefresh({ data: { trigger } });
+      if (claim?.alreadyRunning) {
+        return {
+          surfaced: 0,
+          failed: 0,
+          failedSources: [] as string[],
+          alreadyRunning: true,
+        };
+      }
       try {
         // Fan out per-source so each call stays well under the Worker 60s timeout.
         const results = await Promise.allSettled(
@@ -256,19 +264,43 @@ function Dashboard() {
           },
         });
         if (allFailed) throw new Error(errors[0] ?? "All sources failed");
-        return { surfaced, failed, failedSources };
+        return { surfaced, failed, failedSources, alreadyRunning: false };
       } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        if (errMsg.toLowerCase().includes("already running")) {
+          return {
+            surfaced: 0,
+            failed: 0,
+            failedSources: [] as string[],
+            alreadyRunning: true,
+          };
+        }
         await finishRefresh({
           data: {
             ok: false,
-            errorMessage: e instanceof Error ? e.message : String(e),
+            errorMessage: errMsg,
           },
         }).catch(() => undefined);
         throw e;
       }
     },
-    onMutate: () => toast.loading("Scanning live sources…", { id: "ingest" }),
-    onSuccess: ({ surfaced, failed, failedSources }) => {
+    onMutate: (trigger: "manual" | "auto" = "manual") => {
+      if (trigger === "auto") {
+        toast.info("☀️ Good morning, Mike! Synchronizing today's sales intelligence...", {
+          id: "ingest",
+          duration: 4500,
+        });
+      } else {
+        toast.loading("Scanning live sources…", { id: "ingest" });
+      }
+    },
+    onSuccess: ({ surfaced, failed, failedSources, alreadyRunning }) => {
+      if (alreadyRunning) {
+        toast.success("Intelligence feed is synchronized", { id: "ingest" });
+        qc.invalidateQueries({ queryKey: ["leads"] });
+        qc.invalidateQueries({ queryKey: ["refresh_status"] });
+        return;
+      }
       const sourceDetail = failedSources.length > 0 ? ` (${failedSources.join(", ")})` : "";
       const leadLabel =
         surfaced > 0 ? `Found ${surfaced} new leads` : "Sources synced · active leads up to date";
@@ -283,8 +315,14 @@ function Dashboard() {
       qc.invalidateQueries({ queryKey: ["lead_physicians"] });
       qc.invalidateQueries({ queryKey: ["contact_enrichment_count"] });
     },
-    onError: (e: unknown) =>
-      toast.error(e instanceof Error ? e.message : "Refresh failed", { id: "ingest" }),
+    onError: (e: unknown) => {
+      const msg = e instanceof Error ? e.message : "Refresh failed";
+      if (msg.toLowerCase().includes("already running")) {
+        toast.dismiss("ingest");
+        return;
+      }
+      toast.error(msg, { id: "ingest" });
+    },
     onSettled: () => qc.invalidateQueries({ queryKey: ["refresh_status"] }),
   });
 
@@ -296,6 +334,7 @@ function Dashboard() {
   useEffect(() => {
     if (autoRanRef.current) return;
     if (leadsQ.isLoading || runsQ.isLoading || refreshQ.isLoading || leadsQ.isError) return;
+    if (refreshQ.data?.status === "running" || ingest.isPending) return;
 
     const noLeads = (leadsQ.data ?? []).length === 0;
     const lastSucceeded = refreshQ.data?.lastSucceededAt;
@@ -315,7 +354,7 @@ function Dashboard() {
         !isSameLocalCalendarDay(lastSucceeded, now) ||
         Date.now() - new Date(lastSucceeded).getTime() > 8 * 3600 * 1000);
 
-    if ((noLeads || needsMorningFreshness) && !ingest.isPending) {
+    if (noLeads || needsMorningFreshness) {
       autoRanRef.current = true;
       try {
         sessionStorage.setItem("yield_architect_morning_synced_day", todayYmd);
@@ -323,12 +362,7 @@ function Dashboard() {
         // Ignore in non-browser/SSR environments
       }
 
-      toast.info("☀️ Good morning, Mike! Synchronizing today's sales intelligence...", {
-        id: "morning-freshness-sync",
-        duration: 4500,
-      });
-
-      ingest.mutate();
+      ingest.mutate("auto");
     }
   }, [
     leadsQ.isLoading,
@@ -336,6 +370,7 @@ function Dashboard() {
     leadsQ.data,
     runsQ.isLoading,
     refreshQ.isLoading,
+    refreshQ.data?.status,
     refreshQ.data?.lastSucceededAt,
     ingest,
   ]);
@@ -628,8 +663,8 @@ function Dashboard() {
           <AlertsBell leads={activeLeads} onOpenLead={setActive} />
 
           <button
-            onClick={() => ingest.mutate()}
-            disabled={ingest.isPending || refreshQ.data?.status === "running"}
+            onClick={() => ingest.mutate("manual")}
+            disabled={ingest.isPending}
             aria-label="Refresh Intelligence"
             title={ingest.isPending ? "Refreshing…" : "Refresh Intelligence"}
             className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-primary px-4 text-xs font-semibold text-primary-foreground shadow-sm transition-all duration-150 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:opacity-50"
@@ -747,15 +782,16 @@ function Dashboard() {
           );
         })()}
 
-        {ingest.isError ? (
-          <div className="mt-3 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            <div>
-              <div className="font-semibold">Ingestion failed</div>
-              <div className="text-destructive/80">
-                {ingest.error instanceof Error ? ingest.error.message : String(ingest.error)}
-              </div>
-            </div>
+        {ingest.isError &&
+        !(ingest.error instanceof Error ? ingest.error.message : String(ingest.error))
+          .toLowerCase()
+          .includes("already running") ? (
+          <div className="mt-3">
+            <CacheDataErrorCard
+              error={ingest.error}
+              onRetry={() => ingest.mutate("manual")}
+              isRetrying={ingest.isPending}
+            />
           </div>
         ) : null}
 
@@ -984,8 +1020,8 @@ function Dashboard() {
               <RefreshStatusPanel
                 status={refreshQ.data ?? undefined}
                 isLoading={refreshQ.isLoading}
-                isRunning={ingest.isPending || refreshQ.data?.status === "running"}
-                onRefresh={() => ingest.mutate()}
+                isRunning={ingest.isPending}
+                onRefresh={() => ingest.mutate("manual")}
                 runs={runsQ.data ?? []}
               />
               <Sidebar leads={filtered.length ? filtered : scopedActiveLeads} />
