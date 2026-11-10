@@ -17,12 +17,13 @@ const GOOGLE_OPENAI_COMPATIBLE_URL =
 const LOVABLE_GATEWAY_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
 const MAX_TOOL_CALLS = 8;
 
-const SYSTEM = `You are the Philips Sales Intelligence Gemini Copilot — the personal AI sales strategist and chief of staff for Mike Patrick, Philips Healthcare Territory Sales Representative covering Texas, Oklahoma, Arkansas, and Louisiana.
+const SYSTEM = `You are the Philips Sales Intelligence Gemini Copilot — the personal AI sales strategist and chief of staff for Mike, Philips Healthcare Territory Sales Representative covering Texas, Oklahoma, Arkansas, and Louisiana.
 
-You have live tools to query hospital leads, accounts, verified physician decision-makers, and account briefs; to draft personalized outreach emails written personally as Mike Patrick; and to enrich contact information.
+You have live tools to query hospital leads, accounts, verified physician decision-makers, and account briefs; to draft personalized outreach emails written personally as Mike; and to enrich contact information.
 
 Core Directives:
-- Address Mike Patrick naturally as a trusted senior partner ("Mike"). Speak with warmth, sharp clinical insight, and executive clarity — never robotic, stiff, or generic.
+- Address Mike naturally as a trusted senior partner ("Mike"). Speak with warmth, sharp clinical insight, and executive clarity — conversational, concise, never robotic.
+- STRICT PREDICATE: Never use em dashes ("—") or en dashes ("–") or double hyphens ("--") in your writing. Use natural commas, colons, or periods.
 - Always call a tool before answering questions about leads, accounts, or physicians — ground every answer in real territory data.
 - If a query returns 0 results, retry once with broader criteria (e.g. drop narrow filters or broaden search keywords).
 - Bring deep Philips Healthcare clinical & competitive intelligence to every conversation:
@@ -31,8 +32,8 @@ Core Directives:
   • MRI: Position Philips MR 5300 1.5T with BlueSeal helium-free magnet (7 liters sealed micro-cooling, no vent pipe, zero helium refill dependency) against Siemens Magnetom and GE Signa.
   • Ultrasound & Patient Monitoring: Position Philips EPIQ CVx, Affiniti, Lumify with Reacts tele-ultrasound, Avalon beltless maternal monitoring, eICU, and EarlyVue VS30 against Mindray and GE Vivid/Logiq.
   • CMS $50B Rural Health Transformation (RHT): Help Mike align rural and Critical Access hospitals with grant-ready Philips bundles.
-- When drafting outreach emails or messages, ALWAYS write in first-person as Mike Patrick, Philips Healthcare Territory Sales Representative (TX · OK · AR · LA).
-- When referencing leads, cite specific hospital names, states, equipment categories, and estimated values.
+- When drafting outreach emails or messages, ALWAYS write in first-person as Mike with Philips Healthcare. Sign off simply from "Mike", with zero em dashes ("—") or double hyphens ("--").
+- When speaking conversationally, keep responses punchy and under 75 words, closing with one thoughtful next step for Mike.
 - Format entity references with markdown links: [Lead title](/?lead=<id>) or [Account name](/accounts/<id>).`;
 
 interface ChatMsg {
@@ -74,15 +75,24 @@ function resolveGoogleModelName(): string {
   return configured;
 }
 
-function resolveApiConfigs(): ResolvedApiConfig[] {
+function resolveApiConfigs(customApiKey?: string): ResolvedApiConfig[] {
   const configs: ResolvedApiConfig[] = [];
   const customUrl = process.env.COPILOT_API_URL?.trim() || process.env.GOOGLE_CLOUD_API_URL?.trim();
   const googleApiKey =
+    customApiKey?.trim() ||
     process.env.GOOGLE_CLOUD_API_KEY?.trim() ||
     process.env.GEMINI_API_KEY?.trim() ||
     process.env.GOOGLE_API_KEY?.trim();
   const lovableApiKey = process.env.LOVABLE_API_KEY?.trim();
   const googleModel = resolveGoogleModelName();
+
+  if (customApiKey?.trim()) {
+    configs.push({
+      endpointUrl: GOOGLE_OPENAI_COMPATIBLE_URL,
+      authHeader: `Bearer ${customApiKey.trim()}`,
+      model: googleModel,
+    });
+  }
 
   if (customUrl) {
     const bearer = googleApiKey || lovableApiKey || "custom-token";
@@ -93,7 +103,7 @@ function resolveApiConfigs(): ResolvedApiConfig[] {
     });
   }
 
-  if (googleApiKey) {
+  if (googleApiKey && (!customApiKey || googleApiKey !== customApiKey.trim())) {
     configs.push({
       endpointUrl: GOOGLE_OPENAI_COMPATIBLE_URL,
       authHeader: `Bearer ${googleApiKey}`,
@@ -194,22 +204,22 @@ async function* executeDeterministicCopilotFallback(
       yield {
         type: "tool_start",
         name: "draft_outreach",
-        args: { lead_id: targetLead.id, rep_name: "Mike Patrick" },
+        args: { lead_id: targetLead.id, rep_name: "Mike" },
       };
 
       const draftResult = (await runCopilotTool("draft_outreach", {
         lead_id: targetLead.id,
-        rep_name: "Mike Patrick",
+        rep_name: "Mike",
       })) as { subject?: string; body?: string };
 
       yield {
         type: "tool_end",
         name: "draft_outreach",
-        summary: "Draft created for Mike Patrick",
+        summary: "Draft created from Mike",
       };
 
       const textResponse = [
-        `### Personal Outreach Drafted for Mike Patrick`,
+        `### Personal Outreach Drafted from Mike`,
         ``,
         `Mike, I've prepared a personalized message from you as the Philips Healthcare representative for **[${targetLead.title}](/?lead=${targetLead.id})** at **${targetLead.hospital ?? "Territory Health System"}** (${targetLead.state ?? "Regional"}):`,
         ``,
@@ -286,7 +296,7 @@ async function* executeDeterministicCopilotFallback(
     yield {
       type: "text",
       text: [
-        `### Verified Clinical Decision-Makers for Mike Patrick`,
+        `### Verified Clinical Decision-Makers for Mike`,
         ``,
         ...items,
         ``,
@@ -357,7 +367,7 @@ async function* executeDeterministicCopilotFallback(
     ? "### Fresh Rural RHT Buying Signals"
     : targetState
       ? `### Active Sales Intelligence for ${targetState}`
-      : "### Top Active Opportunities for Mike Patrick";
+      : "### Top Active Opportunities for Mike";
 
   yield {
     type: "text",
@@ -373,8 +383,9 @@ async function* executeDeterministicCopilotFallback(
 
 export async function* executeCopilotChat(
   inputMessages: Array<{ role: "user" | "assistant"; content: string }>,
+  customApiKey?: string,
 ): AsyncGenerator<CopilotStreamEvent> {
-  const apiConfigs = resolveApiConfigs();
+  const apiConfigs = resolveApiConfigs(customApiKey);
   const latestUserMessage =
     [...inputMessages].reverse().find((message) => message.role === "user")?.content || "";
 
@@ -474,9 +485,16 @@ export async function* executeCopilotChat(
 }
 
 export const copilotChat = createServerFn({ method: "POST" })
-  .validator((input) => z.object({ messages: z.array(MessageSchema).min(1).max(40) }).parse(input))
+  .validator((input) =>
+    z
+      .object({
+        messages: z.array(MessageSchema).min(1).max(40),
+        apiKey: z.string().optional(),
+      })
+      .parse(input),
+  )
   .handler(async function* ({ data }) {
-    yield* executeCopilotChat(data.messages);
+    yield* executeCopilotChat(data.messages, data.apiKey);
   });
 
 function summarizeResult(name: string, result: unknown): string {
@@ -571,7 +589,8 @@ export const getVoiceAgentBriefing = createServerFn({ method: "POST" })
     z
       .object({
         territoryStates: z.array(z.string()).default(["TX", "OK", "AR", "LA"]),
-        repName: z.string().default("Mike Patrick"),
+        repName: z.string().default("Mike"),
+        apiKey: z.string().optional(),
       })
       .parse(input ?? {}),
   )
@@ -634,26 +653,27 @@ export const getVoiceAgentBriefing = createServerFn({ method: "POST" })
     });
 
     let spokenScript = "";
-    const apiConfigs = resolveApiConfigs();
+    const apiConfigs = resolveApiConfigs(data.apiKey);
 
     if (apiConfigs.length > 0 && topLeads.length > 0) {
       const leadSummaries = gamePlan
         .map(
           (p, i) =>
-            `${i + 1}. ${p.hospital} (${p.state}) — Est. ${p.estimatedValueUsd ? `$${(p.estimatedValueUsd / 1e6).toFixed(1)}M` : "Strategic"}, Philips Modality: ${p.recommendedModality}, Displacing: ${p.incumbentToDisplace}, Decision-Maker: ${p.contactName ?? "Clinical Leadership"}, Strategy: ${p.tacticalAngle}`,
+            `${i + 1}. ${p.hospital} (${p.state}), Est. ${p.estimatedValueUsd ? `$${(p.estimatedValueUsd / 1e6).toFixed(1)}M` : "Strategic"}, Philips Modality: ${p.recommendedModality}, Displacing: ${p.incumbentToDisplace}, Decision-Maker: ${p.contactName ?? "Clinical Leadership"}, Strategy: ${p.tacticalAngle}`,
         )
         .join("\n");
 
-      const prompt = `You are Gemini, acting as the personal Philips Healthcare Sales Intelligence Strategist speaking directly to Mike Patrick (Philips Sales Representative covering Texas, Oklahoma, Arkansas, and Louisiana).
+      const prompt = `You are Gemini, acting as the personal Philips Healthcare Sales Intelligence Strategist speaking directly to Mike, Philips Sales Representative covering Texas, Oklahoma, Arkansas, and Louisiana.
 
-Write a warm, natural, human-sounding morning briefing for Mike Patrick.
+Write a warm, natural, human-sounding morning briefing for Mike.
 Rules:
-1. Open naturally by greeting Mike Patrick by name ("Good morning, Mike." or "Morning, Mike Patrick.").
+1. Open naturally by greeting Mike by name ("Good morning, Mike.").
 2. Speak like a sharp, trusted human colleague having a real morning strategy conversation over coffee — NOT a robotic list reader. Do not say "Target 1, Target 2" or "First, Second, Third". Weave the top opportunities into a smooth, insightful narrative.
-3. Mention the overall territory momentum ($${(totalPipelineValue / 1e6).toFixed(1)}M across ${leadCount} active accounts) and walk Mike through how to approach these top accounts today:
+3. STRICT PREDICATE: Never use em dashes ("—") or en dashes ("–") or double hyphens ("--").
+4. Mention the overall territory momentum ($${(totalPipelineValue / 1e6).toFixed(1)}M across ${leadCount} active accounts) and walk Mike through how to approach these top accounts today:
 ${leadSummaries}
-4. Never mention pitch decks. Instead, offer to draft personal outreach emails from Mike Patrick or dive deeper into any hospital account if he asks.
-5. Plain conversational sentences only — no markdown, no asterisks, no bullet points, under 115 words.`;
+5. Offer to draft personal outreach emails from Mike or dive deeper into any hospital account if he asks.
+6. Plain conversational sentences only — under 100 words.`;
 
       const res = await fetchGeminiWithCascade(apiConfigs, (model) => ({
         model,
@@ -682,7 +702,7 @@ ${leadSummaries}
 
       const [first, second, third] = gamePlan;
       const narrativeParts: string[] = [
-        `Good morning, Mike Patrick. We're tracking ${formattedPipeline} across ${leadCount} active hospital accounts in your Texas, Oklahoma, Arkansas, and Louisiana territory today.`,
+        `Good morning, Mike. We're tracking ${formattedPipeline} across ${leadCount} active hospital accounts in your territory today.`,
       ];
 
       if (first) {
@@ -693,7 +713,7 @@ ${leadSummaries}
       }
       if (second) {
         narrativeParts.push(
-          `After that, take a look at ${second.hospital} in ${second.state} — ${second.tacticalAngle.charAt(0).toLowerCase()}${second.tacticalAngle.slice(1)}`,
+          `Next, take a look at ${second.hospital} in ${second.state}, where ${second.tacticalAngle.charAt(0).toLowerCase()}${second.tacticalAngle.slice(1)}`,
         );
       }
       if (third) {
@@ -702,17 +722,17 @@ ${leadSummaries}
         );
       }
       narrativeParts.push(
-        `Tell me which account you want to tackle first, Mike, and I'll pull the clinical contacts or draft a personal email from you right now.`,
+        `Tell me which account you want to tackle first, Mike, and I'll pull the clinical contacts or draft a personal email for you right now.`,
       );
 
       spokenScript = cleanSpeechScript(narrativeParts.join(" "));
     }
 
-    const audioBase64 = await synthesizeSpeechGoogleCloud(spokenScript);
+    const audioBase64 = await synthesizeSpeechGoogleCloud(spokenScript, data.apiKey);
     const wordCount = spokenScript.split(/\s+/).filter(Boolean).length;
     const durationEstimateSeconds = Math.max(12, Math.round(wordCount / 2.5));
 
-    logInfo("copilot.voice", "Voice briefing generated for Mike Patrick", {
+    logInfo("copilot.voice", "Voice briefing generated for Mike", {
       repName: data.repName,
       leadCount,
       hasAudioBase64: Boolean(audioBase64),
@@ -733,9 +753,82 @@ ${leadSummaries}
  * Synthesizes natural conversational speech for any Gemini reply in the Copilot conversation.
  */
 export const synthesizeCopilotSpeech = createServerFn({ method: "POST" })
-  .validator((input) => z.object({ text: z.string().min(1).max(4000) }).parse(input))
+  .validator((input) =>
+    z
+      .object({
+        text: z.string().min(1).max(4000),
+        apiKey: z.string().optional(),
+      })
+      .parse(input),
+  )
   .handler(async ({ data }): Promise<{ audioBase64: string | null; spokenText: string }> => {
     const spokenText = cleanSpeechScript(data.text);
-    const audioBase64 = await synthesizeSpeechGoogleCloud(spokenText);
+    const audioBase64 = await synthesizeSpeechGoogleCloud(spokenText, data.apiKey);
     return { audioBase64, spokenText };
+  });
+
+/**
+ * Diagnostic check verifying live connectivity with Google's Gemini 2.5 Flash API.
+ */
+export const checkGeminiApiStatus = createServerFn({ method: "POST" })
+  .validator((input: unknown) =>
+    z
+      .object({
+        apiKey: z.string().optional(),
+      })
+      .optional()
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const key =
+      data?.apiKey?.trim() ||
+      process.env.GOOGLE_CLOUD_API_KEY?.trim() ||
+      process.env.GEMINI_API_KEY?.trim() ||
+      process.env.GOOGLE_API_KEY?.trim();
+
+    if (!key) {
+      return {
+        status: "unconfigured" as const,
+        message: "No Google Gemini API key configured.",
+      };
+    }
+
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contents: [{ parts: [{ text: "ping" }] }] }),
+          signal: AbortSignal.timeout(6000),
+        },
+      );
+
+      if (res.ok) {
+        return {
+          status: "active" as const,
+          model: "gemini-2.5-flash",
+          voice: "Aoede",
+          message: "Gemini 2.5 Flash & Aoede Voice Active",
+        };
+      }
+
+      if (res.status === 402) {
+        return {
+          status: "credits_depleted" as const,
+          message: "Google AI Studio prepayment credits depleted (HTTP 402).",
+        };
+      }
+
+      return {
+        status: "error" as const,
+        code: res.status,
+        message: `Google API returned HTTP ${res.status}`,
+      };
+    } catch (err) {
+      return {
+        status: "network_error" as const,
+        message: err instanceof Error ? err.message : String(err),
+      };
+    }
   });

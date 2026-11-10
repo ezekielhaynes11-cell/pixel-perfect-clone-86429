@@ -59,7 +59,7 @@ export function OutreachDraftDialog({
       setSubject(saved.subject);
       setBody(saved.body);
       qc.invalidateQueries({ queryKey: ["outreach_drafts", lead?.id] });
-      toast.success("Personalized draft ready for Mike Patrick");
+      toast.success("Personalized draft ready from Mike");
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Generation failed"),
   });
@@ -168,7 +168,7 @@ export function OutreachDraftDialog({
                 <Sparkles className="h-3.5 w-3.5" />
               )}
               {gen.isPending
-                ? "Drafting as Mike Patrick…"
+                ? "Drafting as Mike…"
                 : subject || (drafts.data && drafts.data.length > 0)
                   ? "Regenerate"
                   : "Generate with AI"}

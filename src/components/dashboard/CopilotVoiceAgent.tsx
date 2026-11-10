@@ -63,7 +63,7 @@ export function resolveAudioDataUri(audioBase64: string): string {
   return `data:${mime};base64,${audioBase64}`;
 }
 
-interface CopilotVoiceAgentProps {
+export interface CopilotVoiceAgentProps {
   repName?: string;
   territoryStates?: string[];
   leads?: Lead[];
@@ -72,10 +72,12 @@ interface CopilotVoiceAgentProps {
   onToggleContacted?: (leadId: string) => void;
   onAskGeminiAboutLead?: (prompt: string) => void;
   contactedIds?: Set<string>;
+  apiKey?: string;
+  onFinishedBriefing?: () => void;
 }
 
 export function CopilotVoiceAgent({
-  repName = "Mike Patrick",
+  repName = "Mike",
   territoryStates = ["TX", "OK", "AR", "LA"],
   leads = [],
   onViewLead,
@@ -83,6 +85,8 @@ export function CopilotVoiceAgent({
   onToggleContacted,
   onAskGeminiAboutLead,
   contactedIds = new Set(),
+  apiKey,
+  onFinishedBriefing,
 }: CopilotVoiceAgentProps) {
   const fetchBriefing = useServerFn(getVoiceAgentBriefing);
 
@@ -92,12 +96,13 @@ export function CopilotVoiceAgent({
     isRefetching,
     refetch,
   } = useQuery({
-    queryKey: ["voice_agent_briefing", repName, territoryStates.join(",")],
+    queryKey: ["voice_agent_briefing", repName, territoryStates.join(","), apiKey],
     queryFn: () =>
       fetchBriefing({
         data: {
           repName,
           territoryStates,
+          apiKey,
         },
       }),
     staleTime: 15 * 60 * 1000,
@@ -412,7 +417,7 @@ export function CopilotVoiceAgent({
                           type="button"
                           onClick={() =>
                             onAskGeminiAboutLead(
-                              `Give me a tactical strategy for ${item.hospital} (${item.state}) as Mike Patrick, including how to position ${item.recommendedModality} against ${item.incumbentToDisplace || "their incumbent system"} and who I should contact first.`,
+                              `Give me a tactical strategy for ${item.hospital} (${item.state}) as Mike, including how to position ${item.recommendedModality} against ${item.incumbentToDisplace || "their incumbent system"} and who I should contact first.`,
                             )
                           }
                           className="flex min-h-[32px] items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20"

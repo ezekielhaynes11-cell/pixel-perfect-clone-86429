@@ -284,7 +284,7 @@ function Dashboard() {
     },
     onMutate: (trigger: "manual" | "auto" = "manual") => {
       if (trigger === "auto") {
-        toast.info("☀️ Good morning, Mike Patrick! Synchronizing today's Philips sales intelligence...", {
+        toast.info("☀️ Good morning, Mike! Synchronizing today's Philips sales intelligence...", {
           id: "ingest",
           duration: 4500,
         });
@@ -1062,7 +1062,7 @@ function Dashboard() {
       <CopilotPanel
         open={copilotOpen}
         onClose={() => setCopilotOpen(false)}
-        repName="Mike Patrick"
+        repName="Mike"
         leads={scopedActiveLeads}
         onViewLead={(lead) => setActive(lead)}
         onDraftLead={(lead) => setDraftFor(lead)}

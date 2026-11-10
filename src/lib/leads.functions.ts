@@ -330,7 +330,17 @@ export const listDraftsForLead = createServerFn({ method: "POST" })
         logWarn("leads.drafts", "Failed to list outreach drafts", { error: error.message });
         return [];
       }
-      return rows ?? [];
+      return (rows ?? []).map((r) => ({
+        ...r,
+        subject: sanitizeOutreachDashes(r.subject || ""),
+        body: sanitizeOutreachDashes(
+          (r.body || "")
+            .replace(/\bBest regards,?\s*\n\s*Owner\b/gi, "Best regards,\nMike\nPhilips Healthcare")
+            .replace(/\n\s*Owner\s*$/g, "\nMike\nPhilips Healthcare")
+            .replace(/\bOwner\b/g, "Mike")
+            .replace(/Mike Patrick/g, "Mike"),
+        ),
+      }));
     } catch (err) {
       logWarn("leads.drafts", "Exception in listDraftsForLead", {
         error: err instanceof Error ? err.message : String(err),
@@ -361,12 +371,6 @@ export const generateOutreachDraft = createServerFn({ method: "POST" })
     const lead = dbLead ?? fallbackLead;
     if (!lead) throw new Error("Lead not found");
 
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("display_name")
-      .eq("user_id", OWNER_ID)
-      .maybeSingle();
-
     const draft = await draftOutreachEmail({
       lead: {
         title: lead.title,
@@ -393,7 +397,7 @@ export const generateOutreachDraft = createServerFn({ method: "POST" })
           };
         })(),
       },
-      repName: profile?.display_name ?? "Mike Patrick",
+      repName: "Mike",
       tone: data.tone,
     });
 

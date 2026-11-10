@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
+import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
   Sparkles,
@@ -12,8 +13,15 @@ import {
   Volume2,
   VolumeX,
   Square,
+  Key,
+  CheckCircle2,
+  AlertTriangle,
 } from "lucide-react";
-import { copilotChat, synthesizeCopilotSpeech } from "@/lib/copilot.functions";
+import {
+  copilotChat,
+  synthesizeCopilotSpeech,
+  checkGeminiApiStatus,
+} from "@/lib/copilot.functions";
 import {
   CopilotVoiceAgent,
   resolveAudioDataUri,
@@ -31,7 +39,7 @@ const SUGGESTIONS = [
   "Walk me through the top 3 accounts I should call first today and why",
   "Which Texas or Oklahoma hospitals have urgent ultrasound or cath lab signals?",
   "Find verified physician decision-makers in Arkansas and Louisiana",
-  "Draft a personal outreach email from Mike Patrick for our #1 priority lead",
+  "Draft a personal outreach email from Mike for our #1 priority lead",
 ];
 
 export interface CopilotPanelProps {
@@ -73,7 +81,7 @@ interface BrowserSpeechRecognition {
 export function CopilotPanel({
   open,
   onClose,
-  repName = "Mike Patrick",
+  repName = "Mike",
   leads = [],
   onViewLead,
   onDraftLead,
@@ -86,10 +94,17 @@ export function CopilotPanel({
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
   const [voiceRepliesEnabled, setVoiceRepliesEnabled] = useState(true);
+  const [continuousVoice, setContinuousVoice] = useState(true);
   const [speakingMessageIdx, setSpeakingMessageIdx] = useState<number | null>(null);
+
+  // Gemini API key state & management
+  const [userApiKey, setUserApiKey] = useState<string>("");
+  const [keyModalOpen, setKeyModalOpen] = useState(false);
+  const [tempKeyInput, setTempKeyInput] = useState("");
 
   const send = useServerFn(copilotChat);
   const synthesizeReply = useServerFn(synthesizeCopilotSpeech);
+  const checkStatus = useServerFn(checkGeminiApiStatus);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const conversationAnchorRef = useRef<HTMLDivElement>(null);
@@ -97,6 +112,27 @@ export function CopilotPanel({
   const latestTranscriptRef = useRef<string>("");
   const replyAudioRef = useRef<HTMLAudioElement | null>(null);
   const speechTokenRef = useRef<number>(0);
+  const continuousVoiceRef = useRef(true);
+
+  useEffect(() => {
+    continuousVoiceRef.current = continuousVoice;
+  }, [continuousVoice]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("gemini_user_api_key") || "";
+      if (stored) {
+        setUserApiKey(stored);
+        setTempKeyInput(stored);
+      }
+    }
+  }, []);
+
+  const { data: apiStatus, refetch: refetchStatus } = useQuery({
+    queryKey: ["gemini_api_status", userApiKey],
+    queryFn: () => checkStatus({ data: { apiKey: userApiKey || undefined } }),
+    staleTime: 60 * 1000,
+  });
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -148,6 +184,56 @@ export function CopilotPanel({
     }
   }, [open, stopListening, stopReplySpeech]);
 
+  const startListening = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const win = window as unknown as {
+      SpeechRecognition?: new () => BrowserSpeechRecognition;
+      webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
+    };
+    const SpeechClass = win.SpeechRecognition || win.webkitSpeechRecognition;
+    if (!SpeechClass) return;
+
+    stopReplySpeech();
+    stopListening();
+    latestTranscriptRef.current = "";
+
+    try {
+      const recognition = new SpeechClass();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = "en-US";
+
+      recognition.onresult = (event: SpeechRecognitionEvent) => {
+        const transcript = event.results[0]?.[0]?.transcript;
+        if (transcript) {
+          latestTranscriptRef.current = transcript;
+          setInput(transcript);
+        }
+      };
+
+      recognition.onerror = () => {
+        stopListening();
+      };
+
+      recognition.onend = () => {
+        stopListening();
+        const spokenPrompt = latestTranscriptRef.current.trim();
+        if (spokenPrompt) {
+          latestTranscriptRef.current = "";
+          setVoiceRepliesEnabled(true);
+          // Auto-submit in continuous conversation
+          void submit(spokenPrompt, { speakReply: true });
+        }
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+      setIsListening(true);
+    } catch {
+      stopListening();
+    }
+  }, [stopListening, stopReplySpeech]);
+
   const speakAssistantReply = useCallback(
     async (text: string, messageIndex: number) => {
       if (!text.trim() || typeof window === "undefined") return;
@@ -157,7 +243,9 @@ export function CopilotPanel({
       setSpeakingMessageIdx(messageIndex);
 
       try {
-        const res = await synthesizeReply({ data: { text } });
+        const res = await synthesizeReply({
+          data: { text, apiKey: userApiKey || undefined },
+        });
         if (speechTokenRef.current !== token) return;
 
         if (res?.audioBase64) {
@@ -166,6 +254,12 @@ export function CopilotPanel({
           audio.onended = () => {
             if (speechTokenRef.current === token) {
               setSpeakingMessageIdx(null);
+              // Continuous hands-free loop: reopen mic when Gemini finishes speaking
+              if (continuousVoiceRef.current) {
+                setTimeout(() => {
+                  startListening();
+                }, 400);
+              }
             }
           };
           audio.onerror = () => {
@@ -177,7 +271,7 @@ export function CopilotPanel({
           return;
         }
 
-        const spokenText = (res?.cleanedText || text).slice(0, 750);
+        const spokenText = (res?.spokenText || text).slice(0, 750);
         if ("speechSynthesis" in window) {
           const preferredVoice = await selectBestNaturalVoice();
           if (speechTokenRef.current !== token) return;
@@ -191,6 +285,12 @@ export function CopilotPanel({
           utterance.onend = () => {
             if (speechTokenRef.current === token) {
               setSpeakingMessageIdx(null);
+              // Continuous hands-free loop: reopen mic when speech ends
+              if (continuousVoiceRef.current) {
+                setTimeout(() => {
+                  startListening();
+                }, 400);
+              }
             }
           };
           utterance.onerror = () => {
@@ -208,7 +308,7 @@ export function CopilotPanel({
         }
       }
     },
-    [stopReplySpeech, synthesizeReply],
+    [startListening, stopReplySpeech, synthesizeReply, userApiKey],
   );
 
   const submit = useCallback(
@@ -234,7 +334,10 @@ export function CopilotPanel({
 
       try {
         const stream = await send({
-          data: { messages: history.map((m) => ({ role: m.role, content: m.content })) },
+          data: {
+            messages: history.map((m) => ({ role: m.role, content: m.content })),
+            apiKey: userApiKey || undefined,
+          },
         });
         for await (const event of stream as AsyncIterable<
           | { type: "text"; text: string }
@@ -303,7 +406,7 @@ export function CopilotPanel({
         }, 80);
       }
     },
-    [busy, messages, send, speakAssistantReply, stopReplySpeech, voiceRepliesEnabled],
+    [busy, messages, send, speakAssistantReply, stopReplySpeech, userApiKey, voiceRepliesEnabled],
   );
 
   const toggleMic = () => {
@@ -311,52 +414,20 @@ export function CopilotPanel({
       stopListening();
       return;
     }
+    startListening();
+  };
 
-    if (typeof window === "undefined") return;
-    const win = window as unknown as {
-      SpeechRecognition?: new () => BrowserSpeechRecognition;
-      webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
-    };
-    const SpeechClass = win.SpeechRecognition || win.webkitSpeechRecognition;
-    if (!SpeechClass) return;
-
-    stopReplySpeech();
-    latestTranscriptRef.current = "";
-
-    try {
-      const recognition = new SpeechClass();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognition.lang = "en-US";
-
-      recognition.onresult = (event: SpeechRecognitionEvent) => {
-        const transcript = event.results[0]?.[0]?.transcript;
-        if (transcript) {
-          latestTranscriptRef.current = transcript;
-          setInput(transcript);
-        }
-      };
-
-      recognition.onerror = () => {
-        stopListening();
-      };
-
-      recognition.onend = () => {
-        stopListening();
-        const spokenPrompt = latestTranscriptRef.current.trim();
-        if (spokenPrompt) {
-          latestTranscriptRef.current = "";
-          setVoiceRepliesEnabled(true);
-          void submit(spokenPrompt, { speakReply: true });
-        }
-      };
-
-      recognitionRef.current = recognition;
-      recognition.start();
-      setIsListening(true);
-    } catch {
-      stopListening();
+  const handleSaveCustomKey = () => {
+    const trimmed = tempKeyInput.trim();
+    if (trimmed) {
+      localStorage.setItem("gemini_user_api_key", trimmed);
+      setUserApiKey(trimmed);
+    } else {
+      localStorage.removeItem("gemini_user_api_key");
+      setUserApiKey("");
     }
+    setKeyModalOpen(false);
+    void refetchStatus();
   };
 
   if (!open) return null;
@@ -365,59 +436,209 @@ export function CopilotPanel({
     <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" />
       <div
-        className="relative flex h-full w-full max-w-[600px] flex-col border-l border-border/50 bg-card/95 shadow-2xl backdrop-blur-xl"
+        className="relative flex h-full w-full max-w-[620px] flex-col border-l border-border/50 bg-card/95 shadow-2xl backdrop-blur-xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <header className="flex h-16 items-center gap-2.5 border-b border-border/50 px-5">
-          <Sparkles className="h-4 w-4 text-primary" />
+        <header className="flex h-16 items-center gap-2 border-b border-border/50 px-4 sm:px-5">
+          <Sparkles className="h-4 w-4 shrink-0 text-primary" />
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="font-display text-sm font-semibold text-foreground">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <span className="font-display text-xs sm:text-sm font-semibold text-foreground">
                 Gemini Sales Copilot
               </span>
               <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
-                Mike Patrick · Philips
+                Mike · Philips
               </span>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              if (voiceRepliesEnabled) {
-                stopReplySpeech();
-              }
-              setVoiceRepliesEnabled((v) => !v);
-            }}
-            aria-label={voiceRepliesEnabled ? "Mute spoken replies" : "Enable spoken replies"}
-            className={`ml-auto flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium transition-colors ${
-              voiceRepliesEnabled
-                ? "border-primary/40 bg-primary/10 text-primary"
-                : "border-border/50 bg-surface/60 text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {voiceRepliesEnabled ? (
-              <>
-                <Volume2 className="h-3.5 w-3.5" />
-                <span>Voice Reply On</span>
-              </>
+          <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
+            {/* Live Gemini Connection Status Badge */}
+            {apiStatus?.status === "active" ? (
+              <button
+                type="button"
+                onClick={() => setKeyModalOpen(true)}
+                title="Google Gemini 2.5 Flash and Aoede voice are active. Click to manage key."
+                className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-400 hover:bg-emerald-500/20"
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="hidden sm:inline">Gemini Live · Aoede</span>
+                <span className="sm:hidden">Aoede</span>
+              </button>
+            ) : apiStatus?.status === "credits_depleted" ? (
+              <button
+                type="button"
+                onClick={() => setKeyModalOpen(true)}
+                title="Google AI Studio prepayment credits depleted (HTTP 402). Click to enter a fresh API key."
+                className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-300 hover:bg-amber-500/25"
+              >
+                <AlertTriangle className="h-3 w-3 shrink-0" />
+                <span className="hidden sm:inline">Credits Depleted · Enter Key</span>
+                <span className="sm:hidden">Key</span>
+              </button>
             ) : (
-              <>
-                <VolumeX className="h-3.5 w-3.5" />
-                <span>Voice Muted</span>
-              </>
+              <button
+                type="button"
+                onClick={() => setKeyModalOpen(true)}
+                title="Configure Gemini API Key"
+                className="inline-flex items-center gap-1 rounded-full border border-border/50 bg-surface/60 px-2 py-0.5 text-[10px] font-semibold text-muted-foreground hover:text-foreground"
+              >
+                <Key className="h-3 w-3" />
+                <span>API Key</span>
+              </button>
             )}
-          </button>
 
-          <button
-            onClick={onClose}
-            aria-label="Close Copilot"
-            className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg text-muted-foreground transition-all duration-150 hover:bg-surface-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            <X className="h-5 w-5" />
-          </button>
+            {/* Continuous Voice Toggle */}
+            <button
+              type="button"
+              onClick={() => setContinuousVoice((v) => !v)}
+              aria-label={continuousVoice ? "Continuous conversation active" : "Push-to-talk mode"}
+              title={
+                continuousVoice
+                  ? "Continuous Voice: ON (Gemini automatically listens after speaking)"
+                  : "Push-to-talk mode (tap mic to speak)"
+              }
+              className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors ${
+                continuousVoice
+                  ? "border-primary/40 bg-primary/10 text-primary"
+                  : "border-border/50 bg-surface/60 text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Mic className="h-3 w-3" />
+              <span className="hidden sm:inline">{continuousVoice ? "Continuous" : "Push-to-talk"}</span>
+            </button>
+
+            {/* Audio Mute / Unmute */}
+            <button
+              type="button"
+              onClick={() => {
+                if (voiceRepliesEnabled) {
+                  stopReplySpeech();
+                }
+                setVoiceRepliesEnabled((v) => !v);
+              }}
+              aria-label={voiceRepliesEnabled ? "Mute spoken replies" : "Enable spoken replies"}
+              className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
+                voiceRepliesEnabled
+                  ? "border-primary/40 bg-primary/10 text-primary"
+                  : "border-border/50 bg-surface/60 text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {voiceRepliesEnabled ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
+            </button>
+
+            <button
+              onClick={onClose}
+              aria-label="Close Copilot"
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-all duration-150 hover:bg-surface-2 hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </header>
+
+        {/* Modal: Gemini API Key Setup */}
+        {keyModalOpen && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-md">
+            <div className="w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-border/40 pb-3">
+                <div className="flex items-center gap-2">
+                  <Key className="h-4 w-4 text-primary" />
+                  <h3 className="font-display text-sm font-semibold text-foreground">
+                    Google Gemini API Key
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setKeyModalOpen(false)}
+                  className="rounded-md p-1 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {apiStatus?.status === "credits_depleted" && (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200 leading-relaxed">
+                  <strong>Notice:</strong> The project associated with your existing key has depleted its prepayment
+                  credits. You can create a free key at{" "}
+                  <a
+                    href="https://aistudio.google.com/app/apikey"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline font-semibold text-amber-100 hover:text-white"
+                  >
+                    Google AI Studio
+                  </a>{" "}
+                  and paste it below to restore live Gemini conversation and Aoede voice immediately.
+                </div>
+              )}
+
+              {apiStatus?.status === "active" && (
+                <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-2.5 text-xs text-emerald-300">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+                  <span>Gemini 2.5 Flash and Aoede voice are currently connected and active.</span>
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-foreground">
+                  Gemini API Key (Google AI Studio)
+                </label>
+                <input
+                  type="password"
+                  value={tempKeyInput}
+                  onChange={(e) => setTempKeyInput(e.target.value)}
+                  placeholder="AIzaSy..."
+                  className="w-full rounded-lg border border-border/60 bg-surface px-3 py-2 text-xs font-mono text-foreground outline-none focus:border-primary"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Saved securely in your browser session. Free API keys can be generated at{" "}
+                  <a
+                    href="https://aistudio.google.com/app/apikey"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-primary hover:underline"
+                  >
+                    aistudio.google.com
+                  </a>.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                {userApiKey && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      localStorage.removeItem("gemini_user_api_key");
+                      setUserApiKey("");
+                      setTempKeyInput("");
+                      setKeyModalOpen(false);
+                      void refetchStatus();
+                    }}
+                    className="mr-auto text-xs text-muted-foreground hover:text-red-400"
+                  >
+                    Clear Custom Key
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setKeyModalOpen(false)}
+                  className="rounded-lg border border-border/50 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveCustomKey}
+                  className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 shadow-sm"
+                >
+                  Save Key
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Unified Gemini Voice Briefing + Live Conversation Body */}
         <div ref={scrollRef} className="flex-1 space-y-5 overflow-y-auto p-4 sm:p-5">
@@ -426,11 +647,19 @@ export function CopilotPanel({
             repName={repName}
             territoryStates={["TX", "OK", "AR", "LA"]}
             leads={leads}
+            apiKey={userApiKey || undefined}
             onViewLead={onViewLead}
             onDraftLead={onDraftLead}
             onToggleContacted={onToggleContacted}
             onAskGeminiAboutLead={(prompt) => {
               void submit(prompt, { speakReply: voiceRepliesEnabled });
+            }}
+            onFinishedBriefing={() => {
+              if (continuousVoiceRef.current) {
+                setTimeout(() => {
+                  startListening();
+                }, 400);
+              }
             }}
             contactedIds={contactedIds}
           />
@@ -526,7 +755,7 @@ export function CopilotPanel({
                                 className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-surface-2 hover:text-foreground"
                               >
                                 <Volume2 className="h-3 w-3" />
-                                <span>Listen</span>
+                                <span>Listen (Aoede)</span>
                               </button>
                             )}
                           </div>
@@ -550,7 +779,7 @@ export function CopilotPanel({
           </div>
         </div>
 
-        {/* Input Bar with Hands-Free Voice Conversation Mic */}
+        {/* Input Bar with Continuous Hands-Free Voice Mic */}
         <form
           className="flex items-center gap-2 border-t border-border/50 bg-card/60 p-3.5 backdrop-blur-md"
           onSubmit={(e) => {
@@ -563,10 +792,16 @@ export function CopilotPanel({
               type="button"
               onClick={toggleMic}
               aria-label={isListening ? "Stop listening" : "Talk to Gemini with voice"}
-              title={isListening ? "Stop listening" : "Speak to Gemini hands-free"}
+              title={
+                isListening
+                  ? "Stop listening"
+                  : continuousVoice
+                    ? "Continuous Voice: Tap to start speaking"
+                    : "Speak to Gemini"
+              }
               className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
                 isListening
-                  ? "border-primary bg-primary/20 text-primary shadow-md"
+                  ? "border-primary bg-primary/20 text-primary shadow-md animate-pulse"
                   : "border-border/50 bg-surface/60 text-muted-foreground hover:bg-surface hover:text-foreground"
               }`}
             >
@@ -581,7 +816,9 @@ export function CopilotPanel({
             placeholder={
               isListening
                 ? "Listening to you, Mike — speak naturally…"
-                : "Talk or type to Gemini about your territory leads…"
+                : continuousVoice
+                  ? "Talk or type to Gemini (Continuous Voice active)…"
+                  : "Talk or type to Gemini about your territory leads…"
             }
             className={`flex min-h-[44px] flex-1 rounded-lg border px-3.5 py-2 text-xs text-foreground outline-none transition-all placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary ${
               isListening

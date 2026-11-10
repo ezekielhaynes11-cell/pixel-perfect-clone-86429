@@ -36,6 +36,10 @@ export interface DraftInput {
 export function sanitizeOutreachDashes(text: string): string {
   if (!text) return "";
   return text
+    // Replace legacy "Owner" signature lines with Mike
+    .replace(/\bBest regards,?\s*\n\s*Owner\b/gi, "Best regards,\nMike\nPhilips Healthcare")
+    .replace(/\n\s*Owner\s*$/g, "\nMike\nPhilips Healthcare")
+    .replace(/\bOwner\b/g, "Mike")
     // Replace em dashes and en dashes with natural commas
     .replace(/[^\S\r\n]*[—–][^\S\r\n]*/g, ", ")
     // Replace double hyphens with a comma
@@ -55,6 +59,8 @@ function resolveRepName(rawName?: string | null): string {
   const trimmed = rawName?.trim();
   if (
     !trimmed ||
+    trimmed.toLowerCase() === "owner" ||
+    trimmed.toLowerCase() === "owner@local" ||
     trimmed.toLowerCase() === "your philips rep" ||
     trimmed.toLowerCase() === "philips account team" ||
     trimmed.toLowerCase() === "sales rep" ||

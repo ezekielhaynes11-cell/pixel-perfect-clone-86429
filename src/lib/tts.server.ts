@@ -87,12 +87,16 @@ export function pcm16ToWavBase64(pcmBase64: string, sampleRate = 24000): string 
 
 /**
  * Synthesizes natural conversational speech using:
- * 1. Gemini 2.5 Flash Native Audio TTS (`generativelanguage.googleapis.com`) — works with standard Gemini API keys.
- * 2. Google Cloud Neural2/Journey TTS (`texttospeech.googleapis.com`) — works with GCP Cloud keys.
- * 3. Returns `null` if no key is configured, triggering enhanced client-side neural voice selection.
+ * 1. Gemini 2.5 Flash Native Audio TTS (`generativelanguage.googleapis.com`) with the warm, executive Aoede voice.
+ * 2. Google Cloud Neural2/Journey TTS (`texttospeech.googleapis.com`) with en-US-Journey-F.
+ * 3. Returns `null` if no key is configured or credits are depleted, triggering enhanced client-side neural voice selection.
  */
-export async function synthesizeSpeechGoogleCloud(scriptText: string): Promise<string | null> {
+export async function synthesizeSpeechGoogleCloud(
+  scriptText: string,
+  customApiKey?: string,
+): Promise<string | null> {
   const apiKey =
+    customApiKey?.trim() ||
     process.env.GOOGLE_CLOUD_API_KEY?.trim() ||
     process.env.GEMINI_API_KEY?.trim() ||
     process.env.GOOGLE_API_KEY?.trim();
@@ -107,7 +111,7 @@ export async function synthesizeSpeechGoogleCloud(scriptText: string): Promise<s
     return null;
   }
 
-  // Tier 1: Gemini 2.5 Flash Native Audio TTS (conversational, warm human prosody)
+  // Tier 1: Gemini 2.5 Flash Native Audio TTS with Aoede voice (warm, natural human prosody)
   try {
     const geminiRes = await fetch(`${GEMINI_TTS_ENDPOINT}?key=${apiKey}`, {
       method: "POST",
@@ -117,7 +121,7 @@ export async function synthesizeSpeechGoogleCloud(scriptText: string): Promise<s
           {
             parts: [
               {
-                text: `Speak in a warm, natural, conversational, intelligent executive tone as Mike Patrick's Philips Sales Copilot:\n\n${cleanedText}`,
+                text: `Speak in a warm, natural, conversational, intelligent executive tone as Mike's Philips Sales Copilot:\n\n${cleanedText}`,
               },
             ],
           },
@@ -154,6 +158,8 @@ export async function synthesizeSpeechGoogleCloud(scriptText: string): Promise<s
         }
         return inlineData.data;
       }
+    } else if (geminiRes.status === 402) {
+      logWarn("tts.synthesize", "Gemini API key returned 402: credits depleted in Google AI Studio project");
     }
   } catch (err) {
     logWarn("tts.synthesize", "Gemini native TTS unavailable, trying Cloud TTS fallback", {
@@ -161,7 +167,7 @@ export async function synthesizeSpeechGoogleCloud(scriptText: string): Promise<s
     });
   }
 
-  // Tier 2: Google Cloud Text-to-Speech API (Journey / Neural2)
+  // Tier 2: Google Cloud Text-to-Speech API (Journey en-US-Journey-F)
   try {
     const response = await fetch(`${GOOGLE_CLOUD_TTS_ENDPOINT}?key=${apiKey}`, {
       method: "POST",

@@ -438,11 +438,6 @@ export async function runCopilotTool(
         .maybeSingle();
       const lead = dbLead ?? CURATED_BASELINE_LEADS.find((l) => l.id === a.lead_id);
       if (!lead) return { error: "Lead not found" };
-      const { data: profile } = await supabaseAdmin
-        .from("profiles")
-        .select("display_name")
-        .eq("user_id", OWNER_ID)
-        .maybeSingle();
       const draft = await draftOutreachEmail({
         lead: {
           title: lead.title,
@@ -460,7 +455,7 @@ export async function runCopilotTool(
               keywords?: string[];
             }) ?? {},
         },
-        repName: profile?.display_name ?? "Mike Patrick",
+        repName: "Mike",
         tone: a.tone,
       });
       const { data: saved } = await supabaseAdmin
